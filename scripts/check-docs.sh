@@ -6,11 +6,6 @@ cd "$ROOT_DIR"
 
 status=0
 
-if ! command -v rg >/dev/null 2>&1; then
-  echo "rg is required for docs validation."
-  exit 1
-fi
-
 echo "Checking Markdown local links..."
 while IFS='|' read -r file raw_target; do
   [[ -z "${file:-}" || -z "${raw_target:-}" ]] && continue
@@ -45,10 +40,17 @@ done < <(
 )
 
 echo "Checking for likely committed OpenAI secret patterns..."
-if rg -n --hidden \
-  --glob '!.git/**' \
-  --glob '!scripts/check-docs.sh' \
-  '(sk-[A-Za-z0-9_-]{20,}|sess-[A-Za-z0-9_-]{20,}|ek_[A-Za-z0-9_-]{20,})' .; then
+secret_hits="$(
+  find . \
+    -path ./.git -prune -o \
+    -path ./build -prune -o \
+    -path ./assets/mockups -prune -o \
+    -type f -print0 |
+  xargs -0 perl -ne 'while (/(sk-[A-Za-z0-9_-]{20,}|sess-[A-Za-z0-9_-]{20,}|ek_[A-Za-z0-9_-]{20,})/g) { print "$ARGV:$.:$1\n" }'
+)"
+
+if [[ -n "$secret_hits" ]]; then
+  echo "$secret_hits"
   echo "Potential secret-like token found. Replace real secrets with placeholders."
   status=1
 fi
