@@ -1,6 +1,8 @@
 # Supplied Mockup UX Spec
 
-This document is the visual and interaction source of truth for the first Android Flutter implementation. The supplied mockups define four required surfaces: welcome/sign-in, live translation in teal listening mode, transcript assistant bottom sheet, and live translation in amber speaking or paused read-aloud mode.
+This document is the visual and interaction source of truth for the first Android Flutter implementation. The supplied mockups define four required visual surfaces: welcome/local setup, live translation in teal listening mode, scoped AI chat bottom sheet, and live translation in amber speaking or paused read-aloud mode.
+
+The product architecture changed after mockup intake. The MVP is phone-only aside from direct OpenAI API calls, so Microsoft/Google sign-in behavior shown in the welcome mockup is V2/future. Preserve the visual quality and hierarchy, but adapt sign-in affordances into phone-local setup, start-meeting, and meeting-history actions for the MVP.
 
 ## UX Direction
 
@@ -45,9 +47,9 @@ This document is the visual and interaction source of truth for the first Androi
 - Language cards: waveform icon for detected/source speech, speaker icon for target audio.
 - Transcript rows: per-line speaker, play, or waveform icon depending on state.
 - Assistant: sparkle icon, close X, thumbs up/down, refresh/regenerate, send up-arrow, lock privacy icon.
-- Auth: Microsoft and Google brand icons, plus right chevrons.
+- Local setup: primary start-meeting action, meeting-history action, OpenAI setup/status affordance if implementation requires it, plus right chevrons where the mockup uses row buttons.
 
-## Screen C: Sign-In / Welcome
+## Screen C: Welcome / Local Setup
 
 ### Layout
 
@@ -57,10 +59,11 @@ This document is the visual and interaction source of truth for the first Androi
 - H1: `Live Translate`.
 - Subtitle: `Live conversation translation for meetings and face-to-face moments`.
 - Teal audio wave graphic spans the middle of the screen.
-- Auth actions are stacked full-width buttons:
-  - `Continue with Microsoft`
-  - `Continue with Google`
-- Each auth button includes the provider brand icon on the left and a right chevron.
+- MVP actions are stacked full-width buttons adapted from the mockup:
+  - `Start new meeting`
+  - `Open meeting history`
+- If implementation requires a visible OpenAI setup/status action, keep it phone-local and avoid exposing raw credential text.
+- V2 sign-in actions may reuse the same row-button visual treatment later.
 - Privacy reassurance block uses lock icon and text: `Transcripts are stored on device only. Your conversations stay private.`
 - Footer badges:
   - `Secure & Private`
@@ -68,7 +71,7 @@ This document is the visual and interaction source of truth for the first Androi
 
 ### Interaction Notes
 
-- Auth buttons should have pressed and disabled states.
+- Primary setup buttons should have pressed and disabled states.
 - The screen should not mention backend internals or API keys.
 - Preserve enough bottom padding for Android gesture navigation.
 
@@ -119,11 +122,11 @@ This document is the visual and interaction source of truth for the first Androi
 - Transcript list should support scrolling behind the fixed bottom control bar with safe bottom padding.
 - `Jump to Live` appears when the list is not pinned to the latest transcript entry.
 
-## Screen B: Transcript Assistant Bottom Sheet
+## Screen B: Scoped AI Chat Bottom Sheet
 
 ### Entry
 
-- Open from the header transcript/chat assistant icon on the main live translation screen.
+- Open from the header AI chat icon on the main live translation screen or from meeting history.
 - Main screen remains visible but dimmed behind the modal.
 
 ### Bottom Sheet Layout
@@ -132,27 +135,32 @@ This document is the visual and interaction source of truth for the first Androi
 - Dark navy sheet surface with subtle top border and drag handle.
 - Header:
   - Sparkle icon.
-  - Title: `Transcript Assistant`.
+  - Title: `AI Chat`.
   - Close X.
-- Subtitle: `I answer from the current transcript.`
+- Scope selector or visible scope label:
+  - `This meeting` when opened from a meeting.
+  - `All meetings` when opened from a global/history surface.
+- Subtitle should reinforce the selected scope without using backend terminology.
 
 ### Chat Content
 
 - User prompt: `What did they agree about the timeline?`
-- Assistant answer uses only the current transcript and cites inline timestamps, including `10:37 AM` and `10:38 AM`.
+- Assistant answer uses only the selected local meeting scope and cites inline timestamps, including `10:37 AM` and `10:38 AM`.
 - Include thumbs up/down feedback controls under the assistant answer.
 - Suggested prompt chips:
   - `Summarise action items`
   - `What do they need from me?`
   - Refresh/regenerate icon chip.
-- Input field placeholder: `Ask about this conversation...`
+- Input field placeholder:
+  - `Ask about this meeting...` for `This meeting`.
+  - `Ask across meetings...` for `All meetings`.
 - Send button uses an up-arrow icon.
-- Privacy note with lock icon: `Responses are based on the current transcript.`
+- Privacy note with lock icon should state that responses are based on the selected local meeting scope.
 
 ### Interaction Notes
 
 - Sheet should support drag-dismiss and close-button dismiss.
-- Assistant must be visually scoped to current transcript context.
+- AI chat must be visually scoped to `This meeting` or `All meetings`.
 - The input should remain reachable above the Android keyboard.
 - Suggested chips populate the input or send immediately, depending on implementation scope; pick one behavior and keep it consistent.
 
@@ -204,10 +212,12 @@ This document is the visual and interaction source of truth for the first Androi
 - Queue/warning banner with two actions.
 - Jump-to-live chip and dotted divider.
 - Fixed bottom control bar with three primary actions.
-- Auth provider button.
+- Local setup action button.
+- Meeting history row or selector.
+- Email export controls with Transcript/Summary/Both selector and recipient checklist.
 - Footer privacy/badge row.
-- Transcript assistant bottom sheet.
-- Assistant message bubbles, citations, feedback controls, prompt chips, input, send button, and privacy note.
+- Scoped AI chat bottom sheet.
+- AI chat message bubbles, citations, feedback controls, prompt chips, input, send button, scope label/control, and privacy note.
 
 ## Flutter Implementation Notes
 
@@ -219,20 +229,21 @@ This document is the visual and interaction source of truth for the first Androi
   - `listening`
   - `speaking`
   - `readAloudPaused`
-  - `assistantOpen`
+  - `aiChatOpen`
+  - `aiChatScope`
   - `hasQueuedAudio`
   - `isAtLiveEdge`
-- Keep transcript row data structured with source language, target language, original text, translated text, timestamp, speaker ownership, accent, and playback state.
+- Keep transcript row data structured with meeting ID, source language, target language, original text, translated text, timestamp, speaker ownership, accent, and playback state.
 - Ensure the transcript list has bottom inset equal to the fixed control bar height plus safe-area padding.
 - Use semantic labels for icon-only controls.
-- Keep privacy language consistent with local-only encrypted transcript storage and direct OpenAI transcript Q&A direction from the product spec.
+- Keep privacy language consistent with local-only encrypted meeting storage and direct OpenAI AI chat direction from the product spec.
 
 ## Acceptance Criteria For First UI Implementation
 
-- Welcome/sign-in screen matches Screen C content and dark teal audio branding.
+- Welcome/local setup screen matches Screen C visual direction and dark teal audio branding while reflecting phone-only MVP behavior.
 - Main screen can render teal listening mode matching Screen A.
-- Assistant launcher opens a dimmed main screen plus bottom sheet matching Screen B.
+- AI chat launcher opens a dimmed main screen plus scoped bottom sheet matching Screen B.
 - Main screen can render amber speaking/paused read-aloud mode matching Screen D.
 - Bottom controls, queue banner, toggles, language cards, and transcript rows have the correct labels and state-dependent colors.
-- No source transcript content is routed through AWS in implementation architecture.
+- No source transcript content is routed through app-owned backend infrastructure in implementation architecture.
 - Android emulator smoke check shows all four surfaces without overlapping text or clipped bottom controls.

@@ -1,6 +1,6 @@
 # Environment
 
-This repo does not yet contain a Flutter scaffold or Lambda implementation. Use this document as the setup contract for future implementation work and keep it current as commands become real.
+This repo does not yet contain a Flutter scaffold, app package manifest, lockfile, or backend implementation. Use this document as the setup contract for future implementation work and keep it current as commands become real.
 
 ## Current Local Setup
 
@@ -29,8 +29,8 @@ It is known to segfault on this Fedora/KDE/Wayland setup.
 - Flutter SDK, stable channel.
 - Android SDK and platform tools.
 - Java toolchain compatible with the chosen Android Gradle plugin.
-- AWS CLI or deployment tooling for the token broker.
 - A GitHub CLI session for issue and PR maintenance.
+- Dependency/advisory tooling for Dart/Flutter and native mobile package checks once lockfiles exist.
 
 Expected Android environment variables:
 
@@ -46,32 +46,23 @@ Document the exact known-good values or discovery commands here once the Flutter
 
 Use [.env.example](../.env.example) as a placeholder contract only. It must never contain real credentials.
 
-Mobile-safe values may include public client IDs, package names, issuer URLs, broker base URLs, and model names. Backend-only secrets must stay in backend secret storage or uncommitted local env files.
+Mobile-safe values may include app environment names, package names, model intent names, and local feature flags. Do not add standard OpenAI API keys, cloud identity secrets, cookies, signing keys, keystores, or tokens to committed config.
 
 Important placeholders:
 
 - `OPENAI_REALTIME_MODEL`: expected default is `gpt-realtime-translate`.
-- `TOKEN_BROKER_BASE_URL`: API Gateway or local broker endpoint.
-- `MICROSOFT_CLIENT_ID`: public app registration client ID placeholder.
-- `GOOGLE_ANDROID_CLIENT_ID`: public Android OAuth client ID placeholder.
-- `BACKEND_OPENAI_API_KEY`: backend/Lambda local-only placeholder. Never copy this into mobile code.
+- `OPENAI_SUMMARY_MODEL_INTENT`: product intent is GPT-5.5 for meeting summaries.
+- `OPENAI_SUMMARY_REASONING_INTENT`: product intent is extra-high reasoning for meeting summaries.
 
-## Auth Configuration Notes
+Implementation must verify current OpenAI API model, reasoning parameter, realtime, and direct mobile credential/session support before coding against these intent values.
 
-Microsoft:
+## Deferred V2 Configuration
 
-- App registration must support Microsoft personal accounts and work/school organizational accounts.
-- Final tenant/account-type values are still open and must be documented before auth implementation closes.
-
-Google:
-
-- Android credentials must match package name and signing certificate.
-- Final package name and signing certificate are still open.
+The MVP does not use AWS, Lambda, token broker endpoints, Google/Microsoft sign-in, cloud sync, or backend OpenAI key storage. Do not add active MVP setup requirements for those systems. If future work reintroduces them, update [docs/v2-future-scope.md](v2-future-scope.md), [docs/decision-log.md](decision-log.md), this file, and the GitHub issue map first.
 
 ## Secret Handling Rules
 
-- Do not commit `.env`, `.env.*`, local AWS credentials, keystores, signing certificates, tokens, cookies, or real API keys.
-- Do not include a standard OpenAI API key in Flutter source, assets, tests, build outputs, or mobile config.
-- Use backend secret storage/config for the standard OpenAI API key.
-- Use short-lived OpenAI client secrets for the mobile app.
-- Redact tokens and client secrets from logs and screenshots.
+- Do not commit `.env`, `.env.*`, OpenAI credentials, local AWS credentials, keystores, signing certificates, tokens, cookies, real account IDs that grant access, or real API keys.
+- Do not include a standard OpenAI API key in Flutter source, assets, tests, screenshots, build outputs, or mobile config.
+- If implementation uses user-provided OpenAI credential material, store it only in encrypted local storage and provide a clear remove/reset path.
+- Redact OpenAI credential/session material, tokens, recipient lists, transcript content, prompts, summaries, and translated text from logs, screenshots, analytics, crash reports, and test output.

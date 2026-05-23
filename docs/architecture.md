@@ -5,61 +5,70 @@ This document summarizes the implementation boundaries from the canonical [live 
 ## System Shape
 
 ```text
-Signed-in Flutter app
-  -> AWS API Gateway + Lambda token broker
-       -> OpenAI API, backend-held standard API key
-       <- short-lived OpenAI client secret metadata
-
-Signed-in Flutter app
-  -> OpenAI Realtime Translation directly
+Flutter phone app
+  -> OpenAI API directly
        model: gpt-realtime-translate
        sends microphone audio
        receives translated audio and transcript deltas
 
-Signed-in Flutter app
-  -> encrypted local device storage
-       preferences, recent languages, transcript history
+Flutter phone app
+  -> OpenAI API directly for AI chat and summaries
+       scope: This meeting or All meetings
+       product intent for export summaries: GPT-5.5 with extra-high reasoning
+       implementation must verify current model/reasoning support before coding
 
-Transcript Q&A
-  -> direct OpenAI path or equivalent privacy-preserving path
-       AWS must not see transcript content
+Flutter phone app
+  -> encrypted local device storage
+       meetings, transcript/history, summary metadata, preferences,
+       recent languages, remembered export recipients, last selected recipients,
+       and any credential/session material
+
+Flutter phone app
+  -> device-native mail/share composer when user initiates export
+       no app-operated outbound mail backend
 ```
+
+There is no MVP AWS, Lambda, token broker, app backend, cloud sync, cloud identity gate, or server-side transcript handling. Deferred cloud/backend/auth ideas live in [docs/v2-future-scope.md](v2-future-scope.md).
 
 ## Hard Boundaries
 
-- Mobile code never contains a standard OpenAI API key.
-- AWS is a token broker only.
-- AWS must not receive transcript text, translated text, prompts about transcripts, microphone audio, audio chunks, or audio-derived payloads.
-- The mobile app connects directly to OpenAI using short-lived client secrets.
-- Transcript storage is local-only and encrypted for the MVP.
-- Diagnostics, analytics, crash reports, and logs must exclude secrets and speech/transcript payloads.
+- Mobile source, committed config, assets, tests, screenshots, and build outputs never contain a standard OpenAI API key.
+- The MVP has no app backend.
+- Direct OpenAI API calls are the only routine network path for product behavior.
+- Transcript text, translated text, prompts, microphone audio, audio chunks, audio-derived payloads, summaries, recipient lists, meeting metadata, and export payloads must not be sent to app-owned backend infrastructure.
+- The app must not operate an outbound mail backend for MVP export.
+- Meeting and transcript storage is local-only and encrypted for the MVP.
+- Diagnostics, analytics, crash reports, screenshots, test output, and logs must exclude secrets and speech/transcript/summary/export payloads.
 
 ## Mobile App Responsibilities
 
 - Flutter app with Android-first UX and iOS-compatible structure.
-- Auth UI and session handling for Microsoft personal, Microsoft work/school, and Google identity.
+- Phone-local setup/start flow rather than cloud sign-in gate.
 - Runtime microphone permissions and explicit session state transitions.
-- Realtime session connection, refresh, reconnect, and teardown.
-- Local encrypted storage for preferences, recent languages, and transcript history.
-- UI surfaces from [docs/mockup-ux-spec.md](mockup-ux-spec.md) and [assets/mockups](../assets/mockups).
-- Transcript Q&A UI and direct privacy-preserving model path.
-
-## Backend Responsibilities
-
-- Validate signed-in caller identity/session.
-- Use backend secret storage/config for the standard OpenAI API key.
-- Request short-lived OpenAI client secrets.
-- Return only the short-lived secret and metadata such as expiry.
-- Redact bearer tokens, client secrets, identity tokens, and API keys from logs.
-
-The backend must not add transcript endpoints for the MVP.
+- Direct OpenAI realtime session connection, reconnect, teardown, and error handling.
+- Local encrypted storage for preferences, recent languages, meetings, transcript/history, summary metadata, recipient preferences, and any credential/session material.
+- Meeting management for starting a new meeting, selecting an old meeting, and continuing from it.
+- UI surfaces from [docs/mockup-ux-spec.md](mockup-ux-spec.md) and [assets/mockups](../assets/mockups), adapted for the phone-only MVP.
+- Scoped AI chat UI and direct OpenAI request path for `This meeting` and `All meetings`.
+- Email export UI with Transcript/Summary/Both selector and recipient checklist.
 
 ## OpenAI Responsibilities
 
 - Live speech translation through `gpt-realtime-translate`.
 - Stream translated audio and transcript deltas while the speaker is still talking.
-- Support client-secret expiry handling and reconnect behavior in the app.
-- Language support must be verified during implementation rather than hard-coded from stale assumptions.
+- Support AI chat over local meeting context sent directly from the phone app.
+- Support summary generation for email export if current model and reasoning parameters allow it.
+- Language, authentication/session, realtime, and reasoning-parameter support must be verified during implementation rather than hard-coded from stale assumptions.
+
+## Email Export Boundary
+
+Email export is user initiated.
+
+- The app prepares the selected Transcript, Summary, or Both locally.
+- If Summary or Both is selected, the app may call OpenAI directly to generate the summary after support is verified.
+- The app presents recipients as a local checklist and remembers the recipient list and last selected recipients locally.
+- The app should hand the export to the device-native mail/share composer where practical.
+- The app must not add a server mailer, backend relay, or cloud export queue in the MVP.
 
 ## Suggested Future Repo Layout
 
@@ -67,7 +76,6 @@ When implementation begins, keep boundaries visible:
 
 ```text
 app/ or mobile/              Flutter application
-backend/token-broker/        AWS Lambda token broker
 docs/                        Product, architecture, setup, testing, decisions
 assets/mockups/              Supplied Android mockups
 test/                        Flutter tests once scaffolded
@@ -75,10 +83,13 @@ test/                        Flutter tests once scaffolded
 
 Use the actual Flutter scaffold conventions when the app is created; update this section if the final layout differs.
 
-## Prohibited Flows
+## Prohibited MVP Flows
 
-- Mobile app -> AWS -> OpenAI transcript or audio proxy.
-- Mobile app -> committed standard OpenAI API key.
-- Transcript Q&A -> AWS transcript endpoint.
-- Logs -> raw transcript, translated text, prompts, microphone audio, auth tokens, OpenAI client secrets, or standard API keys.
+- Mobile app -> app backend -> OpenAI.
+- Mobile app -> AWS/Lambda/token broker.
+- Mobile app -> app-owned server mailer.
+- Mobile app -> committed or bundled standard OpenAI API key.
+- AI chat -> app backend or cloud transcript endpoint.
+- Email export -> app backend or cloud export service.
+- Logs/analytics/crash reports/screenshots/test output -> raw transcript, translated text, prompts, summaries, recipient lists, microphone audio, OpenAI credentials/session material, or API keys.
 - Cloud transcript sync in the MVP.

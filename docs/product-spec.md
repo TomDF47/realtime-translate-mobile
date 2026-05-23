@@ -4,20 +4,22 @@ This is the high-level product spec. Use [docs/live-translate-build-spec.md](liv
 
 ## Goal
 
-Build an Android-first, iOS-compatible mobile app for continuous live speech translation using OpenAI Realtime Translation.
+Build an Android-first, iOS-compatible mobile app for continuous live speech translation using OpenAI Realtime Translation. The MVP is phone-only except for direct OpenAI API calls.
 
 ## Core Experience
 
-1. User signs in with Microsoft personal, Microsoft organisational, or Google identity.
+1. User opens the app and starts a new meeting or selects an old meeting.
 2. User chooses source language detection or a known input language.
 3. User chooses a supported output language.
-4. App starts continuous translation.
+4. App starts continuous translation through a direct OpenAI API connection.
 5. OpenAI streams translated audio and transcript deltas while the speaker is still talking.
-6. User can review local transcript history and ask Q&A about the transcript without sending transcript content through AWS.
+6. User can review local meeting history and continue from an old meeting.
+7. User can use scoped AI chat over `This meeting` or `All meetings`.
+8. User can export Transcript, Summary, or Both through a user-initiated device mail/share flow.
 
 ## Supplied Mockups
 
-Tom has supplied four Android mockups covering the welcome/sign-in screen, teal listening live translation state, transcript assistant bottom sheet, and amber speaking or paused read-aloud state. Use [docs/mockup-ux-spec.md](mockup-ux-spec.md) as the visual and interaction source of truth for the first Flutter implementation.
+Tom has supplied four Android mockups covering the welcome screen, teal listening live translation state, transcript assistant bottom sheet, and amber speaking or paused read-aloud state. Use [docs/mockup-ux-spec.md](mockup-ux-spec.md) as the visual and interaction source of truth for the first Flutter implementation.
 
 The source image files are in [assets/mockups](../assets/mockups):
 
@@ -26,59 +28,75 @@ The source image files are in [assets/mockups](../assets/mockups):
 - [03-transcript-assistant.jpg](../assets/mockups/03-transcript-assistant.jpg)
 - [04-speaking-paused-amber.jpg](../assets/mockups/04-speaking-paused-amber.jpg)
 
+The revised MVP keeps the visual direction but adapts sign-in affordances into phone-local setup/start-meeting behavior. Google/Microsoft sign-in is V2/future.
+
 ## Architecture
 
 ### Mobile
 
 - Flutter app.
 - Android-first implementation.
-- Keep iOS compatibility in project structure, dependencies, and auth choices.
+- Keep iOS compatibility in project structure and dependencies.
 - Store sensitive local data using encrypted device storage.
+- Store meetings, transcript/history, summary metadata, recipient preferences, recent languages, and sensitive settings locally.
 - Do not embed a standard OpenAI API key.
 
 ### Backend
 
-- AWS API Gateway + Lambda.
-- Token broker only.
-- Validates user identity/session.
-- Requests short-lived OpenAI client secrets.
-- Returns client secrets to the mobile app.
-- Does not receive transcript content.
-- Does not store transcript content.
+- No app backend in MVP.
+- No AWS API Gateway, Lambda, token broker, cloud sync, cloud identity gate, server mailer, or server-side transcript handling.
+- Deferred cloud/backend/auth scope is tracked in [docs/v2-future-scope.md](v2-future-scope.md).
 
 ### OpenAI
 
 - Live translation uses `gpt-realtime-translate`.
-- App connects directly to OpenAI Realtime Translation with short-lived client secrets.
+- App connects directly to the OpenAI API from the phone.
 - Translation path should support streaming translated audio and transcript deltas.
-- Account for current platform limits: broad input language coverage, narrower target output language coverage.
-- Provide fallback route for broader target-language support when Realtime Translation output language is unsupported.
+- AI chat and summary generation use direct OpenAI calls from the phone.
+- Account for current platform limits: broad input language coverage, narrower target output language coverage, direct credential/session support, and reasoning parameter availability must be verified before implementation.
 
-## Identity
+## Meeting Management
 
-Support:
+- User can start a new meeting.
+- User can select an old meeting and continue from it.
+- Meetings have local transcript/history/summary metadata stored on the phone.
+- Meeting history is encrypted on device and can be deleted.
 
-- Microsoft personal accounts.
-- Microsoft work/school organisational accounts.
-- Google sign-in.
+## Scoped AI Chat
 
-Implementation notes:
+- Document and implement this as AI chat.
+- AI chat scope is explicit:
+  - `This meeting`
+  - `All meetings`
+- Answers should be grounded in local transcript context and cite timestamps when possible.
+- Transcript context is sent only through direct OpenAI calls from the phone.
 
-- Microsoft app registration should support both personal and work/school account types.
-- Google Android credentials require package name and signing certificate.
-- Identity should gate token broker access.
+## Email Export
 
-## Privacy
+- User can choose Transcript, Summary, or Both.
+- On send, app presents a checklist of email addresses.
+- User can add/remove recipients and check/select recipients at send time.
+- App remembers the recipient list and last selected recipients locally.
+- Export should use device-native mail/share composer semantics where practical.
+- No outbound mail backend in MVP.
+- If Summary or Both is selected, product intent is GPT-5.5 with extra-high reasoning. Implementation must verify current OpenAI API model and reasoning support before coding.
 
-- AWS must not see transcript content.
-- Backend logs must avoid user speech/transcript payloads.
-- Transcript storage is local-only and encrypted.
-- No cloud transcript sync in the first version.
+## Privacy And Security
+
+- Direct OpenAI API calls are the only routine network path for product behavior.
+- No app-owned backend may receive transcript, audio, prompt, summary, recipient, or export payloads.
+- Local storage is encrypted.
+- No cloud transcript sync in the MVP.
+- Logs, analytics, crash reports, screenshots, and test output must avoid user speech/transcript payloads, prompts, translations, summaries, recipient lists, and OpenAI credential/session material.
+- Dependency/package hygiene, mobile permission minimization, supply-chain checks, and no transcript leakage are first-class acceptance criteria.
 
 ## Initial Non-Goals
 
 - Full iOS release.
-- Organisation/team admin console.
-- Cloud transcript storage.
+- Organization/team admin console.
+- App backend, AWS, Lambda, token broker, or cloud identity gate.
+- Cloud transcript storage or sync.
+- Server-side transcript, summary, audio, or email handling.
+- Outbound mail backend.
 - Human interpreter marketplace.
 - Heavy backend business logic.

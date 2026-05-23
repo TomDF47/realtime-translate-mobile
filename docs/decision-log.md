@@ -2,9 +2,40 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
-## 2026-05-24 - Initial MVP Architecture
+## 2026-05-24 - Phone-Only MVP Architecture
 
 Status: Accepted
+
+Decision:
+
+- Build an Android-first Flutter mobile app while keeping the project iOS-compatible later.
+- Keep the MVP completely phone-only aside from direct OpenAI API calls.
+- Do not include AWS API Gateway, Lambda, a token broker, app backend, cloud identity gate, cloud sync, server mailer, or server-side transcript handling in the MVP.
+- Use `gpt-realtime-translate` as the primary live translation model.
+- Store meetings, transcript/history, summaries, recipient preferences, sensitive preferences, and credential/session material only in encrypted local device storage for the MVP.
+- Add local meeting management: start a new meeting, select an old meeting, and continue from it.
+- Add scoped AI chat over `This meeting` or `All meetings`.
+- Add user-initiated email export through device-native mail/share composer semantics where practical.
+- Treat cybersecurity as a first-class acceptance criterion.
+
+Rationale:
+
+- Phone-local operation minimizes backend privacy risk and keeps executive meeting transcripts away from app-owned infrastructure.
+- Direct phone-to-OpenAI calls preserve the intended realtime product path without introducing a transcript/audio proxy.
+- Local encrypted storage keeps the MVP privacy model simple and auditable.
+- Explicit AI chat scope reduces accidental cross-meeting disclosure.
+- Native mail/share export avoids operating a server-side email relay for sensitive transcript data.
+
+Implications:
+
+- Any AWS, backend, cloud identity, or cloud sync proposal is V2/future until the source-of-truth docs and GitHub issues are updated.
+- Implementation must verify current OpenAI support for direct mobile credential/session handling, `gpt-realtime-translate`, GPT-5.5 summary intent, and extra-high reasoning parameters before coding.
+- Logs, diagnostics, analytics, crash reports, screenshots, and tests must avoid transcript, audio, prompt, summary, recipient, and credential/session leakage.
+- Dependency/package hygiene, permission minimization, and supply-chain checks are required acceptance criteria.
+
+## 2026-05-24 - Initial MVP Architecture
+
+Status: Superseded by `2026-05-24 - Phone-Only MVP Architecture`
 
 Decision:
 
@@ -18,27 +49,25 @@ Decision:
 
 Rationale:
 
-- Direct mobile-to-OpenAI realtime sessions keep latency low and avoid a transcript/audio proxy.
-- A narrow token broker limits backend privacy risk and implementation surface area.
-- Local encrypted transcript storage keeps the MVP privacy model simple and explicit.
+- This was the first planning baseline. It has been retained for provenance only.
 
 Implications:
 
-- AWS must never receive transcript text, translated text, prompts about transcripts, microphone audio, audio chunks, or audio-derived payloads.
-- Transcript Q&A must use a direct OpenAI path or another privacy-preserving path that avoids AWS seeing transcript content.
-- Backend logging, mobile logging, diagnostics, and tests must enforce redaction and no-transcript-routing behavior.
+- Token broker, AWS, and Google/Microsoft sign-in work is now V2/future scope. See [docs/v2-future-scope.md](v2-future-scope.md).
 
 ## 2026-05-24 - Supplied Mockups Are First-Pass UI Source
 
-Status: Accepted
+Status: Accepted with phone-only MVP adaptation
 
 Decision:
 
-- Treat the four supplied 720x1280 Android portrait JPGs in [assets/mockups](../assets/mockups) and [docs/mockup-ux-spec.md](mockup-ux-spec.md) as the visual and interaction source of truth for the first Flutter implementation.
+- Treat the four supplied 720x1280 Android portrait JPGs in [assets/mockups](../assets/mockups) and [docs/mockup-ux-spec.md](mockup-ux-spec.md) as the visual source of truth for the first Flutter implementation.
+- Adapt cloud sign-in affordances to phone-local setup/start-meeting behavior for MVP unless a future accepted decision restores cloud identity.
 
 Rationale:
 
 - The mockups define the expected product feel, required first-pass surfaces, labels, states, and interaction hierarchy more concretely than a generic design-system description.
+- The product architecture changed after mockup intake, so sign-in-specific behavior must not override the phone-only MVP decision.
 
 Implications:
 

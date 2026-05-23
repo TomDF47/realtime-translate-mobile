@@ -21,33 +21,38 @@ flutter test
 
 Expected coverage areas:
 
-- Session state model transitions: signed out, requesting client secret, connecting, listening, speaking, read-aloud paused, reconnecting, expired, and error.
+- Session state model transitions: local setup, meeting selection, connecting, listening, speaking, read-aloud paused, reconnecting, offline, credential invalid, and error.
 - Microphone permission states: granted, denied, permanently denied, and revoked.
+- Direct OpenAI integration seams for realtime translation, AI chat, and summary generation.
 - Language support table and unsupported-target fallback behavior.
-- Local encrypted storage read/write/delete behavior.
-- Transcript Q&A empty, offline, expired-secret, and model-error states.
-- Widget tests for the four supplied mockup surfaces.
-- Accessibility checks for icon-only controls, auth buttons, language selectors, playback controls, assistant controls, and transcript actions.
+- Local encrypted storage read/write/delete behavior for meetings, transcript/history, summary metadata, preferences, remembered recipients, last selected recipients, and any credential/session material.
+- Meeting management: start new meeting, select old meeting, continue from meeting, delete meeting.
+- Scoped AI chat: `This meeting`, `All meetings`, empty transcript, no selected meeting, offline, credential-invalid, unsupported, and model/API error states.
+- Email export: Transcript/Summary/Both selector, recipient checklist, add/remove recipients, remembered last selections, native mail/share handoff, and no outbound mail backend.
+- Widget tests for the supplied mockup-derived surfaces and revised phone-only setup/meeting/export surfaces.
+- Accessibility checks for icon-only controls, local setup actions, meeting selectors, language selectors, playback controls, AI chat controls, export controls, recipient checklist, and transcript actions.
 
-## Backend Token Broker Gates
+## Privacy, Secret, And Cybersecurity Gates
 
-Once backend code exists, broker tests should cover:
+Every implementation change touching OpenAI, logging, storage, permissions, dependencies, export, or transcript handling should include negative tests or documented checks for:
 
-- Identity/session validation before issuing client secrets.
-- Short-lived OpenAI client-secret request and response metadata.
-- Expiry and refresh metadata.
-- Error responses for unauthenticated, unauthorized, upstream failure, and malformed request cases.
-- Logging redaction for bearer tokens, identity tokens, OpenAI client secrets, standard API keys, and request bodies.
-- Negative assertion that transcript or audio fields are rejected or never accepted by broker endpoints.
+- No standard OpenAI API key in mobile code/config/assets/tests/screenshots/build outputs.
+- No transcript/audio/prompt/summary/export payload routed through app-owned backend infrastructure.
+- No app backend, AWS, Lambda, token broker, cloud sync, or server mailer added to MVP code.
+- No transcript/audio/prompt/summary/recipient payload in logs, analytics, diagnostics, crash reports, screenshots, or test output.
+- AI chat uses the explicit `This meeting` or `All meetings` scope and direct OpenAI path.
+- Email export uses local preparation and user-initiated device-native mail/share composer semantics where practical.
+- Mobile permissions are limited to what the feature requires and are documented.
+- Dependency versions are pinned through lockfiles and checked against credible advisory sources once dependencies exist.
 
-## Privacy And Secret Gates
+## Dependency And Supply-Chain Checks
 
-Every implementation change touching auth, OpenAI, logging, storage, or transcript handling should include negative tests for:
+Before closing dependency-bearing implementation work:
 
-- No standard OpenAI API key in mobile code/config/assets/tests/build outputs.
-- No transcript/audio/prompt payload routed through AWS.
-- No transcript/audio/prompt payload in logs, analytics, diagnostics, or crash reports.
-- Transcript Q&A uses direct OpenAI or another privacy-preserving path where AWS cannot see transcript content.
+- Record package/version checks in [docs/cybersecurity-report.md](cybersecurity-report.md) or a linked artifact.
+- Check Dart/pub advisories, GitHub Advisory Database, OSV, NVD where applicable, and package changelogs/security notes for pinned versions.
+- Run any available ecosystem command that surfaces advisories, such as `dart pub get` advisory output once a Flutter scaffold exists.
+- Document accepted risks with owner, mitigation, and next review trigger.
 
 ## Android Emulator Smoke
 
@@ -61,10 +66,12 @@ Do not use `emulator -no-window`.
 
 Once Flutter exists, smoke checks should cover:
 
-- Welcome/sign-in surface.
+- Welcome/local setup surface.
+- Meeting history or meeting selector entry point.
 - Teal live listening surface.
-- Transcript assistant bottom sheet over dimmed live screen.
+- Scoped AI chat bottom sheet over dimmed live screen.
 - Amber speaking/read-aloud-paused surface.
+- Email export type selector and recipient checklist.
 - Large text and small device handling without clipped labels or overlapping bottom controls.
 - Safe-area behavior around Android status and navigation bars.
 
@@ -72,4 +79,4 @@ Record emulator command output, screenshot notes, or exact blockers in the issue
 
 ## CI Direction
 
-The first committed CI gate should run docs validation without requiring Flutter. After implementation lands, expand CI to include Flutter analysis/tests, backend tests, and secret-safety checks.
+The first committed CI gate should run docs validation without requiring Flutter. After implementation lands, expand CI to include Flutter analysis/tests, secret-safety checks, dependency/advisory checks, and privacy/logging assertions.

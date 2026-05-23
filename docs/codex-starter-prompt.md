@@ -13,6 +13,8 @@ Required first reads:
 - README.md
 - docs/development-workflow.md
 - docs/architecture.md
+- docs/v2-future-scope.md
+- docs/cybersecurity-report.md
 - docs/environment.md
 - docs/testing-strategy.md
 - docs/decision-log.md
@@ -21,12 +23,13 @@ Required first reads:
 
 Product decisions:
 - Flutter mobile app, Android-first, iOS-compatible later.
-- Minimal AWS API Gateway + Lambda backend as a token broker only.
-- Mobile app connects directly to OpenAI using short-lived client secrets.
+- MVP is phone-only aside from direct OpenAI API calls.
+- No AWS, Lambda, token broker, app backend, cloud identity gate, cloud sync, server mailer, or server-side transcript handling in MVP.
 - Main translation model: gpt-realtime-translate.
-- Transcript Q&A should avoid AWS seeing transcript content.
-- Storage is local encrypted device storage only.
-- Sign-in must support Microsoft personal, Microsoft organisational, and Google accounts.
+- AI chat must be scoped explicitly to This meeting or All meetings.
+- Meetings, transcripts, summaries, recipient preferences, sensitive preferences, and credential/session material are local encrypted device storage only.
+- Email export uses device-native mail/share composer semantics where practical and no outbound mail backend.
+- Summary export product intent is GPT-5.5 with extra-high reasoning; verify current OpenAI API support before coding.
 
 Important machine detail:
 - Use `android-pixel9-headless` for emulator testing.
@@ -34,12 +37,14 @@ Important machine detail:
 
 Implementation expectations:
 - Use docs/mockup-ux-spec.md as the visual and interaction source of truth.
-- Implement the four supplied surfaces: welcome/sign-in, teal listening live translation, transcript assistant bottom sheet, and amber speaking/paused read-aloud mode.
+- Adapt the welcome/sign-in mockup to the revised phone-only MVP; provider sign-in is V2/future.
+- Implement the supplied mockup-derived surfaces plus phone-local meeting management and email export controls.
 - Keep the UI clean, premium, and executive-grade.
 - Do not turn the first screen into a technical control panel.
 - Create a pragmatic Flutter project structure suitable for Android now and iOS later.
 - Add clear setup docs and environment placeholders.
 - Add tests appropriate for the implemented scope.
 - Verify with Flutter analysis/tests and an Android emulator smoke check where feasible.
+- Add dependency/advisory and secret-safety checks once package versions exist.
 - Update README and relevant docs in the same change when setup, behavior, architecture, verification, risks, or issue status change.
 ```
