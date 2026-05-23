@@ -9,8 +9,13 @@ Build the first implementation of an Android-first Flutter app for live speech t
 
 Required first reads:
 - AGENTS.md
-- README.md
 - docs/live-translate-build-spec.md
+- README.md
+- docs/development-workflow.md
+- docs/architecture.md
+- docs/environment.md
+- docs/testing-strategy.md
+- docs/decision-log.md
 - docs/mockup-ux-spec.md
 - all four files in assets/mockups/
 
@@ -36,4 +41,5 @@ Implementation expectations:
 - Add clear setup docs and environment placeholders.
 - Add tests appropriate for the implemented scope.
 - Verify with Flutter analysis/tests and an Android emulator smoke check where feasible.
+- Update README and relevant docs in the same change when setup, behavior, architecture, verification, risks, or issue status change.
 ```

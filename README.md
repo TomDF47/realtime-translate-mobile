@@ -8,6 +8,11 @@ Android-first Flutter app for live speech translation, designed to stay iOS-comp
 - Mockup UX spec: [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md)
 - Supplied mockups: [assets/mockups](assets/mockups)
 - Codex agent instructions: [AGENTS.md](AGENTS.md)
+- Development workflow: [docs/development-workflow.md](docs/development-workflow.md)
+- Architecture handoff: [docs/architecture.md](docs/architecture.md)
+- Environment setup: [docs/environment.md](docs/environment.md)
+- Testing strategy: [docs/testing-strategy.md](docs/testing-strategy.md)
+- Decision log: [docs/decision-log.md](docs/decision-log.md)
 
 ## Decision Record
 
@@ -27,7 +32,36 @@ The app should feel premium, clean, and executive-grade. The first usable surfac
 
 Planning repo created. Supplied Android mockups have been received, copied into [assets/mockups](assets/mockups), and captured in [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md). The canonical build-ready spec is [docs/live-translate-build-spec.md](docs/live-translate-build-spec.md).
 
+Agentic development handoff docs are in place for workflow, architecture, environment placeholders, testing strategy, and decision logging. The repo does not yet contain a Flutter scaffold or Lambda implementation.
+
 Do not start Flutter implementation until the implementation issue is explicitly picked up. Keep work aligned to the GitHub issue acceptance criteria.
+
+## Repository Map
+
+- [AGENTS.md](AGENTS.md): required operating contract for future Codex jobs.
+- [CONTRIBUTING.md](CONTRIBUTING.md): contribution and PR expectations.
+- [docs/live-translate-build-spec.md](docs/live-translate-build-spec.md): canonical product, architecture, privacy, and implementation spec.
+- [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md): visual and interaction source of truth for the first Flutter UI pass.
+- [docs/architecture.md](docs/architecture.md): mobile, AWS, OpenAI, storage, and prohibited data-flow boundaries.
+- [docs/development-workflow.md](docs/development-workflow.md): issue workflow, doc update matrix, and handoff checklist.
+- [docs/environment.md](docs/environment.md): local setup, emulator notes, env placeholders, and secret handling.
+- [docs/testing-strategy.md](docs/testing-strategy.md): docs, Flutter, backend, privacy, and emulator verification plan.
+- [docs/decision-log.md](docs/decision-log.md): durable decisions future agents should preserve.
+- [docs/codex-starter-prompt.md](docs/codex-starter-prompt.md): starter prompt for the first Flutter implementation pass.
+- [.env.example](.env.example): placeholder-only environment contract.
+- [scripts/check-docs.sh](scripts/check-docs.sh): docs link and secret-pattern sanity check.
+
+## Local Setup
+
+For the current docs/planning repo:
+
+```bash
+bash scripts/check-docs.sh
+```
+
+Do not add real credentials to `.env.example` or any committed file. Use uncommitted local env files and backend secret storage for secrets.
+
+Once Flutter and backend code exist, update this README with the exact install, analyze, test, run, and deployment commands.
 
 ## GitHub Issue Map
 
@@ -73,6 +107,24 @@ All supplied mockups are 720x1280 Android portrait JPGs:
 - Store transcript history and sensitive local data only in encrypted device storage for the MVP.
 - Keep logs, crash reports, analytics, and diagnostics free of speech, transcript payloads, prompts, translations, bearer tokens, client secrets, and API keys.
 - Verify current OpenAI Realtime Translation target language support during implementation and keep fallback routing explicit for unsupported target languages.
+
+## Verification
+
+Current docs-only gate:
+
+```bash
+bash scripts/check-docs.sh
+```
+
+Expected gates once implementation exists:
+
+- `flutter analyze`
+- `flutter test`
+- Backend token broker unit tests
+- Secret scan or equivalent check for standard OpenAI API key leakage
+- Android emulator smoke check using `android-pixel9-headless`
+- UI smoke coverage for all four supplied mockup surfaces
+- Privacy routing test showing transcript Q&A does not call AWS transcript endpoints
 
 ## Documentation Maintenance
 

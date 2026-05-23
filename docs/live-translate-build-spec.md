@@ -26,6 +26,11 @@ Build an Android-first, iOS-compatible Flutter app for continuous live speech tr
 - Agent operating instructions: [AGENTS.md](../AGENTS.md)
 - UX interpretation: [docs/mockup-ux-spec.md](mockup-ux-spec.md)
 - High-level product spec: [docs/product-spec.md](product-spec.md)
+- Architecture handoff: [docs/architecture.md](architecture.md)
+- Development workflow: [docs/development-workflow.md](development-workflow.md)
+- Environment setup: [docs/environment.md](environment.md)
+- Testing strategy: [docs/testing-strategy.md](testing-strategy.md)
+- Decision log: [docs/decision-log.md](decision-log.md)
 - Starter prompt for first implementation: [docs/codex-starter-prompt.md](codex-starter-prompt.md)
 
 Supplied mockups:
