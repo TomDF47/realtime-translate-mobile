@@ -7,6 +7,13 @@ You are working in /home/tom/projects/realtime-translate-mobile.
 
 Build the first implementation of an Android-first Flutter app for live speech translation.
 
+Required first reads:
+- AGENTS.md
+- README.md
+- docs/live-translate-build-spec.md
+- docs/mockup-ux-spec.md
+- all four files in assets/mockups/
+
 Product decisions:
 - Flutter mobile app, Android-first, iOS-compatible later.
 - Minimal AWS API Gateway + Lambda backend as a token broker only.

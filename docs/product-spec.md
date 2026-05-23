@@ -1,5 +1,7 @@
 # Product Spec
 
+This is the high-level product spec. Use [docs/live-translate-build-spec.md](live-translate-build-spec.md) as the canonical build-ready spec for implementation, verification, and issue triage.
+
 ## Goal
 
 Build an Android-first, iOS-compatible mobile app for continuous live speech translation using OpenAI Realtime Translation.
@@ -16,6 +18,13 @@ Build an Android-first, iOS-compatible mobile app for continuous live speech tra
 ## Supplied Mockups
 
 Tom has supplied four Android mockups covering the welcome/sign-in screen, teal listening live translation state, transcript assistant bottom sheet, and amber speaking or paused read-aloud state. Use [docs/mockup-ux-spec.md](mockup-ux-spec.md) as the visual and interaction source of truth for the first Flutter implementation.
+
+The source image files are in [assets/mockups](../assets/mockups):
+
+- [01-welcome-sign-in.jpg](../assets/mockups/01-welcome-sign-in.jpg)
+- [02-live-listening-teal.jpg](../assets/mockups/02-live-listening-teal.jpg)
+- [03-transcript-assistant.jpg](../assets/mockups/03-transcript-assistant.jpg)
+- [04-speaking-paused-amber.jpg](../assets/mockups/04-speaking-paused-amber.jpg)
 
 ## Architecture
 
