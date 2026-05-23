@@ -13,6 +13,10 @@ Build an Android-first, iOS-compatible mobile app for continuous live speech tra
 5. OpenAI streams translated audio and transcript deltas while the speaker is still talking.
 6. User can review local transcript history and ask Q&A about the transcript without sending transcript content through AWS.
 
+## Supplied Mockups
+
+Tom has supplied four Android mockups covering the welcome/sign-in screen, teal listening live translation state, transcript assistant bottom sheet, and amber speaking or paused read-aloud state. Use [docs/mockup-ux-spec.md](mockup-ux-spec.md) as the visual and interaction source of truth for the first Flutter implementation.
+
 ## Architecture
 
 ### Mobile
@@ -69,4 +73,3 @@ Implementation notes:
 - Cloud transcript storage.
 - Human interpreter marketplace.
 - Heavy backend business logic.
-

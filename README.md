@@ -17,7 +17,7 @@ The app should feel premium, clean, and executive-grade. The first usable surfac
 
 ## Current Status
 
-Planning repo created. Mockups are pending before frontend implementation starts.
+Planning repo created. Supplied Android mockups have been received and captured in [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md). Do not start Flutter implementation until the implementation issue is explicitly picked up.
 
 ## Development Notes
 
@@ -28,4 +28,3 @@ android-pixel9-headless
 ```
 
 Use that instead of `emulator -no-window`, which segfaults on this machine.
-

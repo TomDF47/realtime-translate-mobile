@@ -1,6 +1,6 @@
 # Codex Starter Prompt
 
-Use this after the mockups arrive.
+Use this for the first implementation pass after the supplied mockup UX spec is committed.
 
 ```text
 You are working in /home/tom/projects/realtime-translate-mobile.
@@ -21,7 +21,8 @@ Important machine detail:
 - Do not use `emulator -no-window`; it segfaults on this Fedora/KDE/Wayland setup.
 
 Implementation expectations:
-- Follow the supplied mockups closely.
+- Use docs/mockup-ux-spec.md as the visual and interaction source of truth.
+- Implement the four supplied surfaces: welcome/sign-in, teal listening live translation, transcript assistant bottom sheet, and amber speaking/paused read-aloud mode.
 - Keep the UI clean, premium, and executive-grade.
 - Do not turn the first screen into a technical control panel.
 - Create a pragmatic Flutter project structure suitable for Android now and iOS later.
@@ -29,4 +30,3 @@ Implementation expectations:
 - Add tests appropriate for the implemented scope.
 - Verify with Flutter analysis/tests and an Android emulator smoke check where feasible.
 ```
-
