@@ -36,7 +36,7 @@ The app should feel premium, clean, and executive-grade. The MVP is phone-only a
 
 Planning repo created. Supplied Android mockups have been received, copied into [assets/mockups](assets/mockups), and captured in [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md). The canonical build-ready spec is [docs/live-translate-build-spec.md](docs/live-translate-build-spec.md).
 
-The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, encrypted local meeting storage, and local meeting management. The current app can render the phone-local welcome/start screen, microphone permission denied state, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with stored metadata, select-and-continue behavior that appends local transcript history, delete controls, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, or server-side transcript handling.
+The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, encrypted local meeting storage, local meeting management, and a repeatable local supply-chain/security gate. The current app can render the phone-local welcome/start screen, microphone permission denied state, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with stored metadata, select-and-continue behavior that appends local transcript history, delete controls, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, or server-side transcript handling.
 
 OpenAI Realtime verification for #6 found a credential blocker: `gpt-realtime-translate` is documented, but OpenAI's client-safe Realtime client secrets for web/mobile are minted by a developer-controlled server using a standard API key. That conflicts with the phone-only/no-backend MVP rule until #23 decides the accepted credential/session approach.
 
@@ -58,6 +58,7 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [docs/codex-starter-prompt.md](docs/codex-starter-prompt.md): starter prompt for the first Flutter implementation pass.
 - [.env.example](.env.example): placeholder-only environment contract.
 - [scripts/check-docs.sh](scripts/check-docs.sh): docs link and secret-pattern sanity check.
+- [scripts/check-supply-chain.sh](scripts/check-supply-chain.sh): local dependency advisory, secret-pattern, and Android permission gate.
 - [pubspec.yaml](pubspec.yaml) and [pubspec.lock](pubspec.lock): Flutter package manifest and pinned dependency lockfile.
 - [lib/main.dart](lib/main.dart): current phone-local Flutter start surface.
 - [lib/src/theme/live_translate_theme.dart](lib/src/theme/live_translate_theme.dart): shared colors, spacing, radii, text styles, elevation, and app theme.
@@ -93,6 +94,7 @@ flutter pub get
 flutter analyze
 flutter test
 bash scripts/check-docs.sh
+bash scripts/check-supply-chain.sh
 ```
 
 For Android debug build and smoke checks:
@@ -121,6 +123,7 @@ Closed planning and implementation intake:
 - #13 Implement microphone permissions and live session lifecycle
 - #18 Define Flutter design tokens and reusable mockup components
 - #20 Implement local meeting management
+- #22 Implement dependency and supply-chain cybersecurity controls
 
 Open MVP/planning work:
 
@@ -135,7 +138,6 @@ Open MVP/planning work:
 - #17 Add accessibility and responsive text verification
 - #19 Maintain README and agent handoff docs during implementation
 - #21 Add email export for transcripts and summaries
-- #22 Implement dependency and supply-chain cybersecurity controls
 - #23 Decide safe direct OpenAI mobile credential approach
 
 Deferred V2/future work:
@@ -176,12 +178,13 @@ flutter pub get
 flutter analyze
 flutter test
 bash scripts/check-docs.sh
+bash scripts/check-supply-chain.sh
 ```
 
 Additional checks for app changes:
 
-- Secret scan or equivalent check for standard OpenAI API key leakage
-- Dependency/advisory checks for pinned Flutter/Dart/native package versions
+- Secret scan or equivalent check for standard OpenAI API key leakage.
+- Dependency/advisory checks for pinned Flutter/Dart/native package versions.
 - Android emulator smoke check using `android-pixel9-headless`
 - UI smoke coverage for supplied mockup-derived surfaces, meeting management, scoped AI chat, and email export
 - Privacy routing test showing transcript/audio/prompt/summary/export content does not call an app backend

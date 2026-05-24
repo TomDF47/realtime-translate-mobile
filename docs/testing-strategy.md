@@ -10,9 +10,10 @@ flutter pub get
 flutter analyze
 flutter test
 bash scripts/check-docs.sh
+bash scripts/check-supply-chain.sh
 ```
 
-`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. Current Flutter tests cover the phone-local start surface, mockup-derived listening/AI chat/amber/export surfaces, microphone permission denied UI, deterministic session lifecycle transitions that keep capture/realtime/playback resources closed until permission is granted, encrypted local repository behavior for meetings, transcript/history entries, summary metadata, language routes, recipient preferences, sensitive preferences, credential/session material, and meeting management for deleting or continuing a saved meeting with appended local history.
+`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. `scripts/check-supply-chain.sh` checks for obvious credential leaks, verifies Android permission additions against the current allowlist, and queries OSV for pinned hosted Pub and Gradle/Maven runtime package versions. Current Flutter tests cover the phone-local start surface, mockup-derived listening/AI chat/amber/export surfaces, microphone permission denied UI, deterministic session lifecycle transitions that keep capture/realtime/playback resources closed until permission is granted, encrypted local repository behavior for meetings, transcript/history entries, summary metadata, language routes, recipient preferences, sensitive preferences, credential/session material, and meeting management for deleting or continuing a saved meeting with appended local history.
 
 ## Flutter App Gates
 
@@ -53,6 +54,7 @@ Every implementation change touching OpenAI, logging, storage, permissions, depe
 
 Before closing dependency-bearing implementation work:
 
+- Run `bash scripts/check-supply-chain.sh`.
 - Record package/version checks in [docs/cybersecurity-report.md](cybersecurity-report.md) or a linked artifact.
 - Check Dart/pub advisories, GitHub Advisory Database, OSV, NVD where applicable, and package changelogs/security notes for pinned versions.
 - Run any available ecosystem command that surfaces advisories, such as `dart pub get` advisory output once a Flutter scaffold exists.
@@ -101,4 +103,4 @@ The current app can verify the phone-local start surface, Android microphone run
 
 ## CI Direction
 
-The first committed CI gate should run docs validation without requiring Flutter. After implementation lands, expand CI to include Flutter analysis/tests, secret-safety checks, dependency/advisory checks, and privacy/logging assertions.
+The first committed CI gate should run docs validation without requiring Flutter. After implementation lands, expand CI to include Flutter analysis/tests, `scripts/check-supply-chain.sh`, secret-safety checks, dependency/advisory checks, and privacy/logging assertions.

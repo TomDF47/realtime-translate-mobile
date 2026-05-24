@@ -37,6 +37,7 @@ flutter pub get
 flutter analyze
 flutter test
 bash scripts/check-docs.sh
+bash scripts/check-supply-chain.sh
 ```
 
 Android emulator available on Tom's Fedora machine:

@@ -18,7 +18,7 @@ git status --short --branch
 
 ## Issue-Driven Work
 
-- Use existing issues #2-#22 for MVP work unless a new gap is genuinely not covered.
+- Use existing issues #2-#23 for MVP work unless a new gap is genuinely not covered.
 - Treat #4 and #5 as V2/future unless a later accepted decision restores cloud identity or backend scope to MVP.
 - Link implementation changes to the issue they complete or advance.
 - Do not duplicate setup, docs, emulator, test, CI, privacy, cybersecurity, meeting, export, or mockup work already covered by existing issues.
@@ -63,6 +63,7 @@ Cybersecurity:
 - Minimize mobile permissions.
 - Pin dependencies through lockfiles once implementation exists.
 - Check dependency advisories before merging package changes.
+- Run `bash scripts/check-supply-chain.sh` before closing dependency-bearing or security-sensitive implementation work.
 - Keep logs, analytics, crash reports, screenshots, and test output free of transcript, audio, prompt, summary, recipient, and OpenAI credential/session material.
 
 ## Documentation Update Matrix

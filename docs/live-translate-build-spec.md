@@ -200,6 +200,7 @@ Minimum verification plan once implementation exists:
 - Android emulator smoke check using `android-pixel9-headless`
 - Secret scanning or equivalent check that no standard OpenAI API key appears in mobile code/config/assets/tests/build outputs
 - Dependency/advisory check for pinned Flutter/Dart/native package versions
+- Local cybersecurity gate: `bash scripts/check-supply-chain.sh`
 - UI smoke checks for supplied mockup-derived surfaces plus meeting management and email export surfaces
 - Accessibility checks for labels, focus order, large text, recipient checklist, and contrast-sensitive states
 - Privacy routing test showing no transcript/audio/prompt/summary/export content is sent to an app backend
@@ -238,6 +239,7 @@ Closed planning and implementation intake:
 - #13 Implement microphone permissions and live session lifecycle.
 - #18 Define Flutter design tokens and reusable mockup components.
 - #20 Implement local meeting management.
+- #22 Implement dependency and supply-chain cybersecurity controls.
 
 Open MVP/planning work:
 
@@ -252,7 +254,6 @@ Open MVP/planning work:
 - #17 Add accessibility and responsive text verification.
 - #19 Maintain README and agent handoff docs during implementation.
 - #21 Add email export for transcripts and summaries.
-- #22 Implement dependency and supply-chain cybersecurity controls.
 - #23 Decide safe direct OpenAI mobile credential approach.
 
 Deferred V2/future issues:

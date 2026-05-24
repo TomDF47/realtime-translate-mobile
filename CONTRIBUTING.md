@@ -31,7 +31,7 @@ This repo is currently a planning and implementation handoff workspace for an An
 
 - Treat dependency hygiene, supply-chain checks, mobile permission minimization, secret scanning, and logging/diagnostics redaction as acceptance criteria.
 - Update [docs/cybersecurity-report.md](docs/cybersecurity-report.md) when package versions, dependency state, advisory checks, or rerun triggers change.
-- Once implementation exists, pin dependency versions through lockfiles and check credible advisory sources before merging package changes.
+- Once implementation exists, pin dependency versions through lockfiles and run `bash scripts/check-supply-chain.sh` plus any required manual advisory checks before merging package changes.
 
 ## Verification
 
@@ -43,6 +43,12 @@ git diff --check
 ```
 
 Once implementation exists, add the relevant gates from [docs/testing-strategy.md](docs/testing-strategy.md), including Flutter analysis/tests, secret checks, dependency/advisory checks, privacy/logging checks, and Android emulator smoke checks.
+
+For dependency-bearing or security-sensitive changes, run:
+
+```bash
+bash scripts/check-supply-chain.sh
+```
 
 ## Pull Requests
 

@@ -1,14 +1,14 @@
 # Cybersecurity Report
 
-Report date/time: 2026-05-24 10:16:47 AWST (Australia/Perth, UTC+08:00)
+Report date/time: 2026-05-24 10:22:50 AWST (Australia/Perth, UTC+08:00)
 
-Scope: Flutter scaffold dependency baseline, Android microphone-permission lifecycle update, and encrypted local meeting storage for the phone-only MVP. The repo now contains Flutter Android/iOS scaffold files, package manifests, a lockfile, Android Gradle build files, placeholder-only environment config, local signing placeholders, a native Android MethodChannel for runtime microphone permission, and a platform-backed secure storage repository.
+Scope: Flutter scaffold dependency baseline, Android microphone-permission lifecycle update, encrypted local meeting storage, and local dependency/security gate for the phone-only MVP. The repo now contains Flutter Android/iOS scaffold files, package manifests, a lockfile, Android Gradle build files, placeholder-only environment config, local signing placeholders, a native Android MethodChannel for runtime microphone permission, a platform-backed secure storage repository, and a repeatable local supply-chain script.
 
 ## Executive Summary
 
 The Flutter scaffold introduces pinned Dart package versions in `pubspec.lock`, Android Gradle build tooling, and a local signing placeholder. The app declares Android `RECORD_AUDIO` permission and requests it at runtime through app-owned native Android code before opening the mock live-session surface. The storage implementation adds `flutter_secure_storage` for encrypted local meeting, transcript/history, summary metadata, recent language route, recipient preference, sensitive preference, and future credential/session material storage. Android app backup is disabled in the manifest for the MVP data boundary. No app backend, AWS/Lambda token broker, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, analytics, or crash reporting code has been added.
 
-Current result: no known vulnerabilities or GitHub advisory hits were found for the introduced Pub packages or checked Maven build-tool packages during this pass. OpenAI Realtime credential verification found a product/security blocker for #6: official docs show `gpt-realtime-translate` exists, but client-safe Realtime client secrets for web/mobile are minted by a developer-controlled server using a standard API key. #23 must decide the accepted credential/session approach before live OpenAI integration resumes. The repo still must rerun this report whenever package versions or build tooling change.
+Current result: no known vulnerabilities or GitHub advisory hits were found for the introduced Pub packages or checked Maven packages during this pass. `bash scripts/check-supply-chain.sh` now checks for obvious credential leaks, validates the Android permission allowlist, and queries OSV for hosted Pub and Gradle/Maven runtime package versions. OpenAI Realtime credential verification found a product/security blocker for #6: official docs show `gpt-realtime-translate` exists, but client-safe Realtime client secrets for web/mobile are minted by a developer-controlled server using a standard API key. #23 must decide the accepted credential/session approach before live OpenAI integration resumes. The repo still must rerun this report whenever package versions or build tooling change.
 
 ## MVP Security Posture
 
@@ -31,6 +31,8 @@ android/settings.gradle.kts
 android/build.gradle.kts
 android/app/build.gradle.kts
 android/gradle/wrapper/gradle-wrapper.properties
+scripts/check-supply-chain.py
+scripts/check-supply-chain.sh
 ```
 
 Primary versions introduced:
@@ -64,6 +66,7 @@ Primary versions introduced:
 | 2026-05-24 AWST | GitHub Advisory Database REST API | All hosted Pub packages from `dart pub deps --json` using `ecosystem=pub&affects=<package>` | 0 advisory hits for each hosted package. |
 | 2026-05-24 AWST | OSV query batch API | Maven build tooling and secure-storage native dependency: `com.android.tools.build:gradle` 9.0.1, plugin buildscript AGP 8.13.2, Kotlin Gradle plugin 2.3.20, `com.google.crypto.tink:tink-android` 1.21.0 | `vulnerable_count: 0`. |
 | 2026-05-24 AWST | GitHub Advisory Database REST API | Maven build tooling and `com.google.crypto.tink:tink-android` | 0 advisory hits. |
+| 2026-05-24 AWST | `bash scripts/check-supply-chain.sh` | Secret patterns, Android permissions, 56 hosted Pub packages, and 51 Gradle/Maven runtime/build packages | Passed. No secret-like values found, `android.permission.RECORD_AUDIO` is the only Android permission, and OSV returned no vulnerabilities for 107 pinned package versions. |
 | 2026-05-24 AWST | NVD | Dart/Flutter package graph | Not mapped because Pub package advisories are better covered by OSV/GitHub Advisory Database and no credible CPE mapping exists for the locked Pub packages. |
 | 2026-05-24 AWST | Manual review | Microphone permission lifecycle change | No third-party package added. Android `RECORD_AUDIO` is the only new mobile permission, requested at runtime through `MainActivity` before live-session UI opens. |
 | 2026-05-24 AWST | Manual review | Encrypted local storage change | Storage uses `flutter_secure_storage` with Android KeyStore/iOS Keychain backing, app data backup disabled through `android:allowBackup="false"`, and no backend/cloud persistence path. |
@@ -77,6 +80,7 @@ Primary versions introduced:
 - Microphone permission handling uses platform code and does not add a supply-chain dependency. Real audio capture remains unimplemented and should be reviewed again when capture code or audio packages are introduced.
 - Encrypted local storage uses `flutter_secure_storage` 10.3.0. Android storage is backed by Android KeyStore/Tink through the plugin; iOS storage is backed by Keychain with `first_unlock_this_device` accessibility.
 - Android backup is disabled for the app manifest to avoid backup/restore copying secure-storage ciphertext outside the phone-only MVP boundary.
+- `scripts/check-supply-chain.sh` is now the required local supply-chain gate. It fails on obvious OpenAI/AWS/private-key secret patterns, unexpected Android permissions, OSV query errors, or OSV vulnerabilities in pinned hosted Pub and Gradle/Maven package versions.
 - The current storage repository writes one encrypted local document. Large long-running transcript volume should be reassessed before production-scale retention or import/export features expand beyond the MVP test data shape.
 - Future dependency additions must include lockfile updates, advisory checks, and this report update before issue closure.
 
@@ -98,8 +102,8 @@ Rerun this report and record package-specific results when any of these change:
 For each package or tool version introduced:
 
 1. Record package name, ecosystem, version, source file, and date checked.
-2. Query OSV where ecosystem mapping exists.
-3. Query GitHub Advisory Database, especially for Dart/Flutter `pub` packages.
+2. Run `bash scripts/check-supply-chain.sh` to query OSV where ecosystem mapping exists and to enforce secret and Android-permission checks.
+3. Query GitHub Advisory Database, especially for Dart/Flutter `pub` packages, when package versions change.
 4. Check Dart/pub advisory output from dependency resolution.
 5. Check NVD for platform/native dependencies where CPE mapping is credible.
 6. Review package changelog, release notes, and security page for manually disclosed issues not yet indexed.
