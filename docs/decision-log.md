@@ -11,7 +11,8 @@ Decision:
 - Build an Android-first Flutter mobile app while keeping the project iOS-compatible later.
 - Keep the MVP completely phone-only aside from direct OpenAI API calls.
 - Do not include AWS API Gateway, Lambda, a token broker, app backend, cloud identity gate, cloud sync, server mailer, or server-side transcript handling in the MVP.
-- Use `gpt-realtime-translate` as the primary live translation model.
+- Prefer `gpt-realtime-2` for realtime voice/translation unless endpoint/API testing finds a major blocker.
+- Keep `gpt-realtime-translate` as a dedicated translation fallback/profile.
 - Store meetings, transcript/history, summaries, recipient preferences, sensitive preferences, and credential/session material only in encrypted local device storage for the MVP.
 - Add local meeting management: start a new meeting, select an old meeting, and continue from it.
 - Add scoped AI chat over `This meeting` or `All meetings`.
@@ -29,9 +30,36 @@ Rationale:
 Implications:
 
 - Any AWS, backend, cloud identity, or cloud sync proposal is V2/future until the source-of-truth docs and GitHub issues are updated.
-- Implementation must verify current OpenAI support for direct mobile credential/session handling, `gpt-realtime-translate`, GPT-5.5 summary intent, and extra-high reasoning parameters before coding.
+- Implementation must verify endpoint behavior for `gpt-realtime-2` versus `gpt-realtime-translate` and keep GPT-5.5 `xhigh` reasoning for summary intent.
 - Logs, diagnostics, analytics, crash reports, screenshots, and tests must avoid transcript, audio, prompt, summary, recipient, and credential/session leakage.
 - Dependency/package hygiene, permission minimization, and supply-chain checks are required acceptance criteria.
+
+## 2026-05-24 - Direct OpenAI Credential And Model Preference
+
+Status: Accepted
+
+Decision:
+
+- Proceed with direct phone-to-OpenAI API calls for the MVP.
+- Do not add an MVP backend, AWS/Lambda token broker, or cloud identity gate.
+- Use user-provided OpenAI credential/session material stored only in encrypted local device storage.
+- Do not commit, bundle, or embed a standard OpenAI API key in mobile code, config, assets, tests, screenshots, or build outputs.
+- Ask Tom for an OpenAI API key only when the app reaches the first real OpenAI network smoke/integration test.
+- Prefer `gpt-realtime-2` for realtime voice/translation unless endpoint/API testing finds a major blocker.
+- Keep `gpt-realtime-translate` as a dedicated translation fallback/profile.
+- Use GPT-5.5 with `xhigh` reasoning intent for transcript summary generation.
+
+Rationale:
+
+- This preserves the phone-only MVP architecture while unblocking non-secret OpenAI integration scaffolding.
+- Official OpenAI docs verified on 2026-05-24 list `gpt-realtime-2` as the most capable realtime voice model and `gpt-realtime-translate` as a dedicated streaming speech-to-speech translation model.
+- Official Realtime client-secret docs still recommend server-minted ephemeral credentials for browser/mobile clients, but Tom accepted a phone-local user-provided credential path for MVP rather than introducing an app backend.
+
+Implications:
+
+- Credential UX, encrypted storage, redaction, reset/removal, and credential-invalid recovery are MVP implementation requirements.
+- A real OpenAI network smoke test requires Tom to provide a key out-of-band or interactively at that point; no placeholder or real key belongs in the repo.
+- If live endpoint/API testing shows `gpt-realtime-2` cannot meet translation needs, use the dedicated `gpt-realtime-translate` profile without adding backend infrastructure.
 
 ## 2026-05-24 - Initial MVP Architecture
 
@@ -93,4 +121,4 @@ Rationale:
 Implications:
 
 - Future implementation can widen the realtime target table only after current OpenAI docs, API metadata, or live API validation provides stronger evidence.
-- Unsupported target UI should make fallback state visible and should stay direct phone-to-OpenAI once #23 resolves credential handling.
+- Unsupported target UI should make fallback state visible and should stay direct phone-to-OpenAI using the accepted encrypted local credential/session approach.

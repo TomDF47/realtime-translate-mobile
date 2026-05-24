@@ -21,7 +21,7 @@ Android-first Flutter app for live speech translation, designed to stay iOS-comp
 - Mobile app: Flutter, Android-first, iOS-compatible later
 - MVP backend: none
 - Routine network path: phone app connects directly to the OpenAI API only
-- Main translation model: `gpt-realtime-translate`
+- Preferred realtime voice/translation model: `gpt-realtime-2`, with `gpt-realtime-translate` kept as a dedicated translation fallback/profile
 - AI chat: scoped explicitly to `This meeting` or `All meetings`
 - Data storage: local encrypted device storage only
 - Meeting management: local meetings with transcript/history/summary metadata stored on phone
@@ -38,7 +38,7 @@ Planning repo created. Supplied Android mockups have been received, copied into 
 
 The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, encrypted local meeting storage, local meeting management, a centralized language support/fallback table, accessibility/responsive text coverage, and a repeatable local supply-chain/security gate. The current app can render the phone-local welcome/start screen, microphone permission denied state, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with stored metadata, select-and-continue behavior that appends local transcript history, delete controls, local language target options, a fallback-pending state for unsupported realtime targets, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, or server-side transcript handling.
 
-OpenAI Realtime verification for #6 found a credential blocker: `gpt-realtime-translate` is documented, but OpenAI's client-safe Realtime client secrets for web/mobile are minted by a developer-controlled server using a standard API key. That conflicts with the phone-only/no-backend MVP rule until #23 decides the accepted credential/session approach.
+OpenAI Realtime verification for #6 found that `gpt-realtime-2` is documented as the most capable realtime voice model and `gpt-realtime-translate` is documented as a dedicated streaming speech-to-speech translation model. Official client-safe Realtime client secrets are still minted by a developer-controlled server using a standard API key, so #23 closed with Tom's MVP decision: proceed phone-to-OpenAI directly with user-provided OpenAI credential/session material stored only in encrypted local device storage, do not commit or bundle any key, and ask Tom for an API key only at the first real OpenAI network smoke/integration test.
 
 Language support verification for #7 on 2026-05-24 used the official OpenAI Realtime Translation guide, `gpt-realtime-translate` model page, and translation client-secret API reference. Those docs confirm the dedicated `/v1/realtime/translations` endpoint and `audio.output.language` target parameter, but they do not expose an authoritative target-language enum. The app therefore uses a conservative realtime target table for English, Spanish, and French, treats broader targets such as Japanese as direct-OpenAI fallback-pending, and keeps fallback phone-only with no AWS, backend, cloud sync, or server-side transcript handling.
 
@@ -114,7 +114,7 @@ flutter devices
 flutter run -d <android-emulator-id>
 ```
 
-Do not add real credentials to `.env.example` or any committed file. Use uncommitted local env files only for local development placeholders. Mobile credential/session material must not be bundled into the app. #23 must decide the current OpenAI-supported direct mobile credential/session approach before #6 implementation resumes.
+Do not add real credentials to `.env.example` or any committed file. Use uncommitted local env files only for local development placeholders. Mobile credential/session material must not be bundled into the app. #23 accepted a phone-local user-provided credential/session flow; implementation should store that material only in encrypted local device storage and include a removal/reset path.
 
 For local Android release-signing experiments, copy [android/key.properties.example](android/key.properties.example) to `android/key.properties` and use local placeholder values only. `android/key.properties` is ignored and must not be committed.
 
@@ -134,6 +134,7 @@ Closed planning and implementation intake:
 - #18 Define Flutter design tokens and reusable mockup components
 - #20 Implement local meeting management
 - #22 Implement dependency and supply-chain cybersecurity controls
+- #23 Decide safe direct OpenAI mobile credential approach
 
 Open MVP/planning work:
 
@@ -145,7 +146,6 @@ Open MVP/planning work:
 - #15 Implement privacy-safe local logging and diagnostics controls
 - #19 Maintain README and agent handoff docs during implementation
 - #21 Add email export for transcripts and summaries
-- #23 Decide safe direct OpenAI mobile credential approach
 
 Deferred V2/future work:
 
@@ -166,13 +166,14 @@ The mockups remain the visual source of truth. MVP behavior has changed to phone
 ## Implementation Guardrails
 
 - Never embed a standard OpenAI API key in mobile source, committed config, assets, tests, screenshots, or build outputs.
+- User-provided OpenAI credential/session material may be stored only in encrypted local device storage and must have a clear reset/removal path.
 - Preserve the phone-only MVP architecture: no app backend, AWS, Lambda, token broker, cloud sync, server mailer, or server-side transcript handling.
 - Direct OpenAI API calls are the only routine network path for product behavior.
 - Keep AI chat on a direct OpenAI path scoped explicitly to `This meeting` or `All meetings`.
 - Store meeting history, transcripts, summaries, recipient preferences, and sensitive local data only in encrypted device storage for the MVP.
 - Use device-native mail/share composer semantics where practical for export; do not add an outbound mail backend.
 - Keep logs, crash reports, analytics, diagnostics, screenshots, and test output free of speech, transcript payloads, prompts, translations, summaries, recipient lists, OpenAI credentials/session material, and API keys.
-- Verify current OpenAI Realtime Translation target language support, direct mobile credential/session support, and summary model/reasoning support during implementation.
+- Verify current OpenAI Realtime model/endpoint behavior, Realtime Translation target language support, and summary model/reasoning support during implementation.
 - Treat cybersecurity as a first-class acceptance criterion: dependency hygiene, supply-chain checks, mobile permission minimization, secret scanning, and no transcript leakage are required.
 
 ## Verification

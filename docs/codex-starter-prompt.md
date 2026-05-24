@@ -25,11 +25,11 @@ Product decisions:
 - Flutter mobile app, Android-first, iOS-compatible later.
 - MVP is phone-only aside from direct OpenAI API calls.
 - No AWS, Lambda, token broker, app backend, cloud identity gate, cloud sync, server mailer, or server-side transcript handling in MVP.
-- Main translation model: gpt-realtime-translate.
+- Preferred realtime voice/translation model: gpt-realtime-2; keep gpt-realtime-translate as a dedicated translation fallback/profile.
 - AI chat must be scoped explicitly to This meeting or All meetings.
 - Meetings, transcripts, summaries, recipient preferences, sensitive preferences, and credential/session material are local encrypted device storage only.
 - Email export uses device-native mail/share composer semantics where practical and no outbound mail backend.
-- Summary export product intent is GPT-5.5 with extra-high reasoning; verify current OpenAI API support before coding.
+- Summary export product intent is GPT-5.5 with xhigh reasoning; verify current OpenAI API support before coding.
 
 Important machine detail:
 - Use `android-pixel9-headless` for emulator testing.

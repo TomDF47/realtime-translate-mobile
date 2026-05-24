@@ -99,12 +99,13 @@ Mobile-safe values may include app environment names, package names, model inten
 
 Important placeholders:
 
-- `OPENAI_REALTIME_MODEL`: expected default is `gpt-realtime-translate`.
+- `OPENAI_REALTIME_MODEL`: expected default is `gpt-realtime-2`.
+- `OPENAI_TRANSLATION_FALLBACK_MODEL`: dedicated translation fallback/profile is `gpt-realtime-translate`.
 - `OPENAI_SUMMARY_MODEL_INTENT`: product intent is GPT-5.5 for meeting summaries.
-- `OPENAI_SUMMARY_REASONING_INTENT`: product intent is extra-high reasoning for meeting summaries.
+- `OPENAI_SUMMARY_REASONING_INTENT`: product intent is `xhigh` reasoning for meeting summaries.
 - `ANDROID_PACKAGE_NAME`: current scaffold value is `com.tomdf47.realtime_translate_mobile`.
 
-Implementation must verify current OpenAI API model, reasoning parameter, realtime, and direct mobile credential/session support before coding against these intent values.
+Implementation must verify current OpenAI API model, reasoning parameter, and realtime endpoint behavior before coding against these intent values. #23 accepted user-provided OpenAI credential/session material stored only in encrypted local device storage; no key may be committed, bundled, logged, or captured in screenshots.
 
 ## Android Signing Placeholders
 

@@ -14,7 +14,7 @@ Build an Android-first, iOS-compatible Flutter app for continuous live speech tr
 | Platform order | Android first, iOS-compatible later |
 | MVP backend | None |
 | Routine network path | Phone app connects directly to the OpenAI API only |
-| Live model | `gpt-realtime-translate` |
+| Live model | Prefer `gpt-realtime-2` for realtime voice/translation; keep `gpt-realtime-translate` as a dedicated translation fallback/profile |
 | AI chat | Direct OpenAI path scoped explicitly to `This meeting` or `All meetings` |
 | Storage | Encrypted local device storage only |
 | Meetings | Local meeting history, transcript/history, and summary metadata stored on phone |
@@ -113,15 +113,17 @@ The MVP must not include an app backend.
 
 ## OpenAI Requirements
 
-- Use `gpt-realtime-translate` as the primary live translation model.
+- Prefer `gpt-realtime-2` for the realtime voice/translation path unless endpoint/API testing finds a major blocker.
+- Keep `gpt-realtime-translate` as a dedicated translation fallback/profile; do not assume it is based on the realtime2 path.
 - Connect from the phone app directly to OpenAI.
 - Stream microphone audio directly to OpenAI.
 - Receive translated audio and transcript deltas while the speaker is still talking.
 - Recover from direct credential/session expiry, network drops, transient OpenAI errors, and app lifecycle interruption with bounded reconnect/backoff behavior.
 - Keep user-facing state clear during connecting, reconnecting, credential-invalid, unsupported-language, offline, permission-denied, and model/API error states.
 - Verify current OpenAI Realtime Translation language support during implementation rather than hard-coding stale external assumptions.
-- Verify the current OpenAI API authentication/session approach for direct mobile use before coding. Never bundle, hard-code, or commit a standard OpenAI API key in mobile source, config, assets, tests, screenshots, or build outputs.
-- If implementation uses user-provided OpenAI credential material, store it only in encrypted local storage, redact it from logs/screenshots/test output, and provide a clear removal/reset path.
+- The accepted MVP credential approach is user-provided OpenAI credential/session material stored only in encrypted local device storage. Never bundle, hard-code, or commit a standard OpenAI API key in mobile source, config, assets, tests, screenshots, or build outputs.
+- Ask Tom for an OpenAI API key only at the first real OpenAI network smoke/integration test.
+- Store credential/session material only in encrypted local storage, redact it from logs/screenshots/test output, and provide a clear removal/reset path.
 
 ## Language Support And Fallback
 
@@ -136,7 +138,7 @@ Implementation requirements:
 - Make fallback behavior explicit in the UI rather than failing silently.
 - Keep fallback AI chat and translation routes phone-only except for direct OpenAI calls.
 
-Current implementation note: language support was verified on 2026-05-24 against the official OpenAI Realtime Translation guide, `gpt-realtime-translate` model page, and translation client-secret API reference. The official docs confirm the dedicated `/v1/realtime/translations` endpoint, streaming translated audio plus transcript deltas, one session per output language, and the `audio.output.language` target parameter, but they do not publish an authoritative target-language enum. Until OpenAI publishes or exposes that enum, the app uses a conservative realtime target list of English, Spanish, and French; broader targets such as Japanese are shown as direct-OpenAI fallback-pending and must not use AWS, an app backend, cloud sync, or server-side transcript handling.
+Current implementation note: language support was verified on 2026-05-24 against the official OpenAI Realtime Translation guide, `gpt-realtime-translate` model page, and translation client-secret API reference. The official docs confirm the dedicated `/v1/realtime/translations` endpoint, streaming translated audio plus transcript deltas, one session per output language, and the `audio.output.language` target parameter, but they do not publish an authoritative target-language enum. The official model docs also list `gpt-realtime-2` as the most capable realtime voice model. Until endpoint/API testing proves the final route, the app prefers `gpt-realtime-2` for realtime voice/translation work, keeps `gpt-realtime-translate` as a dedicated translation fallback/profile, uses a conservative realtime target list of English, Spanish, and French, and shows broader targets such as Japanese as direct-OpenAI fallback-pending. Fallback must not use AWS, an app backend, cloud sync, or server-side transcript handling.
 
 ## Meeting Management Requirements
 
@@ -169,8 +171,7 @@ Current implementation note: language support was verified on 2026-05-24 against
 - App remembers the recipient list and the last selected recipients locally.
 - Email export should use device-native mail/share composer semantics where practical.
 - The MVP must not operate an outbound mail backend.
-- If `Summary` or `Both` is selected, product intent is GPT-5.5 with extra-high reasoning to summarize the transcript.
-- Implementation must verify current OpenAI API model and reasoning-parameter support before coding summary generation.
+- If `Summary` or `Both` is selected, product intent is GPT-5.5 with `xhigh` reasoning to summarize the transcript through the Responses API.
 - Summary output must include:
   - brief executive summary paragraph
   - all critical talking points and outcomes as bullet points
@@ -245,6 +246,7 @@ Closed planning and implementation intake:
 - #18 Define Flutter design tokens and reusable mockup components.
 - #20 Implement local meeting management.
 - #22 Implement dependency and supply-chain cybersecurity controls.
+- #23 Decide safe direct OpenAI mobile credential approach.
 
 Open MVP/planning work:
 
@@ -256,7 +258,6 @@ Open MVP/planning work:
 - #15 Implement privacy-safe local logging and diagnostics controls.
 - #19 Maintain README and agent handoff docs during implementation.
 - #21 Add email export for transcripts and summaries.
-- #23 Decide safe direct OpenAI mobile credential approach.
 
 Deferred V2/future issues:
 
@@ -280,8 +281,7 @@ Deferred V2/future issues:
 ## Open Questions To Resolve During Implementation
 
 - Final Android package name and signing certificate details.
-- Current OpenAI-supported direct mobile credential/session approach. Verification on 2026-05-24 confirmed `gpt-realtime-translate` exists, but OpenAI's client-safe Realtime client secrets are minted by a developer-controlled server using a standard API key; #23 must decide how to reconcile that with the phone-only/no-backend MVP rule.
+- The accepted credential/session implementation details for user-provided OpenAI credential material, including UX, encrypted storage reset/removal, and credential-invalid recovery.
 - Current OpenAI Realtime Translation docs do not expose an authoritative target output language enum. The MVP currently uses the conservative English/Spanish/French realtime table and direct-OpenAI fallback-pending handling described above.
-- Current OpenAI API support for GPT-5.5 and extra-high reasoning parameters for summary generation.
-- Whether the MVP uses user-provided OpenAI credential material or another currently supported direct OpenAI approach.
+- Live endpoint/API behavior for `gpt-realtime-2` versus the dedicated `gpt-realtime-translate` fallback/profile.
 - Whether diagnostics/crash reporting is included in MVP or deferred.

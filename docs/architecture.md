@@ -7,7 +7,8 @@ This document summarizes the implementation boundaries from the canonical [live 
 ```text
 Flutter phone app
   -> OpenAI API directly
-       model: gpt-realtime-translate
+       preferred model: gpt-realtime-2
+       dedicated translation fallback/profile: gpt-realtime-translate
        sends microphone audio
        receives translated audio and transcript deltas
        target language must pass the local realtime language table
@@ -15,8 +16,7 @@ Flutter phone app
 Flutter phone app
   -> OpenAI API directly for AI chat and summaries
        scope: This meeting or All meetings
-       product intent for export summaries: GPT-5.5 with extra-high reasoning
-       implementation must verify current model/reasoning support before coding
+       product intent for export summaries: GPT-5.5 with xhigh reasoning
 
 Flutter phone app
   -> encrypted local device storage
@@ -29,7 +29,7 @@ Flutter phone app
        no app-operated outbound mail backend
 ```
 
-There is no MVP AWS, Lambda, token broker, app backend, cloud sync, cloud identity gate, or server-side transcript handling. Deferred cloud/backend/auth ideas live in [docs/v2-future-scope.md](v2-future-scope.md).
+There is no MVP AWS, Lambda, token broker, app backend, cloud sync, cloud identity gate, or server-side transcript handling. The accepted MVP credential approach is user-provided OpenAI credential/session material stored only in encrypted local device storage. Deferred cloud/backend/auth ideas live in [docs/v2-future-scope.md](v2-future-scope.md).
 
 ## Hard Boundaries
 
@@ -46,7 +46,7 @@ There is no MVP AWS, Lambda, token broker, app backend, cloud sync, cloud identi
 - Flutter app with Android-first UX and iOS-compatible structure.
 - Phone-local setup/start flow rather than cloud sign-in gate.
 - Runtime microphone permissions and explicit session state transitions.
-- Direct OpenAI realtime session connection, reconnect, teardown, and error handling.
+- Direct OpenAI realtime session connection, credential-invalid handling, reconnect, teardown, and error handling.
 - Local encrypted storage for preferences, recent languages, meetings, transcript/history, summary metadata, recipient preferences, and any credential/session material.
 - Meeting management for starting a new meeting, selecting an old meeting, and continuing from it.
 - UI surfaces from [docs/mockup-ux-spec.md](mockup-ux-spec.md) and [assets/mockups](../assets/mockups), adapted for the phone-only MVP.
@@ -55,11 +55,12 @@ There is no MVP AWS, Lambda, token broker, app backend, cloud sync, cloud identi
 
 ## OpenAI Responsibilities
 
-- Live speech translation through `gpt-realtime-translate`.
+- Realtime voice/translation through `gpt-realtime-2` unless endpoint/API testing finds a major blocker.
+- Dedicated translation fallback/profile through `gpt-realtime-translate`.
 - Stream translated audio and transcript deltas while the speaker is still talking.
 - Support AI chat over local meeting context sent directly from the phone app.
 - Support summary generation for email export if current model and reasoning parameters allow it.
-- Language, authentication/session, realtime, and reasoning-parameter support must be verified during implementation rather than hard-coded from stale assumptions.
+- Endpoint/model behavior, realtime translation target languages, and reasoning-parameter support must be verified during implementation rather than hard-coded from stale assumptions.
 
 ## Email Export Boundary
 
@@ -91,7 +92,7 @@ docs/                        Product, architecture, setup, testing, decisions
 assets/mockups/              Supplied Android mockups
 ```
 
-The current app shell renders the phone-local welcome/start surface, Android microphone permission gate, mockup-derived live translation surfaces, scoped AI chat sheet, encrypted local meeting history sheet, and local email export sheet. The lifecycle controller models permission, listening, read-aloud-paused, reconnecting, stop, app background/foreground, and audio-route state transitions. The storage layer persists meetings, transcript/history entries, summary metadata, recent language routes, recipient preferences, sensitive preferences, and future credential/session material through `flutter_secure_storage`, with Android backup disabled for app data. Meeting management can start a new local meeting, select a stored meeting, reopen it as the active encrypted local context, append continuation transcript history, and delete stored meeting metadata. Real microphone capture, direct OpenAI streaming, AI chat request execution, summary generation, native share handoff, and logging implementations remain scoped to their GitHub issues.
+The current app shell renders the phone-local welcome/start surface, Android microphone permission gate, mockup-derived live translation surfaces, scoped AI chat sheet, encrypted local meeting history sheet, and local email export sheet. The lifecycle controller models permission, listening, read-aloud-paused, reconnecting, stop, app background/foreground, and audio-route state transitions. The storage layer persists meetings, transcript/history entries, summary metadata, recent language routes, recipient preferences, sensitive preferences, and future credential/session material through `flutter_secure_storage`, with Android backup disabled for app data. Meeting management can start a new local meeting, select a stored meeting, reopen it as the active encrypted local context, append continuation transcript history, and delete stored meeting metadata. Real microphone capture, direct OpenAI streaming, AI chat request execution, summary generation, native share handoff, credential reset/removal UI, and logging implementations remain scoped to their GitHub issues.
 
 Language support is centralized in `lib/src/language/language_support.dart`. The current table is conservative because official OpenAI Realtime Translation docs confirm the target-language parameter but do not publish a target-language enum. Default target options expose only English, Spanish, and French for realtime output; broader targets such as Japanese are represented as direct-OpenAI fallback-pending and stay inside the same phone-only privacy boundary.
 

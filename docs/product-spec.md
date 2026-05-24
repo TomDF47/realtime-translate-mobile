@@ -49,11 +49,13 @@ The revised MVP keeps the visual direction but adapts sign-in affordances into p
 
 ### OpenAI
 
-- Live translation uses `gpt-realtime-translate`.
+- Live translation prefers `gpt-realtime-2` for realtime voice/translation.
+- Keep `gpt-realtime-translate` as a dedicated translation fallback/profile; do not assume it is based on the realtime2 model path.
 - App connects directly to the OpenAI API from the phone.
 - Translation path should support streaming translated audio and transcript deltas.
 - AI chat and summary generation use direct OpenAI calls from the phone.
-- Account for current platform limits: broad input language coverage, narrower target output language coverage, direct credential/session support, and reasoning parameter availability must be verified before implementation.
+- The accepted MVP credential approach is user-provided OpenAI credential/session material stored only in encrypted local device storage; no key may be committed or bundled.
+- Account for current platform limits: broad input language coverage, narrower target output language coverage, endpoint/model support, and reasoning parameter availability must be verified during implementation.
 
 ## Meeting Management
 
@@ -79,7 +81,7 @@ The revised MVP keeps the visual direction but adapts sign-in affordances into p
 - App remembers the recipient list and last selected recipients locally.
 - Export should use device-native mail/share composer semantics where practical.
 - No outbound mail backend in MVP.
-- If Summary or Both is selected, product intent is GPT-5.5 with extra-high reasoning. Implementation must verify current OpenAI API model and reasoning support before coding.
+- If Summary or Both is selected, product intent is GPT-5.5 with `xhigh` reasoning through the Responses API.
 
 ## Privacy And Security
 

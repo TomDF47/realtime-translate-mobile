@@ -47,9 +47,10 @@ If the spec, README, mockup spec, decision log, and issue scope disagree, stop a
 - Mobile app: Flutter, Android-first, structured to remain iOS-compatible later.
 - MVP backend: none.
 - Routine network path: the phone app connects directly to the OpenAI API only.
-- Main translation model: `gpt-realtime-translate`.
+- Preferred realtime voice/translation model: `gpt-realtime-2`, with `gpt-realtime-translate` kept as a dedicated translation fallback/profile if endpoint testing shows it is the better fit.
 - AI chat scope must be explicit: `This meeting` or `All meetings`.
 - Never embed a standard OpenAI API key in mobile code, mobile config, assets, build outputs, screenshots, or tests.
+- User-provided OpenAI credential/session material may be stored only in encrypted local device storage; ask Tom for an API key only at the first real OpenAI network smoke/integration test.
 - Do not add AWS API Gateway, Lambda, token broker, app backend, cloud sync, cloud identity gate, server mailer, or server-side transcript handling to the MVP.
 - User meeting transcripts, summaries, recipient lists, sensitive preferences, and credential/session material must stay in encrypted local device storage only for the MVP.
 - Logs, analytics, crashes, screenshots, diagnostics, and tests must redact secrets and exclude audio/transcript/prompt/summary/export payloads.
