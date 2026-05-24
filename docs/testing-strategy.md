@@ -113,7 +113,9 @@ flutter build apk --debug
 scripts/build_debug_apk_artifact.sh
 scripts/android_emulator_e2e.sh --apk /tmp/<debug-apk-name>.apk --verify-credential-reset
 scripts/android_emulator_e2e.sh --apk /tmp/<debug-apk-name>.apk --verify-invalid-credential-recovery
+scripts/android_emulator_e2e.sh --require-device-audio --audio-preflight-only
 scripts/android_emulator_e2e.sh --with-live-credential
+scripts/android_emulator_e2e.sh --require-device-audio --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
@@ -121,6 +123,8 @@ scripts/build_debug_apk_artifact.sh --release
 scripts/final_qa_gate.sh --emulator-smoke
 scripts/final_qa_gate.sh --require-store-signing
 ```
+
+For physical microphone or audible speaker validation, run `scripts/android_emulator_e2e.sh --require-device-audio --audio-preflight-only` first. The check fails if the selected emulator was launched with `-no-audio`, writes `audio-preflight.txt` under the artifact directory, and does not install the APK, read the local OpenAI secret, launch the app, or clear app data. Add `--require-device-audio` to any later installed-app live-audio run so a no-audio emulator cannot silently produce a misleading pass.
 
 For APK handoff without live OpenAI quota, `scripts/build_debug_apk_artifact.sh` produces `/tmp/realtime-translate-mobile-<mode>-<commit>-<timestamp>.apk` plus a `.sha256` sidecar. Debug is the default, `--debug-live-events` produces the matching debug-only E2E proof build artifact, and `--release` produces a release-mode APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback; debug-signed release artifacts are not store-ready. The script does not read the local OpenAI secret file.
 
@@ -152,6 +156,8 @@ Current GitHub Actions run on pull requests and pushes to `main`:
 Android emulator smoke is intentionally local/manual because the project uses Tom's `android-pixel9-headless` machine workflow.
 
 Latest focused validation for the unsupported-language recovery UI slice was 2026-05-24 AWST. `flutter test test/widget_test.dart test/live_session_controller_test.dart` and `git diff --check` passed. The slice carries the realtime recovery action into session state, labels unsupported-language errors as `Language not supported`, and hides the retry action for that non-retryable configuration failure. It adds no dependencies, Android permissions, backend routes, OpenAI request-format changes, production debug hooks, live OpenAI calls, or credential logging.
+
+Latest host validation for the device-audio preflight slice was 2026-05-24 22:14 AWST. `bash -n scripts/android_emulator_e2e.sh` passed. `scripts/android_emulator_e2e.sh --require-device-audio --audio-preflight-only` failed as expected because the current `Pixel_9_API_36_Play` process was launched with `-no-audio`; proof was written to `/tmp/realtime-translate-mobile-e2e-audio-preflight-precommit/audio-preflight.txt`. The preflight did not install an APK, read the local OpenAI secret, launch the app, or clear app data. `scripts/final_qa_gate.sh` passed with `flutter pub get`, `flutter analyze`, `flutter test` (82 tests), docs check, supply-chain check, shell syntax checks, `git diff --check`, and fresh debug/release APK builds. This slice adds no dependency, Android permission, backend route, OpenAI request change, live credential handling, audio recording, or physical microphone/audible speaker claim.
 
 Latest focused validation for the direct realtime recovery-label slice was 2026-05-24 20:52 AWST. `flutter test test/live_session_controller_test.dart test/widget_test.dart test/realtime_translation_coordinator_test.dart` passed. The slice preserves only sanitized failure categories in session state, renders rate-limit recovery without raw OpenAI error details, and proves credential-expiry/rejection decisions close capture/realtime/playback resources. It made no live OpenAI request, read no live credential, and made no microphone or audible speaker-output claim.
 

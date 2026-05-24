@@ -59,7 +59,9 @@ flutter build apk --debug
 scripts/build_debug_apk_artifact.sh
 scripts/android_emulator_e2e.sh --apk /tmp/<debug-apk-name>.apk --verify-credential-reset
 scripts/android_emulator_e2e.sh --apk /tmp/<debug-apk-name>.apk --verify-invalid-credential-recovery
+scripts/android_emulator_e2e.sh --require-device-audio --audio-preflight-only
 scripts/android_emulator_e2e.sh --with-live-credential
+scripts/android_emulator_e2e.sh --require-device-audio --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
@@ -74,7 +76,7 @@ scripts/final_qa_gate.sh --require-store-signing
 
 `scripts/check_android_release_signing.sh` is the store-ready Android signing preflight. It requires local uncommitted `android/key.properties`, required signing fields, non-placeholder values, and an existing keystore file outside the repo or ignored by git. With `--apk`, it also verifies the APK signature and fails if the artifact is Android debug-signed. `scripts/final_qa_gate.sh --require-store-signing` runs that preflight before the release build and checks the fresh release APK afterward. It reports only pass/fail status and never prints signing passwords, aliases, or keystore material.
 
-The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator when a live credential is requested, can run a non-live credential save/remove/reset gate with `--verify-credential-reset`, can run a non-secret invalid-placeholder auth recovery gate with `--verify-invalid-credential-recovery`, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
+The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator when a live credential is requested, can run a non-live credential save/remove/reset gate with `--verify-credential-reset`, can run a non-secret invalid-placeholder auth recovery gate with `--verify-invalid-credential-recovery`, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit. Use `--require-device-audio` before any physical microphone or audible speaker validation claim. The preflight fails an emulator whose process arguments contain `-no-audio` and writes `audio-preflight.txt` to the artifact directory. `--audio-preflight-only` performs only that check and does not install the APK, read the local OpenAI secret, launch the app, or clear app data.
 
 The `--debug-live-events` mode requires the debug Dart define shown above. It is an installed-app coordinator/storage/playback persistence proof that reports only sanitized row/audio/context counts: after the generated-event proof, the E2E driver restarts the app, verifies the generated row remains visible in encrypted meeting history, reopens the meeting, and verifies `This meeting` AI context sees the persisted local transcript count. It does not use a production hook, live OpenAI speech, emulator microphone input, or audible speaker validation.
 
@@ -92,7 +94,7 @@ emulator -no-window
 
 It is known to segfault on this Fedora/KDE/Wayland setup.
 
-Microphone injection status as of 2026-05-24 18:27 AWST: the current `android-pixel9-headless` launcher passes `-no-audio`, so emulator microphone capture receives zeroed input. The Android emulator exposes host microphone passthrough through `-allow-host-audio`, but the local tooling does not provide a reliable documented way to feed a generated WAV/PCM stream into the emulator microphone for repeatable E2E. Use the debug generated-event proof for installed-app coordinator/storage/playback validation until a real device, a host-audio launcher variant, or a controllable virtual audio device is added and documented.
+Microphone injection status as of 2026-05-24 18:27 AWST: the current `android-pixel9-headless` launcher passes `-no-audio`, so emulator microphone capture receives zeroed input. The Android emulator exposes host microphone passthrough through `-allow-host-audio`, but the local tooling does not provide a reliable documented way to feed a generated WAV/PCM stream into the emulator microphone for repeatable E2E. As of the device-audio preflight slice, `scripts/android_emulator_e2e.sh --require-device-audio --audio-preflight-only` is the required first check before claiming physical microphone or audible speaker proof; with the current no-audio launcher, it should fail clearly and record the blocker in `audio-preflight.txt`. Use the debug generated-event proof for installed-app coordinator/storage/playback validation until a real device, a host-audio launcher variant, or a controllable virtual audio device is added and documented.
 
 Android environment variables verified by `flutter doctor -v`:
 

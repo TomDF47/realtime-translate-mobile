@@ -15,10 +15,13 @@ USE_LIVE_CREDENTIAL=0
 RUN_DEBUG_LIVE_EVENTS=0
 VERIFY_CREDENTIAL_RESET=0
 VERIFY_INVALID_CREDENTIAL_RECOVERY=0
+REQUIRE_DEVICE_AUDIO=0
+AUDIO_PREFLIGHT_ONLY=0
+SHOULD_CLEANUP_APP_DATA=0
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--debug-live-events] [--verify-credential-reset] [--verify-invalid-credential-recovery] [--apk PATH]
+Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--debug-live-events] [--verify-credential-reset] [--verify-invalid-credential-recovery] [--require-device-audio] [--audio-preflight-only] [--apk PATH]
 
 Installs the debug APK on Pixel_9_API_36_Play or an already-connected Android
 emulator, drives the phone-local setup flow with UIAutomator/adb, writes
@@ -42,6 +45,12 @@ Options:
                           grant microphone permission, and verify a direct
                           OpenAI auth rejection fails closed to setup-required.
                           Does not read live secrets.
+  --require-device-audio  Before installed-app validation, fail if the selected
+                          emulator/device is known not to have usable audio.
+                          This currently rejects emulators launched with
+                          -no-audio so mic/speaker claims cannot pass silently.
+  --audio-preflight-only  Run only the device-audio preflight and exit. Does not
+                          install the APK, read live secrets, or launch the app.
   --apk PATH              APK to install. Defaults to build/app/outputs/flutter-apk/app-debug.apk.
   --help                  Show this help.
 USAGE
@@ -63,6 +72,15 @@ while (($#)); do
       ;;
     --verify-invalid-credential-recovery)
       VERIFY_INVALID_CREDENTIAL_RECOVERY=1
+      shift
+      ;;
+    --require-device-audio)
+      REQUIRE_DEVICE_AUDIO=1
+      shift
+      ;;
+    --audio-preflight-only)
+      AUDIO_PREFLIGHT_ONLY=1
+      REQUIRE_DEVICE_AUDIO=1
       shift
       ;;
     --apk)
@@ -95,6 +113,11 @@ if ((USE_LIVE_CREDENTIAL)) && ((VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
   exit 2
 fi
 
+if ((AUDIO_PREFLIGHT_ONLY)) && ((USE_LIVE_CREDENTIAL || RUN_DEBUG_LIVE_EVENTS || VERIFY_CREDENTIAL_RESET || VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
+  echo "--audio-preflight-only cannot be combined with app-flow validation options" >&2
+  exit 2
+fi
+
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
 export JAVA_HOME="${JAVA_HOME:-$HOME/.local/share/jdks/temurin-21}"
@@ -108,8 +131,10 @@ log() {
 
 fail() {
   printf '[android-e2e] ERROR: %s\n' "$*" >&2
-  dump_ui_to "$ARTIFACT_DIR/failure-window.xml" || true
-  screencap_to "$ARTIFACT_DIR/failure.png" || true
+  if ((AUDIO_PREFLIGHT_ONLY == 0)); then
+    dump_ui_to "$ARTIFACT_DIR/failure-window.xml" || true
+    screencap_to "$ARTIFACT_DIR/failure.png" || true
+  fi
   exit 1
 }
 
@@ -166,6 +191,66 @@ wait_for_boot() {
     sleep 1
   done
   fail "emulator did not report boot_completed=1"
+}
+
+selected_device_is_emulator() {
+  [[ "$ADB_SERIAL" == emulator-* ]] && return 0
+  [[ "$(adb_cmd shell getprop ro.kernel.qemu 2>/dev/null | tr -d '\r')" == "1" ]]
+}
+
+emulator_process_args() {
+  local serial_port
+  serial_port="${ADB_SERIAL#emulator-}"
+  ps -eo args |
+    awk -v serial="$ADB_SERIAL" -v port="$serial_port" '
+      /[q]emu-system/ || /[e]mulator/ {
+        if ($0 ~ ("-port " port) || $0 ~ ("-ports " port ",") || $0 ~ serial || $0 ~ "Pixel_9_API_36_Play") {
+          print
+        }
+      }
+    ' |
+    head -n 1
+}
+
+run_audio_preflight() {
+  local report_path model api is_emulator args status detail
+  report_path="$ARTIFACT_DIR/audio-preflight.txt"
+  model="$(adb_cmd shell getprop ro.product.model 2>/dev/null | tr -d '\r' || true)"
+  api="$(adb_cmd shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r' || true)"
+  is_emulator="false"
+  args=""
+  status="pass"
+  detail="physical-or-unknown-device; emulator -no-audio not detected"
+
+  if selected_device_is_emulator; then
+    is_emulator="true"
+    args="$(emulator_process_args || true)"
+    detail="emulator audio is not explicitly disabled"
+    if [[ -z "$args" ]]; then
+      status="fail"
+      detail="could not inspect emulator process arguments for audio flags"
+    elif grep -Fq -- "-no-audio" <<<"$args"; then
+      status="fail"
+      detail="emulator was launched with -no-audio"
+    fi
+  fi
+
+  {
+    printf 'status=%s\n' "$status"
+    printf 'device=%s\n' "$ADB_SERIAL"
+    printf 'model=%s\n' "$model"
+    printf 'api=%s\n' "$api"
+    printf 'emulator=%s\n' "$is_emulator"
+    printf 'detail=%s\n' "$detail"
+    if [[ -n "$args" ]]; then
+      printf 'emulator_args=%s\n' "$args"
+    fi
+  } >"$report_path"
+
+  if [[ "$status" != "pass" ]]; then
+    fail "device audio preflight failed: $detail. See $report_path"
+  fi
+  log "Device audio preflight passed: $detail"
 }
 
 dump_ui() {
@@ -286,14 +371,14 @@ tap_permission_allow_if_present() {
 }
 
 cleanup_app_data() {
-  if [[ -n "${ADB_SERIAL:-}" ]]; then
+  if ((SHOULD_CLEANUP_APP_DATA)) && [[ -n "${ADB_SERIAL:-}" ]]; then
     adb_cmd shell pm clear "$PACKAGE_NAME" >/dev/null 2>&1 || true
   fi
 }
 
 trap cleanup_app_data EXIT
 
-if [[ ! -f "$APK_PATH" ]]; then
+if ((AUDIO_PREFLIGHT_ONLY == 0)) && [[ ! -f "$APK_PATH" ]]; then
   fail "APK not found: $APK_PATH. Build it first with: flutter build apk --debug"
 fi
 
@@ -312,8 +397,18 @@ fi
 ensure_emulator
 wait_for_boot
 
+if ((REQUIRE_DEVICE_AUDIO)); then
+  run_audio_preflight
+fi
+
+if ((AUDIO_PREFLIGHT_ONLY)); then
+  log "Audio preflight complete. Artifacts: $ARTIFACT_DIR"
+  exit 0
+fi
+
 log "Installing $APK_PATH"
 adb_cmd install -r -t "$APK_PATH" >/dev/null
+SHOULD_CLEANUP_APP_DATA=1
 cleanup_app_data
 
 log "Launching $PACKAGE_NAME"
