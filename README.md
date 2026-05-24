@@ -36,7 +36,7 @@ The app should feel premium, clean, and executive-grade. The MVP is phone-only a
 
 Planning repo created. Supplied Android mockups have been received, copied into [assets/mockups](assets/mockups), and captured in [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md). The canonical build-ready spec is [docs/live-translate-build-spec.md](docs/live-translate-build-spec.md).
 
-The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, encrypted local meeting storage, local meeting management, and a repeatable local supply-chain/security gate. The current app can render the phone-local welcome/start screen, microphone permission denied state, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with stored metadata, select-and-continue behavior that appends local transcript history, delete controls, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, or server-side transcript handling.
+The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, encrypted local meeting storage, local meeting management, accessibility/responsive text coverage, and a repeatable local supply-chain/security gate. The current app can render the phone-local welcome/start screen, microphone permission denied state, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with stored metadata, select-and-continue behavior that appends local transcript history, delete controls, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, or server-side transcript handling.
 
 OpenAI Realtime verification for #6 found a credential blocker: `gpt-realtime-translate` is documented, but OpenAI's client-safe Realtime client secrets for web/mobile are minted by a developer-controlled server using a standard API key. That conflicts with the phone-only/no-backend MVP rule until #23 decides the accepted credential/session approach.
 
@@ -72,6 +72,7 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [lib/src/mock/mock_live_translate_data.dart](lib/src/mock/mock_live_translate_data.dart): local-only sample session data for UI and widget tests.
 - [test/widget_test.dart](test/widget_test.dart): current Flutter widget smoke test.
 - [test/design_system_test.dart](test/design_system_test.dart): design-system unit/widget coverage.
+- [test/accessibility_responsive_test.dart](test/accessibility_responsive_test.dart): semantic-label and compact large-text coverage.
 - [android](android): Android Flutter project, app namespace, debug build config, and local signing placeholder.
 - [ios](ios): iOS-compatible Flutter project shell.
 
@@ -124,6 +125,7 @@ Closed planning and implementation intake:
 - #11 Document Android emulator workflow for Codex
 - #13 Implement microphone permissions and live session lifecycle
 - #16 Add CI quality gates for docs, Flutter, and secret safety
+- #17 Add accessibility and responsive text verification
 - #18 Define Flutter design tokens and reusable mockup components
 - #20 Implement local meeting management
 - #22 Implement dependency and supply-chain cybersecurity controls
@@ -137,7 +139,6 @@ Open MVP/planning work:
 - #12 Create phone-only MVP test strategy
 - #14 Harden direct OpenAI realtime resilience
 - #15 Implement privacy-safe local logging and diagnostics controls
-- #17 Add accessibility and responsive text verification
 - #19 Maintain README and agent handoff docs during implementation
 - #21 Add email export for transcripts and summaries
 - #23 Decide safe direct OpenAI mobile credential approach

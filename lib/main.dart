@@ -882,24 +882,24 @@ class LiveSessionScreen extends StatelessWidget {
             onOpenMenu: onOpenMenu,
             onOpenAssistant: onOpenAssistant,
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.xs),
           SessionStatusCard(session: session),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.xs),
           _LanguageRouteRow(
             session: session,
             onDirectionSwitch: onDirectionSwitch,
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.xs),
           _FeatureRow(features: session.features),
           if (session.queueBanner != null) ...[
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.xs),
             QueueBanner(
               data: session.queueBanner!,
               onPrimaryPressed: onDirectionSwitch,
               onSecondaryPressed: onDirectionSwitch,
             ),
           ],
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.xs),
           Expanded(
             child: Stack(
               alignment: Alignment.bottomCenter,

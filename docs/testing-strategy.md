@@ -13,7 +13,7 @@ bash scripts/check-docs.sh
 bash scripts/check-supply-chain.sh
 ```
 
-`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. `scripts/check-supply-chain.sh` checks for obvious credential leaks, verifies Android permission additions against the current allowlist, and queries OSV for pinned hosted Pub and Gradle/Maven runtime package versions. Current Flutter tests cover the phone-local start surface, mockup-derived listening/AI chat/amber/export surfaces, microphone permission denied UI, deterministic session lifecycle transitions that keep capture/realtime/playback resources closed until permission is granted, encrypted local repository behavior for meetings, transcript/history entries, summary metadata, language routes, recipient preferences, sensitive preferences, credential/session material, and meeting management for deleting or continuing a saved meeting with appended local history.
+`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. `scripts/check-supply-chain.sh` checks for obvious credential leaks, verifies Android permission additions against the current allowlist, and queries OSV for pinned hosted Pub and Gradle/Maven runtime package versions. Current Flutter tests cover the phone-local start surface, mockup-derived listening/AI chat/amber/export surfaces, microphone permission denied UI, deterministic session lifecycle transitions that keep capture/realtime/playback resources closed until permission is granted, encrypted local repository behavior for meetings, transcript/history entries, summary metadata, language routes, recipient preferences, sensitive preferences, credential/session material, meeting management for deleting or continuing a saved meeting with appended local history, semantic labels for core controls, and compact large-text rendering across setup, live, assistant, amber, and export surfaces.
 
 ## Flutter App Gates
 
@@ -99,7 +99,7 @@ Optional screenshot capture should write outside the repo by default:
 adb exec-out screencap -p > /tmp/live-translate-mobile-smoke.png
 ```
 
-The current app can verify the phone-local start surface, Android microphone runtime permission dialog/denied state, teal listening screen, scoped AI chat bottom sheet, amber paused read-aloud screen, encrypted meeting history sheet with continue/delete controls, appended local meeting history after reopening a saved meeting, and email export sheet with remembered recipient preferences. Real microphone capture, direct OpenAI streaming, native share handoff, production-volume storage behavior, and privacy routing assertions become required as their implementation issues land.
+The current app can verify the phone-local start surface, Android microphone runtime permission dialog/denied state, teal listening screen, scoped AI chat bottom sheet, amber paused read-aloud screen, encrypted meeting history sheet with continue/delete controls, appended local meeting history after reopening a saved meeting, email export sheet with remembered recipient preferences, and large-text/compact-viewport behavior for those core surfaces. Real microphone capture, direct OpenAI streaming, native share handoff, production-volume storage behavior, and privacy routing assertions become required as their implementation issues land.
 
 ## CI Gates
 

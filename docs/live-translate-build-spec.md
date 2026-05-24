@@ -238,6 +238,7 @@ Closed planning and implementation intake:
 - #11 Document Android emulator workflow for Codex.
 - #13 Implement microphone permissions and live session lifecycle.
 - #16 Add CI quality gates for docs, Flutter, and secret safety.
+- #17 Add accessibility and responsive text verification.
 - #18 Define Flutter design tokens and reusable mockup components.
 - #20 Implement local meeting management.
 - #22 Implement dependency and supply-chain cybersecurity controls.
@@ -251,7 +252,6 @@ Open MVP/planning work:
 - #12 Create phone-only MVP test strategy.
 - #14 Harden direct OpenAI realtime resilience.
 - #15 Implement privacy-safe local logging and diagnostics controls.
-- #17 Add accessibility and responsive text verification.
 - #19 Maintain README and agent handoff docs during implementation.
 - #21 Add email export for transcripts and summaries.
 - #23 Decide safe direct OpenAI mobile credential approach.

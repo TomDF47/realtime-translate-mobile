@@ -168,7 +168,10 @@ class LocalSetupActionButton extends StatelessWidget {
 
     return Semantics(
       button: true,
+      container: true,
+      excludeSemantics: true,
       label: action.semanticLabel,
+      onTap: onPressed,
       child: SizedBox(
         width: double.infinity,
         child: FilledButton(
@@ -221,6 +224,7 @@ class PrivacyNote extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
+      container: true,
       label: 'Privacy note',
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -247,20 +251,12 @@ class FooterBadgeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (var index = 0; index < badges.length; index++) ...[
-          _FooterBadge(badge: badges[index]),
-          if (index < badges.length - 1)
-            Container(
-              height: 24,
-              width: 1,
-              margin: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-              color: AppColors.divider,
-            ),
-        ],
-      ],
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: AppSpacing.xl,
+      runSpacing: AppSpacing.xs,
+      children: [for (final badge in badges) _FooterBadge(badge: badge)],
     );
   }
 }
@@ -374,37 +370,43 @@ class LanguageSelectorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final accentColor = AppColors.forAccent(data.accent);
 
-    return _Surface(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  data.eyebrow,
-                  style: AppTextStyles.compact(Theme.of(context).textTheme),
+    return Semantics(
+      container: true,
+      label:
+          '${data.eyebrow} language selector: ${data.primaryLabel} ${data.secondaryLabel}'
+              .trim(),
+      child: _Surface(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    data.eyebrow,
+                    style: AppTextStyles.compact(Theme.of(context).textTheme),
+                  ),
                 ),
-              ),
-              CircleAvatar(
-                backgroundColor: accentColor.withValues(alpha: 0.18),
-                foregroundColor: accentColor,
-                child: Icon(data.icon),
-              ),
-              const Icon(Icons.keyboard_arrow_down_rounded),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            data.primaryLabel,
-            style: AppTextStyles.label(Theme.of(context).textTheme),
-          ),
-          Text(
-            data.secondaryLabel,
-            style: AppTextStyles.label(Theme.of(context).textTheme),
-          ),
-        ],
+                CircleAvatar(
+                  backgroundColor: accentColor.withValues(alpha: 0.18),
+                  foregroundColor: accentColor,
+                  child: Icon(data.icon),
+                ),
+                const Icon(Icons.keyboard_arrow_down_rounded),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              data.primaryLabel,
+              style: AppTextStyles.label(Theme.of(context).textTheme),
+            ),
+            Text(
+              data.secondaryLabel,
+              style: AppTextStyles.label(Theme.of(context).textTheme),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -461,45 +463,55 @@ class FeatureChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accentColor = AppColors.forAccent(data.accent);
+    final stateLabel = data.isPassive
+        ? 'active'
+        : data.isEnabled
+        ? 'on'
+        : 'off';
 
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xs,
-      ),
-      decoration: BoxDecoration(
-        color: data.isEnabled || data.isPassive
-            ? accentColor.withValues(alpha: 0.14)
-            : AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.chip),
-        border: Border.all(
-          color: data.isEnabled || data.isPassive
-              ? accentColor
-              : AppColors.border,
+    return Semantics(
+      container: true,
+      label: '${data.label} $stateLabel',
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(data.icon, size: 16, color: accentColor),
-          const SizedBox(width: AppSpacing.xs),
-          Text(
-            data.label,
-            style: AppTextStyles.compact(Theme.of(context).textTheme).copyWith(
-              color: data.isPassive ? accentColor : AppColors.textPrimary,
-            ),
+        decoration: BoxDecoration(
+          color: data.isEnabled || data.isPassive
+              ? accentColor.withValues(alpha: 0.14)
+              : AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadii.chip),
+          border: Border.all(
+            color: data.isEnabled || data.isPassive
+                ? accentColor
+                : AppColors.border,
           ),
-          if (!data.isPassive) ...[
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(data.icon, size: 16, color: accentColor),
             const SizedBox(width: AppSpacing.xs),
-            Icon(
-              data.isEnabled
-                  ? Icons.toggle_on_rounded
-                  : Icons.toggle_off_rounded,
-              size: 28,
-              color: data.isEnabled ? accentColor : AppColors.textTertiary,
+            Text(
+              data.label,
+              style: AppTextStyles.compact(Theme.of(context).textTheme)
+                  .copyWith(
+                    color: data.isPassive ? accentColor : AppColors.textPrimary,
+                  ),
             ),
+            if (!data.isPassive) ...[
+              const SizedBox(width: AppSpacing.xs),
+              Icon(
+                data.isEnabled
+                    ? Icons.toggle_on_rounded
+                    : Icons.toggle_off_rounded,
+                size: 28,
+                color: data.isEnabled ? accentColor : AppColors.textTertiary,
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -515,60 +527,69 @@ class TranscriptCard extends StatelessWidget {
     final accentColor = AppColors.forAccent(entry.accent);
     final textTheme = Theme.of(context).textTheme;
 
-    return _Surface(
-      borderColor: accentColor.withValues(alpha: 0.82),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: accentColor.withValues(alpha: 0.12),
-            foregroundColor: accentColor,
-            child: Text(
-              entry.languageCode,
-              style: AppTextStyles.compact(textTheme),
+    return Semantics(
+      container: true,
+      label: 'Transcript ${entry.languageCode} at ${entry.timestamp}',
+      child: _Surface(
+        borderColor: accentColor.withValues(alpha: 0.82),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: accentColor.withValues(alpha: 0.12),
+              foregroundColor: accentColor,
+              child: Text(
+                entry.languageCode,
+                style: AppTextStyles.compact(textTheme),
+              ),
             ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    if (entry.speakerLabel != null) ...[
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      if (entry.speakerLabel != null) ...[
+                        Text(
+                          entry.speakerLabel!,
+                          style: AppTextStyles.compact(
+                            textTheme,
+                          ).copyWith(color: accentColor),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                      ],
+                      const Spacer(),
                       Text(
-                        entry.speakerLabel!,
-                        style: AppTextStyles.compact(
-                          textTheme,
-                        ).copyWith(color: accentColor),
+                        entry.timestamp,
+                        style: AppTextStyles.compact(textTheme),
                       ),
-                      const SizedBox(width: AppSpacing.xs),
                     ],
-                    const Spacer(),
-                    Text(
-                      entry.timestamp,
-                      style: AppTextStyles.compact(textTheme),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(entry.originalText, style: AppTextStyles.body(textTheme)),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  entry.translatedText,
-                  style: AppTextStyles.title(textTheme).copyWith(fontSize: 18),
-                ),
-              ],
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    entry.originalText,
+                    style: AppTextStyles.body(textTheme),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    entry.translatedText,
+                    style: AppTextStyles.title(
+                      textTheme,
+                    ).copyWith(fontSize: 18),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: AppSpacing.xs),
-          Icon(
-            _playbackIcon(entry.playbackState),
-            color: accentColor,
-            size: 20,
-          ),
-        ],
+            const SizedBox(width: AppSpacing.xs),
+            Icon(
+              _playbackIcon(entry.playbackState),
+              color: accentColor,
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -622,32 +643,44 @@ class QueueBanner extends StatelessWidget {
 
     return _Surface(
       borderColor: accentColor,
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.pause_circle_outline_rounded, color: accentColor),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  data.title,
-                  style: AppTextStyles.label(Theme.of(context).textTheme),
+          Row(
+            children: [
+              Icon(Icons.pause_circle_outline_rounded, color: accentColor),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      data.title,
+                      style: AppTextStyles.label(Theme.of(context).textTheme),
+                    ),
+                    Text(
+                      data.detail,
+                      style: AppTextStyles.compact(Theme.of(context).textTheme),
+                    ),
+                  ],
                 ),
-                Text(
-                  data.detail,
-                  style: AppTextStyles.compact(Theme.of(context).textTheme),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: onPrimaryPressed,
-            child: Text(data.primaryActionLabel),
-          ),
-          TextButton(
-            onPressed: onSecondaryPressed,
-            child: Text(data.secondaryActionLabel),
+          const SizedBox(height: AppSpacing.xs),
+          Wrap(
+            spacing: AppSpacing.xs,
+            runSpacing: AppSpacing.xxs,
+            children: [
+              TextButton(
+                onPressed: onPrimaryPressed,
+                child: Text(data.primaryActionLabel),
+              ),
+              TextButton(
+                onPressed: onSecondaryPressed,
+                child: Text(data.secondaryActionLabel),
+              ),
+            ],
           ),
         ],
       ),
@@ -733,7 +766,10 @@ class _BottomControlButton extends StatelessWidget {
 
     return Semantics(
       button: true,
+      container: true,
+      excludeSemantics: true,
       label: action.semanticLabel,
+      onTap: onPressed,
       child: SizedBox(
         width: 104,
         child: InkWell(
