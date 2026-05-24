@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'src/export/local_meeting_exporter.dart';
 import 'src/language/language_support.dart';
 import 'src/mock/mock_live_translate_data.dart';
 import 'src/openai/openai_configuration.dart';
@@ -25,10 +26,12 @@ class LiveTranslateApp extends StatelessWidget {
     super.key,
     this.permissionGateway,
     this.meetingRepository,
+    this.nativeShareGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
   final LocalMeetingRepository? meetingRepository;
+  final NativeShareGateway? nativeShareGateway;
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +42,7 @@ class LiveTranslateApp extends StatelessWidget {
       home: LiveTranslateHome(
         permissionGateway: permissionGateway,
         meetingRepository: meetingRepository,
+        nativeShareGateway: nativeShareGateway,
       ),
     );
   }
@@ -217,10 +221,12 @@ class LiveTranslateHome extends StatefulWidget {
     super.key,
     this.permissionGateway,
     this.meetingRepository,
+    this.nativeShareGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
   final LocalMeetingRepository? meetingRepository;
+  final NativeShareGateway? nativeShareGateway;
 
   @override
   State<LiveTranslateHome> createState() => _LiveTranslateHomeState();
@@ -231,6 +237,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   late final LiveSessionController _sessionController;
   late final LocalMeetingRepository _meetingRepository;
   late final OpenAiCredentialStore _openAiCredentialStore;
+  late final NativeShareGateway _nativeShareGateway;
   _AppSurface _surface = _AppSurface.setup;
   List<StoredMeeting> _storedMeetings = const [];
   OpenAiCredentialStatus _openAiCredentialStatus =
@@ -252,6 +259,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     _openAiCredentialStore = OpenAiCredentialStore(
       repository: _meetingRepository,
     );
+    _nativeShareGateway =
+        widget.nativeShareGateway ?? const MethodChannelNativeShareGateway();
     unawaited(_loadStoredMeetings());
     unawaited(_loadOpenAiCredentialStatus());
   }
@@ -585,7 +594,11 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _ExportSheet(repository: _meetingRepository),
+      builder: (context) => _ExportSheet(
+        repository: _meetingRepository,
+        nativeShareGateway: _nativeShareGateway,
+        meeting: _activeMeeting,
+      ),
     );
   }
 
@@ -1675,9 +1688,15 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
 }
 
 class _ExportSheet extends StatefulWidget {
-  const _ExportSheet({required this.repository});
+  const _ExportSheet({
+    required this.repository,
+    required this.nativeShareGateway,
+    required this.meeting,
+  });
 
   final LocalMeetingRepository repository;
+  final NativeShareGateway nativeShareGateway;
+  final StoredMeeting? meeting;
 
   @override
   State<_ExportSheet> createState() => _ExportSheetState();
@@ -1685,67 +1704,334 @@ class _ExportSheet extends StatefulWidget {
 
 class _ExportSheetState extends State<_ExportSheet> {
   ExportType _selectedType = ExportType.transcript;
-  final Map<String, bool> _recipients = {
-    'recipient@example.com': true,
-    'assistant@example.com': false,
-  };
+  final TextEditingController _recipientController = TextEditingController();
+  Map<String, bool> _recipients = const {};
+  bool _isLoadingRecipients = true;
+  bool _isSharing = false;
+  String? _statusLabel;
+  String? _errorLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadRecipientPreferences());
+  }
+
+  @override
+  void dispose() {
+    _recipientController.dispose();
+    super.dispose();
+  }
+
+  List<String> get _selectedRecipients {
+    return [
+      for (final entry in _recipients.entries)
+        if (entry.value) entry.key,
+    ];
+  }
+
+  bool get _summaryExportPending => _selectedType != ExportType.transcript;
+
+  bool get _canOpenShareSheet {
+    return !_isLoadingRecipients &&
+        !_isSharing &&
+        widget.meeting != null &&
+        _selectedRecipients.isNotEmpty &&
+        !_summaryExportPending;
+  }
+
+  Future<void> _loadRecipientPreferences() async {
+    final snapshot = await widget.repository.loadSnapshot();
+    final preferences = snapshot.recipientPreferences;
+    final remembered = preferences.rememberedRecipients.isEmpty
+        ? const ['recipient@example.com', 'assistant@example.com']
+        : preferences.rememberedRecipients;
+    final selected = preferences.lastSelectedRecipients.toSet();
+    final defaultSelected = preferences.lastSelectedRecipients.isEmpty;
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _recipients = {
+        for (var index = 0; index < remembered.length; index++)
+          remembered[index]: defaultSelected
+              ? index == 0
+              : selected.contains(remembered[index]),
+      };
+      _isLoadingRecipients = false;
+    });
+  }
+
+  void _addRecipient() {
+    final value = _recipientController.text.trim();
+    if (value.isEmpty) {
+      setState(() => _errorLabel = 'Enter an email address to add.');
+      return;
+    }
+
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)) {
+      setState(() => _errorLabel = 'Enter a valid email address.');
+      return;
+    }
+
+    setState(() {
+      _recipients = {..._recipients, value: true};
+      _recipientController.clear();
+      _errorLabel = null;
+      _statusLabel = null;
+    });
+  }
+
+  void _removeRecipient(String recipient) {
+    setState(() {
+      _recipients = {
+        for (final entry in _recipients.entries)
+          if (entry.key != recipient) entry.key: entry.value,
+      };
+      _statusLabel = null;
+    });
+  }
+
+  Future<void> _saveRecipientPreferences() {
+    return widget.repository.saveRecipientPreferences(
+      RecipientPreferences(
+        rememberedRecipients: _recipients.keys.toList(growable: false),
+        lastSelectedRecipients: _selectedRecipients,
+      ),
+    );
+  }
+
+  Future<void> _openShareSheet() async {
+    final meeting = widget.meeting;
+    if (meeting == null) {
+      setState(
+        () => _errorLabel = 'Start or select a meeting before exporting.',
+      );
+      return;
+    }
+
+    if (_summaryExportPending) {
+      setState(
+        () => _errorLabel =
+            'Summary export will enable after direct OpenAI summary generation lands.',
+      );
+      return;
+    }
+
+    final selectedRecipients = _selectedRecipients;
+    if (selectedRecipients.isEmpty) {
+      setState(
+        () => _errorLabel = 'Select at least one recipient before exporting.',
+      );
+      return;
+    }
+
+    setState(() {
+      _isSharing = true;
+      _errorLabel = null;
+      _statusLabel = null;
+    });
+
+    try {
+      await _saveRecipientPreferences();
+      final document = LocalMeetingExportComposer.compose(
+        meeting: meeting,
+        type: _selectedType,
+        recipients: selectedRecipients,
+      );
+      final result = await widget.nativeShareGateway.shareMeetingExport(
+        document,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _statusLabel = switch (result) {
+          NativeShareResult.launched =>
+            'Share sheet opened. Review the export before sending.',
+          NativeShareResult.unavailable =>
+            'No local share target is available on this device.',
+        };
+      });
+    } on SummaryExportUnavailableException {
+      if (mounted) {
+        setState(
+          () => _errorLabel =
+              'Summary export will enable after direct OpenAI summary generation lands.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _errorLabel =
+              'Could not open the local share sheet on this device.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSharing = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final meeting = widget.meeting;
+
     return _SheetFrame(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const _SheetHandle(),
-          Text(
-            'Email export',
-            style: AppTextStyles.title(Theme.of(context).textTheme),
+          Row(
+            children: [
+              const Icon(Icons.ios_share_rounded, color: AppColors.teal),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'Email export',
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.title(textTheme),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Close email export',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
           ),
+          if (meeting == null)
+            Text(
+              'Start or select a meeting before exporting.',
+              style: AppTextStyles.body(textTheme),
+            )
+          else
+            Text(meeting.title, style: AppTextStyles.compact(textTheme)),
           const SizedBox(height: AppSpacing.sm),
           ExportTypeSelector(
             selected: _selectedType,
-            onChanged: (type) => setState(() => _selectedType = type),
+            onChanged: (type) {
+              setState(() {
+                _selectedType = type;
+                _errorLabel = null;
+                _statusLabel = null;
+              });
+            },
           ),
-          const SizedBox(height: AppSpacing.md),
-          for (final recipient in _recipients.keys)
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _recipients[recipient],
-              onChanged: (value) {
-                setState(() => _recipients[recipient] = value ?? false);
-              },
-              title: Text(recipient),
-              controlAffinity: ListTileControlAffinity.leading,
+          if (_summaryExportPending) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Summary and Both require the direct OpenAI summary path before a local export can be prepared.',
+              style: AppTextStyles.compact(textTheme),
             ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          Text('Recipients', style: AppTextStyles.label(textTheme)),
+          const SizedBox(height: AppSpacing.xs),
+          TextField(
+            controller: _recipientController,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(
+              labelText: 'Add recipient',
+              errorText: _errorLabel != null && _errorLabel!.contains('email')
+                  ? _errorLabel
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.card),
+              ),
+            ),
+            onSubmitted: (_) => _addRecipient(),
+          ),
           const SizedBox(height: AppSpacing.sm),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton.filled(
+              tooltip: 'Add recipient',
+              onPressed: _addRecipient,
+              icon: const Icon(Icons.add_rounded),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (_isLoadingRecipients)
+            Text(
+              'Loading recipients...',
+              style: AppTextStyles.compact(textTheme),
+            )
+          else if (_recipients.isEmpty)
+            Text(
+              'No remembered recipients yet.',
+              style: AppTextStyles.compact(textTheme),
+            )
+          else
+            for (final recipient in _recipients.keys)
+              Row(
+                children: [
+                  Checkbox(
+                    value: _recipients[recipient],
+                    onChanged: (value) {
+                      setState(() {
+                        _recipients = {
+                          ..._recipients,
+                          recipient: value ?? false,
+                        };
+                        _statusLabel = null;
+                      });
+                    },
+                  ),
+                  Expanded(
+                    child: Text(
+                      recipient,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.body(textTheme),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove $recipient',
+                    onPressed: () => _removeRecipient(recipient),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                  ),
+                ],
+              ),
+          if (_errorLabel != null && !_errorLabel!.contains('email')) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              _errorLabel!,
+              style: AppTextStyles.compact(
+                textTheme,
+              ).copyWith(color: AppColors.red),
+            ),
+          ],
+          if (_statusLabel != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              _statusLabel!,
+              style: AppTextStyles.compact(
+                textTheme,
+              ).copyWith(color: AppColors.teal),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.md),
           PrivacyNote(
             label:
-                'Exports are prepared locally and handed to the device mail or share sheet.',
+                'Exports are prepared locally and handed to the device mail or share sheet. Review before sending.',
             icon: Icons.lock_outline_rounded,
           ),
           const SizedBox(height: AppSpacing.md),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: () async {
-                await widget.repository.saveRecipientPreferences(
-                  RecipientPreferences(
-                    rememberedRecipients: _recipients.keys.toList(
-                      growable: false,
-                    ),
-                    lastSelectedRecipients: [
-                      for (final entry in _recipients.entries)
-                        if (entry.value) entry.key,
-                    ],
-                  ),
-                );
-                if (context.mounted) {
-                  Navigator.of(context).pop();
-                }
-              },
+              onPressed: _canOpenShareSheet ? _openShareSheet : null,
               icon: const Icon(Icons.ios_share_rounded),
-              label: const Text('Open share sheet'),
+              label: Text(
+                _isSharing ? 'Opening share sheet' : 'Open share sheet',
+              ),
             ),
           ),
         ],

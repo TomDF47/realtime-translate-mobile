@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
+import 'package:realtime_translate_mobile/src/export/local_meeting_exporter.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
+import 'package:realtime_translate_mobile/src/ui/live_translate_models.dart';
 
 void main() {
   testWidgets('shows phone-local start surface', (tester) async {
@@ -115,11 +117,13 @@ void main() {
     tester,
   ) async {
     final repository = _testRepository();
+    final nativeShareGateway = _FakeNativeShareGateway();
     await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
+        nativeShareGateway: nativeShareGateway,
       ),
     );
 
@@ -145,6 +149,12 @@ void main() {
     expect(find.text('Both'), findsOneWidget);
     expect(find.text('recipient@example.com'), findsOneWidget);
 
+    await tester.tap(find.text('Summary'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('direct OpenAI summary path'), findsOneWidget);
+
+    await tester.tap(find.text('Transcript'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Open share sheet'));
     await tester.pumpAndSettle();
 
@@ -152,6 +162,19 @@ void main() {
     expect(snapshot.recipientPreferences.lastSelectedRecipients, [
       'recipient@example.com',
     ]);
+    expect(nativeShareGateway.documents, hasLength(1));
+    expect(nativeShareGateway.documents.single.type, ExportType.transcript);
+    expect(nativeShareGateway.documents.single.recipients, [
+      'recipient@example.com',
+    ]);
+    expect(
+      nativeShareGateway.documents.single.body,
+      contains('Prepared locally on this device.'),
+    );
+    expect(
+      find.text('Share sheet opened. Review the export before sending.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('blocks live session when microphone permission is denied', (
@@ -275,4 +298,16 @@ class _FakePermissionGateway implements MicrophonePermissionGateway {
 
   @override
   Future<MicrophonePermissionStatus> request() async => _status;
+}
+
+class _FakeNativeShareGateway implements NativeShareGateway {
+  final List<MeetingExportDocument> documents = [];
+
+  @override
+  Future<NativeShareResult> shareMeetingExport(
+    MeetingExportDocument document,
+  ) async {
+    documents.add(document);
+    return NativeShareResult.launched;
+  }
 }

@@ -1,6 +1,7 @@
 package com.tomdf47.realtime_translate_mobile
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,6 +13,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val permissionChannelName = "realtime_translate_mobile/microphone_permission"
+    private val nativeShareChannelName = "realtime_translate_mobile/native_share"
     private val recordAudioRequestCode = 4701
     private val askedPermissionKey = "asked_record_audio_permission"
     private var pendingPermissionResult: MethodChannel.Result? = null
@@ -27,6 +29,13 @@ class MainActivity : FlutterActivity() {
                         openAppSettings()
                         result.success(null)
                     }
+                    else -> result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, nativeShareChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "shareMeetingExport" -> shareMeetingExport(call.arguments, result)
                     else -> result.notImplemented()
                 }
             }
@@ -85,5 +94,36 @@ class MainActivity : FlutterActivity() {
             data = Uri.fromParts("package", packageName, null)
         }
         startActivity(intent)
+    }
+
+    private fun shareMeetingExport(arguments: Any?, result: MethodChannel.Result) {
+        val values = arguments as? Map<*, *>
+        val subject = values?.get("subject") as? String ?: "Live Translate export"
+        val body = values?.get("body") as? String ?: ""
+        val recipients = (values?.get("recipients") as? List<*>)
+            ?.filterIsInstance<String>()
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+
+        if (body.isBlank()) {
+            result.error("empty_export", "Export body is empty.", null)
+            return
+        }
+
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, body)
+            if (recipients.isNotEmpty()) {
+                putExtra(Intent.EXTRA_EMAIL, recipients.toTypedArray())
+            }
+        }
+
+        try {
+            startActivity(Intent.createChooser(shareIntent, "Share meeting export"))
+            result.success("launched")
+        } catch (error: ActivityNotFoundException) {
+            result.error("share_unavailable", "No local share target is available.", null)
+        }
     }
 }
