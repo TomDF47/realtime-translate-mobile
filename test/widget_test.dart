@@ -11,6 +11,7 @@ import 'package:realtime_translate_mobile/src/openai/openai_meeting_summary.dart
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
+import 'package:realtime_translate_mobile/src/session/translated_audio_playback.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
 import 'package:realtime_translate_mobile/src/ui/live_translate_models.dart';
@@ -87,6 +88,7 @@ void main() {
         meetingRepository: repository,
         aiChatGateway: aiChatGateway,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
         realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
       ),
     );
@@ -154,6 +156,7 @@ void main() {
         meetingRepository: repository,
         aiChatGateway: aiChatGateway,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
         realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
       ),
     );
@@ -196,6 +199,7 @@ void main() {
         nativeShareGateway: nativeShareGateway,
         meetingSummaryGateway: meetingSummaryGateway,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
         realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
       ),
     );
@@ -263,6 +267,7 @@ void main() {
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.denied(),
         meetingRepository: repository,
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
       ),
     );
 
@@ -288,6 +293,7 @@ void main() {
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
         realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
       ),
     );
@@ -320,6 +326,7 @@ void main() {
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
         realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
       ),
     );

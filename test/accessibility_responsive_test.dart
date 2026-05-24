@@ -9,6 +9,7 @@ import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dar
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
+import 'package:realtime_translate_mobile/src/session/translated_audio_playback.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
 
@@ -26,6 +27,7 @@ void main() {
           meetingRepository: repository,
           aiChatGateway: _FakeAiChatGateway(),
           microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
           realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
         ),
       );
@@ -120,6 +122,7 @@ void main() {
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
         realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
       ),
     );

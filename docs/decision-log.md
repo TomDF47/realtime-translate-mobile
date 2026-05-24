@@ -145,11 +145,11 @@ Rationale:
 Implications:
 
 - Future audio package, SDK, resampling, or playback additions must update the cybersecurity report and rerun supply-chain checks.
-- Real microphone translation smoke, native translated-audio speaker output, and live transcript validation remain open #6/#14 work.
+- At this capture slice, real microphone translation smoke, native translated-audio speaker output, and live transcript validation remained open #6/#14 work; Android speaker output is now covered by the later `AudioTrack` decision below.
 
 ## 2026-05-24 - Translated Audio Playback Starts As A Fakeable Local Queue
 
-Status: Accepted
+Status: Accepted as first slice; Android production output added by `2026-05-24 - Android Translated Audio Output Uses App-Owned AudioTrack`
 
 Decision:
 
@@ -158,15 +158,40 @@ Decision:
 - Keep the first production gateway as a no-op placeholder that does not retain audio-derived data.
 - Start the playback gateway only after credential, microphone permission, and realtime connection gates pass.
 - Stop and clear playback resources during reconnecting, offline, credential-invalid, backgrounded, stopped, and failed reconnect states.
-- Do not add an audio playback package, native speaker output engine, backend relay, logging sink, or extra Android permission in this software-only slice.
+- Do not add an audio playback package, native speaker output engine, backend relay, logging sink, or extra Android permission in this software-only first slice.
 
 Rationale:
 
 - The fakeable gateway lets tests prove decoded translated-audio routing and reconnect teardown/restart behavior without requiring a physical speaker path or controllable microphone source.
-- Keeping audio-derived payloads in transient memory only preserves the phone-only privacy boundary while native output remains unimplemented.
+- Keeping audio-derived payloads in transient memory only preserved the phone-only privacy boundary while this first slice left native output unimplemented.
 - A no-dependency seam keeps supply-chain risk low until the app is ready for a focused Android/iOS audio-output implementation.
 
 Implications:
 
-- Native speaker output is still open #6/#14 work and must update the cybersecurity report, dependency checks, and tests when implemented.
+- This first slice intentionally left native speaker output open; Android output is now covered by the later `AudioTrack` decision below.
 - Diagnostics around playback must remain limited to sanitized operation/result/error labels and must never include audio bytes, base64 chunks, transcript text, translated text, or credentials.
+
+## 2026-05-24 - Android Translated Audio Output Uses App-Owned AudioTrack
+
+Status: Accepted
+
+Decision:
+
+- Implement the first native translated-audio output increment with app-owned Android `AudioTrack` stream-mode code behind the existing fakeable `TranslatedAudioPlaybackGateway`.
+- Keep the Flutter gateway fakeable, and keep the no-op gateway available for tests and non-Android shells.
+- Accept mono PCM16 chunks only when their sample rate and channel count match the opened playback stream.
+- Keep decoded output audio in transient memory only through a bounded native queue, dropping oldest queued chunks if the queue fills.
+- Close and clear playback during reconnecting, offline, credential-invalid, backgrounded, stopped, and failed reconnect paths.
+- Do not add a playback package, external SDK, backend relay, logging sink, persistent audio store, or extra Android permission for this increment.
+
+Rationale:
+
+- The existing platform-channel layer already owns Android audio capture and can add output without widening the dependency or permission surface.
+- `AudioTrack` gives the MVP a direct Android speaker path while preserving the phone-only architecture and fakeable Dart test boundary.
+- A bounded transient queue avoids unbounded retention of audio-derived payloads and fits the current skip-to-live/reconnect direction.
+
+Implications:
+
+- Real audible translated-audio validation still requires a real streaming session or controllable translated-audio source; do not claim spoken end-to-end translation from fake PCM16 queue tests.
+- Future iOS output must stay behind the same gateway and receive equivalent privacy/security review.
+- Any future playback package, resampler, audio effects SDK, route-management permission, or persisted audio cache must update the cybersecurity report and rerun supply-chain checks.

@@ -15,6 +15,7 @@ import 'src/session/microphone_capture.dart';
 import 'src/session/microphone_permission.dart';
 import 'src/session/realtime_translation_coordinator.dart';
 import 'src/session/realtime_transcript_committer.dart';
+import 'src/session/translated_audio_playback.dart';
 import 'src/storage/encrypted_local_store.dart';
 import 'src/storage/local_meeting_repository.dart';
 import 'src/storage/local_storage_models.dart';
@@ -36,6 +37,7 @@ class LiveTranslateApp extends StatelessWidget {
     this.aiChatGateway,
     this.meetingSummaryGateway,
     this.microphoneCaptureGateway,
+    this.translatedAudioPlaybackGateway,
     this.realtimeTranslationGateway,
   });
 
@@ -45,6 +47,7 @@ class LiveTranslateApp extends StatelessWidget {
   final AiChatGateway? aiChatGateway;
   final MeetingSummaryGateway? meetingSummaryGateway;
   final MicrophoneCaptureGateway? microphoneCaptureGateway;
+  final TranslatedAudioPlaybackGateway? translatedAudioPlaybackGateway;
   final RealtimeTranslationGateway? realtimeTranslationGateway;
 
   @override
@@ -60,6 +63,7 @@ class LiveTranslateApp extends StatelessWidget {
         aiChatGateway: aiChatGateway,
         meetingSummaryGateway: meetingSummaryGateway,
         microphoneCaptureGateway: microphoneCaptureGateway,
+        translatedAudioPlaybackGateway: translatedAudioPlaybackGateway,
         realtimeTranslationGateway: realtimeTranslationGateway,
       ),
     );
@@ -243,6 +247,7 @@ class LiveTranslateHome extends StatefulWidget {
     this.aiChatGateway,
     this.meetingSummaryGateway,
     this.microphoneCaptureGateway,
+    this.translatedAudioPlaybackGateway,
     this.realtimeTranslationGateway,
   });
 
@@ -252,6 +257,7 @@ class LiveTranslateHome extends StatefulWidget {
   final AiChatGateway? aiChatGateway;
   final MeetingSummaryGateway? meetingSummaryGateway;
   final MicrophoneCaptureGateway? microphoneCaptureGateway;
+  final TranslatedAudioPlaybackGateway? translatedAudioPlaybackGateway;
   final RealtimeTranslationGateway? realtimeTranslationGateway;
 
   @override
@@ -299,6 +305,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       captureGateway:
           widget.microphoneCaptureGateway ??
           MethodChannelMicrophoneCaptureGateway(),
+      playbackGateway:
+          widget.translatedAudioPlaybackGateway ??
+          MethodChannelTranslatedAudioPlaybackGateway(),
       realtimeGateway:
           widget.realtimeTranslationGateway ??
           OpenAiRealtimeTranslationGateway(),

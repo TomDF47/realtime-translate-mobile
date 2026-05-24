@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
+
+import 'package:flutter/services.dart';
 
 import '../diagnostics/privacy_safe_diagnostics.dart';
 
@@ -14,6 +15,10 @@ class TranslatedAudioPlaybackConfig {
 
   final int sampleRateHz;
   final int channelCount;
+
+  Map<String, Object> toMethodArguments() {
+    return {'sampleRateHz': sampleRateHz, 'channelCount': channelCount};
+  }
 }
 
 class TranslatedAudioPcm16Chunk {
@@ -26,6 +31,14 @@ class TranslatedAudioPcm16Chunk {
   final Uint8List bytes;
   final int sampleRateHz;
   final int channelCount;
+
+  Map<String, Object> toMethodArguments() {
+    return {
+      'bytes': bytes,
+      'sampleRateHz': sampleRateHz,
+      'channelCount': channelCount,
+    };
+  }
 }
 
 abstract interface class TranslatedAudioPlaybackGateway {
@@ -36,6 +49,122 @@ abstract interface class TranslatedAudioPlaybackGateway {
   Future<void> enqueuePcm16(TranslatedAudioPcm16Chunk chunk);
 
   Future<void> stop({required bool clearQueue});
+}
+
+class MethodChannelTranslatedAudioPlaybackGateway
+    implements TranslatedAudioPlaybackGateway {
+  MethodChannelTranslatedAudioPlaybackGateway({
+    this.methodChannel = const MethodChannel(
+      'realtime_translate_mobile/translated_audio_playback',
+    ),
+    this.diagnostics = const PrivacySafeDiagnostics(),
+  });
+
+  final MethodChannel methodChannel;
+  final PrivacySafeDiagnostics diagnostics;
+  bool _isOpen = false;
+  bool _nativePlaybackAvailable = true;
+
+  @override
+  bool get isOpen => _isOpen;
+
+  @override
+  Future<void> start(TranslatedAudioPlaybackConfig config) async {
+    if (_isOpen) {
+      return;
+    }
+
+    try {
+      await methodChannel.invokeMethod<void>(
+        'start',
+        config.toMethodArguments(),
+      );
+      _nativePlaybackAvailable = true;
+      diagnostics.info(
+        'translated_playback.started',
+        fields: {
+          'operation': 'translatedPlayback.start',
+          'resource': 'translatedPlayback',
+          'result': 'nativeStarted',
+        },
+      );
+    } on MissingPluginException {
+      _nativePlaybackAvailable = false;
+      diagnostics.warning(
+        'translated_playback.unavailable',
+        fields: {
+          'operation': 'translatedPlayback.start',
+          'resource': 'translatedPlayback',
+          'result': 'missingPlugin',
+        },
+      );
+    }
+
+    _isOpen = true;
+  }
+
+  @override
+  Future<void> enqueuePcm16(TranslatedAudioPcm16Chunk chunk) async {
+    if (!_isOpen) {
+      throw StateError('Translated audio playback is not open.');
+    }
+
+    if (!_nativePlaybackAvailable) {
+      return;
+    }
+
+    try {
+      await methodChannel.invokeMethod<void>(
+        'enqueuePcm16',
+        chunk.toMethodArguments(),
+      );
+    } on MissingPluginException {
+      _nativePlaybackAvailable = false;
+      diagnostics.warning(
+        'translated_playback.unavailable',
+        fields: {
+          'operation': 'translatedPlayback.enqueue',
+          'resource': 'translatedPlayback',
+          'result': 'missingPlugin',
+        },
+      );
+    }
+  }
+
+  @override
+  Future<void> stop({required bool clearQueue}) async {
+    if (!_isOpen) {
+      return;
+    }
+
+    try {
+      if (_nativePlaybackAvailable) {
+        await methodChannel.invokeMethod<void>('stop', {
+          'clearQueue': clearQueue,
+        });
+      }
+    } on MissingPluginException {
+      diagnostics.warning(
+        'translated_playback.unavailable',
+        fields: {
+          'operation': 'translatedPlayback.stop',
+          'resource': 'translatedPlayback',
+          'result': 'missingPlugin',
+        },
+      );
+    } finally {
+      _isOpen = false;
+      _nativePlaybackAvailable = true;
+      diagnostics.info(
+        'translated_playback.stopped',
+        fields: {
+          'operation': 'translatedPlayback.stop',
+          'resource': 'translatedPlayback',
+          'result': clearQueue ? 'cleared' : 'stopped',
+        },
+      );
+    }
+  }
 }
 
 class NoopTranslatedAudioPlaybackGateway
@@ -73,8 +202,8 @@ class NoopTranslatedAudioPlaybackGateway
       throw StateError('Translated audio playback is not open.');
     }
 
-    // Native playback is a later Android/iOS output concern. This gateway
-    // keeps the coordinator path live without retaining audio-derived data.
+    // Kept for tests and non-Android shells that deliberately avoid binding
+    // speaker output while preserving the coordinator path.
   }
 
   @override
