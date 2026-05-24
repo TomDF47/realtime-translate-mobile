@@ -79,6 +79,7 @@ android/                     Android Flutter project and app namespace
 ios/                         iOS-compatible Flutter project shell
 lib/                         Flutter app code
 lib/src/session/             Phone-local permission and live-session lifecycle state
+lib/src/storage/             Encrypted local store, meeting repository, and storage models
 lib/src/theme/               Shared design tokens and app theme
 lib/src/ui/                  Structured UI state models and reusable components
 lib/src/mock/                Local mock session data for UI development
@@ -89,7 +90,7 @@ docs/                        Product, architecture, setup, testing, decisions
 assets/mockups/              Supplied Android mockups
 ```
 
-The current app shell renders the phone-local welcome/start surface, Android microphone permission gate, mockup-derived live translation surfaces, scoped AI chat sheet, meeting history sheet, and local email export sheet. The lifecycle controller models permission, listening, read-aloud-paused, reconnecting, stop, app background/foreground, and audio-route state transitions, but real microphone capture, direct OpenAI streaming, encrypted storage, AI chat request execution, summary generation, native share handoff, and logging implementations remain scoped to their GitHub issues.
+The current app shell renders the phone-local welcome/start surface, Android microphone permission gate, mockup-derived live translation surfaces, scoped AI chat sheet, encrypted local meeting history sheet, and local email export sheet. The lifecycle controller models permission, listening, read-aloud-paused, reconnecting, stop, app background/foreground, and audio-route state transitions. The storage layer persists meetings, transcript/history entries, summary metadata, recent language routes, recipient preferences, sensitive preferences, and future credential/session material through `flutter_secure_storage`, with Android backup disabled for app data. Real microphone capture, direct OpenAI streaming, AI chat request execution, summary generation, native share handoff, and logging implementations remain scoped to their GitHub issues.
 
 ## Prohibited MVP Flows
 

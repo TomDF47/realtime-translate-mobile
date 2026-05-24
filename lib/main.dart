@@ -5,18 +5,27 @@ import 'package:flutter/material.dart';
 import 'src/mock/mock_live_translate_data.dart';
 import 'src/session/live_session_controller.dart';
 import 'src/session/microphone_permission.dart';
+import 'src/storage/encrypted_local_store.dart';
+import 'src/storage/local_meeting_repository.dart';
+import 'src/storage/local_storage_models.dart';
 import 'src/theme/live_translate_theme.dart';
 import 'src/ui/live_translate_components.dart';
 import 'src/ui/live_translate_models.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const LiveTranslateApp());
 }
 
 class LiveTranslateApp extends StatelessWidget {
-  const LiveTranslateApp({super.key, this.permissionGateway});
+  const LiveTranslateApp({
+    super.key,
+    this.permissionGateway,
+    this.meetingRepository,
+  });
 
   final MicrophonePermissionGateway? permissionGateway;
+  final LocalMeetingRepository? meetingRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -24,17 +33,61 @@ class LiveTranslateApp extends StatelessWidget {
       title: 'Live Translate',
       debugShowCheckedModeBanner: false,
       theme: LiveTranslateTheme.dark(),
-      home: LiveTranslateHome(permissionGateway: permissionGateway),
+      home: LiveTranslateHome(
+        permissionGateway: permissionGateway,
+        meetingRepository: meetingRepository,
+      ),
     );
   }
 }
 
 enum _AppSurface { setup, listening, speakingPaused }
 
+String _languageLabel(LanguageSelectorData data) {
+  return '${data.primaryLabel} ${data.secondaryLabel}'.trim();
+}
+
+StoredMeeting _storedMeetingFromSession({
+  required String id,
+  required String title,
+  required LiveSessionViewData session,
+  required DateTime now,
+}) {
+  return StoredMeeting(
+    id: id,
+    title: title,
+    createdAt: now,
+    updatedAt: now,
+    sourceLanguageLabel: _languageLabel(session.fromLanguage),
+    targetLanguageLabel: _languageLabel(session.toLanguage),
+    transcriptEntries: [
+      for (var index = 0; index < session.transcriptEntries.length; index++)
+        StoredTranscriptEntry(
+          id: '$id-entry-$index',
+          meetingId: id,
+          languageCode: session.transcriptEntries[index].languageCode,
+          originalText: session.transcriptEntries[index].originalText,
+          translatedText: session.transcriptEntries[index].translatedText,
+          timestamp: now.add(Duration(seconds: index)),
+          speakerLabel: session.transcriptEntries[index].speakerLabel,
+          confidence: null,
+          status: 'final',
+          playbackState: session.transcriptEntries[index].playbackState.name,
+        ),
+    ],
+    summaryMetadata: const StoredSummaryMetadata.empty(),
+  );
+}
+
 class LiveTranslateHome extends StatefulWidget {
-  const LiveTranslateHome({super.key, this.permissionGateway});
+  const LiveTranslateHome({
+    super.key,
+    this.permissionGateway,
+    this.meetingRepository,
+  });
 
   final MicrophonePermissionGateway? permissionGateway;
+  final LocalMeetingRepository? meetingRepository;
 
   @override
   State<LiveTranslateHome> createState() => _LiveTranslateHomeState();
@@ -43,7 +96,10 @@ class LiveTranslateHome extends StatefulWidget {
 class _LiveTranslateHomeState extends State<LiveTranslateHome>
     with WidgetsBindingObserver {
   late final LiveSessionController _sessionController;
+  late final LocalMeetingRepository _meetingRepository;
   _AppSurface _surface = _AppSurface.setup;
+  List<StoredMeeting> _storedMeetings = const [];
+  String? _activeMeetingId;
 
   @override
   void initState() {
@@ -54,6 +110,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           widget.permissionGateway ??
           MethodChannelMicrophonePermissionGateway(),
     );
+    _meetingRepository =
+        widget.meetingRepository ??
+        LocalMeetingRepository(store: FlutterSecureEncryptedLocalStore());
+    unawaited(_loadStoredMeetings());
   }
 
   @override
@@ -80,10 +140,48 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
     final phase = _sessionController.state.phase;
     if (phase == LiveSessionPhase.listening) {
+      await _persistMeetingFromSession(MockLiveTranslateData.listeningSession);
+      if (!mounted) {
+        return;
+      }
       setState(() => _surface = _AppSurface.listening);
     } else {
       setState(() {});
     }
+  }
+
+  Future<void> _loadStoredMeetings() async {
+    final snapshot = await _meetingRepository.loadSnapshot();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _storedMeetings = snapshot.meetings);
+  }
+
+  Future<void> _persistMeetingFromSession(LiveSessionViewData session) async {
+    final now = DateTime.now().toUtc();
+    final meetingId =
+        _activeMeetingId ?? 'meeting-${now.microsecondsSinceEpoch}';
+    _activeMeetingId = meetingId;
+    await _meetingRepository.upsertMeeting(
+      _storedMeetingFromSession(
+        id: meetingId,
+        title: session.mode == LiveSessionMode.speaking
+            ? 'Read-aloud follow-up'
+            : 'Project timeline review',
+        session: session,
+        now: now,
+      ),
+    );
+    await _meetingRepository.saveRecentLanguageRoute(
+      LanguageRoutePreference(
+        sourceLanguageLabel: _languageLabel(session.fromLanguage),
+        targetLanguageLabel: _languageLabel(session.toLanguage),
+        updatedAt: now,
+      ),
+    );
+    await _loadStoredMeetings();
   }
 
   void _openListening() {
@@ -122,6 +220,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
   void _openSetup() {
     _sessionController.stopMeeting();
+    _activeMeetingId = null;
     setState(() => _surface = _AppSurface.setup);
   }
 
@@ -177,13 +276,23 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) => _MeetingHistorySheet(
-        onOpenListening: () {
+        meetings: _storedMeetings,
+        onOpenMeeting: (meeting) {
           Navigator.of(context).pop();
-          _openListening();
+          _activeMeetingId = meeting.id;
+          if (meeting.targetLanguageLabel.contains('Japanese')) {
+            _openSpeakingPaused();
+          } else {
+            _openListening();
+          }
         },
-        onOpenSpeakingPaused: () {
+        onDeleteMeeting: (meeting) async {
           Navigator.of(context).pop();
-          _openSpeakingPaused();
+          await _meetingRepository.deleteMeeting(meeting.id);
+          await _loadStoredMeetings();
+          if (_activeMeetingId == meeting.id && mounted) {
+            _openSetup();
+          }
         },
       ),
     );
@@ -194,7 +303,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => const _ExportSheet(),
+      builder: (context) => _ExportSheet(repository: _meetingRepository),
     );
   }
 
@@ -805,12 +914,14 @@ class _MeetingMenuSheet extends StatelessWidget {
 
 class _MeetingHistorySheet extends StatelessWidget {
   const _MeetingHistorySheet({
-    required this.onOpenListening,
-    required this.onOpenSpeakingPaused,
+    required this.meetings,
+    required this.onOpenMeeting,
+    required this.onDeleteMeeting,
   });
 
-  final VoidCallback onOpenListening;
-  final VoidCallback onOpenSpeakingPaused;
+  final List<StoredMeeting> meetings;
+  final ValueChanged<StoredMeeting> onOpenMeeting;
+  final Future<void> Function(StoredMeeting meeting) onDeleteMeeting;
 
   @override
   Widget build(BuildContext context) {
@@ -825,16 +936,18 @@ class _MeetingHistorySheet extends StatelessWidget {
             style: AppTextStyles.title(Theme.of(context).textTheme),
           ),
           const SizedBox(height: AppSpacing.sm),
-          _MeetingRow(
-            title: 'Project timeline review',
-            detail: 'Auto-detect Spanish -> English - 5 transcript lines',
-            onTap: onOpenListening,
-          ),
-          _MeetingRow(
-            title: 'Read-aloud follow-up',
-            detail: 'English -> Japanese - queued audio',
-            onTap: onOpenSpeakingPaused,
-          ),
+          if (meetings.isEmpty)
+            Text(
+              'No saved meetings yet',
+              style: AppTextStyles.body(Theme.of(context).textTheme),
+            )
+          else
+            for (final meeting in meetings)
+              _MeetingRow(
+                meeting: meeting,
+                onTap: () => onOpenMeeting(meeting),
+                onDelete: () => onDeleteMeeting(meeting),
+              ),
         ],
       ),
     );
@@ -843,14 +956,14 @@ class _MeetingHistorySheet extends StatelessWidget {
 
 class _MeetingRow extends StatelessWidget {
   const _MeetingRow({
-    required this.title,
-    required this.detail,
+    required this.meeting,
     required this.onTap,
+    required this.onDelete,
   });
 
-  final String title;
-  final String detail;
+  final StoredMeeting meeting;
   final VoidCallback onTap;
+  final Future<void> Function() onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -862,21 +975,28 @@ class _MeetingRow extends StatelessWidget {
         child: Icon(Icons.forum_outlined),
       ),
       title: Text(
-        title,
+        meeting.title,
         style: AppTextStyles.label(Theme.of(context).textTheme),
       ),
       subtitle: Text(
-        detail,
+        '${meeting.sourceLanguageLabel} -> ${meeting.targetLanguageLabel} - '
+        '${meeting.transcriptCount} transcript lines',
         style: AppTextStyles.compact(Theme.of(context).textTheme),
       ),
-      trailing: const Icon(Icons.chevron_right_rounded),
+      trailing: IconButton(
+        tooltip: 'Delete meeting',
+        onPressed: onDelete,
+        icon: const Icon(Icons.delete_outline_rounded),
+      ),
       onTap: onTap,
     );
   }
 }
 
 class _ExportSheet extends StatefulWidget {
-  const _ExportSheet();
+  const _ExportSheet({required this.repository});
+
+  final LocalMeetingRepository repository;
 
   @override
   State<_ExportSheet> createState() => _ExportSheetState();
@@ -927,7 +1047,22 @@ class _ExportSheetState extends State<_ExportSheet> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () async {
+                await widget.repository.saveRecipientPreferences(
+                  RecipientPreferences(
+                    rememberedRecipients: _recipients.keys.toList(
+                      growable: false,
+                    ),
+                    lastSelectedRecipients: [
+                      for (final entry in _recipients.entries)
+                        if (entry.value) entry.key,
+                    ],
+                  ),
+                );
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
               icon: const Icon(Icons.ios_share_rounded),
               label: const Text('Open share sheet'),
             ),

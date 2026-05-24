@@ -1,0 +1,143 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
+import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
+import 'package:realtime_translate_mobile/src/storage/local_storage_models.dart';
+
+void main() {
+  test('persists meetings and transcript history in encrypted store', () async {
+    final store = MemoryEncryptedLocalStore();
+    final repository = LocalMeetingRepository(store: store);
+    final createdAt = DateTime.utc(2026, 5, 24, 1);
+    final updatedAt = DateTime.utc(2026, 5, 24, 2);
+
+    final meeting = StoredMeeting(
+      id: 'meeting-1',
+      title: 'Project timeline review',
+      createdAt: createdAt,
+      updatedAt: createdAt,
+      sourceLanguageLabel: 'Auto-detect Spanish',
+      targetLanguageLabel: 'English',
+      transcriptEntries: const [],
+      summaryMetadata: const StoredSummaryMetadata.empty(),
+    );
+
+    await repository.upsertMeeting(meeting);
+    await repository.appendTranscriptEntry(
+      meetingId: meeting.id,
+      updatedAt: updatedAt,
+      entry: StoredTranscriptEntry(
+        id: 'entry-1',
+        meetingId: meeting.id,
+        languageCode: 'ES',
+        originalText: '¿Podemos reunirnos el martes?',
+        translatedText: 'Can we meet on Tuesday?',
+        timestamp: updatedAt,
+        speakerLabel: null,
+        confidence: 0.98,
+        status: 'final',
+        playbackState: 'playable',
+      ),
+    );
+
+    final snapshot = await repository.loadSnapshot();
+
+    expect(repository.isEncryptedAtRest, isTrue);
+    expect(store.storageDescription, contains('encrypted'));
+    expect(snapshot.meetings, hasLength(1));
+    expect(snapshot.meetings.single.transcriptCount, 1);
+    expect(
+      snapshot.meetings.single.transcriptEntries.single.translatedText,
+      contains('Tuesday'),
+    );
+  });
+
+  test(
+    'deletes meeting history without clearing recipient preferences',
+    () async {
+      final repository = LocalMeetingRepository(
+        store: MemoryEncryptedLocalStore(),
+      );
+      final now = DateTime.utc(2026, 5, 24);
+
+      await repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Delete me',
+          createdAt: now,
+          updatedAt: now,
+          sourceLanguageLabel: 'English',
+          targetLanguageLabel: 'Japanese',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+      await repository.saveRecipientPreferences(
+        const RecipientPreferences(
+          rememberedRecipients: ['recipient@example.com'],
+          lastSelectedRecipients: ['recipient@example.com'],
+        ),
+      );
+
+      await repository.deleteMeeting('meeting-1');
+
+      final snapshot = await repository.loadSnapshot();
+      expect(snapshot.meetings, isEmpty);
+      expect(snapshot.recipientPreferences.rememberedRecipients, [
+        'recipient@example.com',
+      ]);
+    },
+  );
+
+  test(
+    'stores recent language routes and recipient preferences locally',
+    () async {
+      final repository = LocalMeetingRepository(
+        store: MemoryEncryptedLocalStore(),
+      );
+      final now = DateTime.utc(2026, 5, 24, 3);
+
+      await repository.saveRecentLanguageRoute(
+        LanguageRoutePreference(
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          updatedAt: now,
+        ),
+      );
+      await repository.saveRecipientPreferences(
+        const RecipientPreferences(
+          rememberedRecipients: [
+            'recipient@example.com',
+            'assistant@example.com',
+          ],
+          lastSelectedRecipients: ['assistant@example.com'],
+        ),
+      );
+
+      final snapshot = await repository.loadSnapshot();
+      expect(
+        snapshot.recentLanguageRoutes.single.targetLanguageLabel,
+        'English',
+      );
+      expect(snapshot.recipientPreferences.lastSelectedRecipients, [
+        'assistant@example.com',
+      ]);
+    },
+  );
+
+  test('deleteAllLocalData clears sensitive local storage document', () async {
+    final repository = LocalMeetingRepository(
+      store: MemoryEncryptedLocalStore(),
+    );
+
+    await repository.saveSensitivePreference(key: 'retentionDays', value: '30');
+    await repository.saveCredentialSessionMaterial(
+      key: 'directOpenAISessionPlaceholder',
+      value: 'placeholder-only',
+    );
+    await repository.deleteAllLocalData();
+
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.sensitivePreferences, isEmpty);
+    expect(snapshot.credentialSessionMaterial, isEmpty);
+  });
+}

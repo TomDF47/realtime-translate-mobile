@@ -233,6 +233,7 @@ Closed planning and implementation intake:
 - #1 Finalize product spec and mockup intake.
 - #2 Scaffold Flutter mobile app.
 - #3 Implement Flutter UI from supplied mockups for phone-only MVP.
+- #9 Implement local encrypted meeting storage.
 - #11 Document Android emulator workflow for Codex.
 - #13 Implement microphone permissions and live session lifecycle.
 - #18 Define Flutter design tokens and reusable mockup components.
@@ -242,7 +243,6 @@ Open MVP/planning work:
 - #6 Integrate direct OpenAI Realtime Translation.
 - #7 Implement language support and fallback routing.
 - #8 Add scoped AI chat over local meetings.
-- #9 Implement local encrypted meeting storage.
 - #10 Maintain cybersecurity threat model and report.
 - #12 Create phone-only MVP test strategy.
 - #14 Harden direct OpenAI realtime resilience.

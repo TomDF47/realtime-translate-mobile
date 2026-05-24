@@ -3,10 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
+import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
+import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
 
 void main() {
   testWidgets('shows phone-local start surface', (tester) async {
-    await tester.pumpWidget(const LiveTranslateApp());
+    await tester.pumpWidget(
+      LiveTranslateApp(meetingRepository: _testRepository()),
+    );
 
     expect(find.text('Live Translate'), findsOneWidget);
     expect(find.text('Start new meeting'), findsOneWidget);
@@ -29,7 +33,10 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      LiveTranslateApp(permissionGateway: _FakePermissionGateway.granted()),
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: _testRepository(),
+      ),
     );
 
     await tester.tap(find.text('Start new meeting'));
@@ -55,8 +62,12 @@ void main() {
   testWidgets('opens amber paused read-aloud and export surfaces', (
     tester,
   ) async {
+    final repository = _testRepository();
     await tester.pumpWidget(
-      LiveTranslateApp(permissionGateway: _FakePermissionGateway.granted()),
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+      ),
     );
 
     await tester.tap(find.text('Start new meeting'));
@@ -79,13 +90,24 @@ void main() {
     expect(find.text('Summary'), findsOneWidget);
     expect(find.text('Both'), findsOneWidget);
     expect(find.text('recipient@example.com'), findsOneWidget);
+
+    await tester.tap(find.text('Open share sheet'));
+    await tester.pumpAndSettle();
+
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.recipientPreferences.lastSelectedRecipients, [
+      'recipient@example.com',
+    ]);
   });
 
   testWidgets('blocks live session when microphone permission is denied', (
     tester,
   ) async {
     await tester.pumpWidget(
-      LiveTranslateApp(permissionGateway: _FakePermissionGateway.denied()),
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.denied(),
+        meetingRepository: _testRepository(),
+      ),
     );
 
     await tester.tap(find.text('Start new meeting'));
@@ -101,6 +123,37 @@ void main() {
     );
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
   });
+
+  testWidgets('persists and deletes local meeting history', (tester) async {
+    final repository = _testRepository();
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+      ),
+    );
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pumpAndSettle();
+    expect((await repository.loadSnapshot()).meetings, hasLength(1));
+
+    await tester.tap(find.byTooltip('Open menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Meeting history'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Project timeline review'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Delete meeting'));
+    await tester.pumpAndSettle();
+
+    expect((await repository.loadSnapshot()).meetings, isEmpty);
+    expect(find.text('Start new meeting'), findsOneWidget);
+  });
+}
+
+LocalMeetingRepository _testRepository() {
+  return LocalMeetingRepository(store: MemoryEncryptedLocalStore());
 }
 
 class _FakePermissionGateway implements MicrophonePermissionGateway {
