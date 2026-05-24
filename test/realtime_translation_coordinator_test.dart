@@ -346,6 +346,125 @@ void main() {
   );
 
   test(
+    'generated-speech-style reconnect keeps one committed transcript row',
+    () async {
+      final reconnectDelays = <Duration>[];
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectDelay: (delay) async {
+          reconnectDelays.add(delay);
+        },
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 7);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Generated speech reconnect',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'en',
+          profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Buenos ',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'dias',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Buenos dias',
+          ),
+        )
+        ..addEvent(
+          OpenAiRealtimeAudioDelta(
+            type: 'session.output_audio.delta',
+            base64Audio: base64Encode([1, 2, 3, 4]),
+          ),
+        )
+        ..addEvent(const OpenAiRealtimeSessionClosed(type: 'socket.closed'));
+      await _drainAsync();
+
+      expect(reconnectDelays, hasLength(1));
+      expect(harness.realtimeGateway.connectCount, 2);
+      expect(harness.captureGateway.startCount, 2);
+      expect(harness.playbackGateway.startCount, 2);
+      expect(harness.playbackGateway.stopCount, greaterThanOrEqualTo(1));
+      expect(harness.playbackGateway.enqueuedChunks, isEmpty);
+
+      harness.realtimeGateway.session
+        ..addEvent(
+          OpenAiRealtimeAudioDelta(
+            type: 'session.output_audio.delta',
+            base64Audio: base64Encode([5, 6, 7, 8]),
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Good ',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'morning',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Good morning.',
+          ),
+        );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(harness.controller.state.phase, LiveSessionPhase.listening);
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, 'Buenos dias');
+      expect(entries.single.translatedText, 'Good morning.');
+      expect(entries.single.status, 'final');
+      expect(harness.playbackGateway.enqueuedChunks, hasLength(1));
+      expect(harness.playbackGateway.enqueuedChunks.single.bytes, [5, 6, 7, 8]);
+    },
+  );
+
+  test(
     'failed reconnect exhausts policy and marks partial transcript interrupted',
     () async {
       final harness = await _Harness.create(
