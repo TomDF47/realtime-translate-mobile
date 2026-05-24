@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'src/export/local_meeting_exporter.dart';
@@ -22,6 +23,9 @@ import 'src/storage/local_storage_models.dart';
 import 'src/theme/live_translate_theme.dart';
 import 'src/ui/live_translate_components.dart';
 import 'src/ui/live_translate_models.dart';
+
+const _debugE2eHarnessEnabled =
+    kDebugMode && bool.fromEnvironment('LIVE_TRANSLATE_DEBUG_E2E');
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -278,6 +282,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   OpenAiCredentialStatus _openAiCredentialStatus =
       const OpenAiCredentialStatus.missing();
   String? _activeMeetingId;
+  String? _debugRealtimeProofStatus;
 
   @override
   void initState() {
@@ -740,6 +745,63 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
   }
 
+  Future<void> _runDebugRealtimeProof() async {
+    if (!_debugE2eHarnessEnabled) {
+      return;
+    }
+
+    final meetingId = _activeMeetingId;
+    if (meetingId == null) {
+      setState(() => _debugRealtimeProofStatus = 'Debug realtime proof failed');
+      return;
+    }
+
+    final beforeSnapshot = await _meetingRepository.loadSnapshot();
+    final beforeRealtimeRows = _realtimeRowCount(beforeSnapshot, meetingId);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _debugRealtimeProofStatus = 'Debug realtime proof running');
+    try {
+      final result = await _realtimeCoordinator
+          .debugInjectGeneratedSpeechStyleReconnectProof();
+      final afterSnapshot = await _meetingRepository.loadSnapshot();
+      final afterRealtimeRows = _realtimeRowCount(afterSnapshot, meetingId);
+      if (!mounted) {
+        return;
+      }
+
+      final newRealtimeRows = afterRealtimeRows - beforeRealtimeRows;
+      final passed =
+          newRealtimeRows == 1 &&
+          result.playbackChunkCount == 1 &&
+          result.simulatedReconnectCount == 1;
+      setState(() {
+        _debugRealtimeProofStatus = passed
+            ? 'Debug realtime proof passed: 1 realtime row, 1 audio chunk'
+            : 'Debug realtime proof failed';
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _debugRealtimeProofStatus = 'Debug realtime proof failed');
+    }
+  }
+
+  int _realtimeRowCount(LocalStorageSnapshot snapshot, String meetingId) {
+    for (final meeting in snapshot.meetings) {
+      if (meeting.id == meetingId) {
+        return meeting.transcriptEntries
+            .where((entry) => entry.id.contains('-realtime-'))
+            .length;
+      }
+    }
+
+    return 0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessionState = _sessionController.state;
@@ -783,6 +845,12 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
             _showLanguageOptionsSheet(isTarget: true),
         onDirectionSwitch: _openSpeakingPaused,
         onBottomAction: _handleBottomAction,
+        debugHarness: _debugE2eHarnessEnabled
+            ? DebugRealtimeProofPanel(
+                status: _debugRealtimeProofStatus,
+                onRun: _runDebugRealtimeProof,
+              )
+            : null,
       ),
       _AppSurface.speakingPaused => LiveSessionScreen(
         session: _sessionForSurface(_AppSurface.speakingPaused),
@@ -794,6 +862,12 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
             _showLanguageOptionsSheet(isTarget: true),
         onDirectionSwitch: _openListening,
         onBottomAction: _handleBottomAction,
+        debugHarness: _debugE2eHarnessEnabled
+            ? DebugRealtimeProofPanel(
+                status: _debugRealtimeProofStatus,
+                onRun: _runDebugRealtimeProof,
+              )
+            : null,
       ),
     };
   }
@@ -1162,6 +1236,7 @@ class LiveSessionScreen extends StatelessWidget {
     required this.onOpenTargetLanguageOptions,
     required this.onDirectionSwitch,
     required this.onBottomAction,
+    this.debugHarness,
   });
 
   final LiveSessionViewData session;
@@ -1171,6 +1246,7 @@ class LiveSessionScreen extends StatelessWidget {
   final VoidCallback onOpenTargetLanguageOptions;
   final VoidCallback onDirectionSwitch;
   final ValueChanged<BottomControlActionData> onBottomAction;
+  final Widget? debugHarness;
 
   @override
   Widget build(BuildContext context) {
@@ -1197,6 +1273,10 @@ class LiveSessionScreen extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           _FeatureRow(features: session.features),
+          if (debugHarness != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            debugHarness!,
+          ],
           if (session.queueBanner != null) ...[
             const SizedBox(height: AppSpacing.xs),
             QueueBanner(
@@ -1225,6 +1305,50 @@ class LiveSessionScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class DebugRealtimeProofPanel extends StatelessWidget {
+  const DebugRealtimeProofPanel({
+    super.key,
+    required this.status,
+    required this.onRun,
+  });
+
+  final String? status;
+  final VoidCallback onRun;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: 'Debug realtime proof panel',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                status ?? 'Debug realtime proof idle',
+                style: AppTextStyles.compact(Theme.of(context).textTheme),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            OutlinedButton.icon(
+              onPressed: onRun,
+              icon: const Icon(Icons.science_rounded, size: 16),
+              label: const Text('Run debug realtime proof'),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -465,6 +465,61 @@ void main() {
   );
 
   test(
+    'debug generated-speech proof writes one realtime row and recovered audio',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 8);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Debug proof',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'en',
+          profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+
+      final result = await harness.coordinator
+          .debugInjectGeneratedSpeechStyleReconnectProof();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(result.transcriptEventCount, 5);
+      expect(result.playbackChunkCount, 1);
+      expect(result.simulatedReconnectCount, 1);
+      expect(entries, hasLength(1));
+      expect(entries.single.id, contains('-realtime-'));
+      expect(entries.single.originalText, 'Generated speech');
+      expect(entries.single.translatedText, 'Generated translation.');
+      expect(entries.single.status, 'final');
+      expect(harness.playbackGateway.enqueuedChunks, hasLength(1));
+      expect(harness.playbackGateway.enqueuedChunks.single.bytes, [5, 6, 7, 8]);
+      expect(harness.playbackGateway.stopCount, greaterThanOrEqualTo(1));
+    },
+  );
+
+  test(
     'failed reconnect exhausts policy and marks partial transcript interrupted',
     () async {
       final harness = await _Harness.create(

@@ -56,9 +56,13 @@ Installed APK emulator E2E, only when `/home/tom/.openclaw/secrets/realtime-tran
 export PATH=/home/tom/.local/share/flutter/bin:$PATH
 flutter build apk --debug
 scripts/android_emulator_e2e.sh --with-live-credential
+flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
+scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 ```
 
 The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
+
+The `--debug-live-events` mode requires the debug Dart define shown above. It is an installed-app coordinator/storage/playback proof that reports only row/audio counts; it does not use a production hook, live OpenAI speech, emulator microphone input, or audible speaker validation.
 
 Android emulator available on Tom's Fedora machine:
 
@@ -73,6 +77,8 @@ emulator -no-window
 ```
 
 It is known to segfault on this Fedora/KDE/Wayland setup.
+
+Microphone injection status as of 2026-05-24 18:27 AWST: the current `android-pixel9-headless` launcher passes `-no-audio`, so emulator microphone capture receives zeroed input. The Android emulator exposes host microphone passthrough through `-allow-host-audio`, but the local tooling does not provide a reliable documented way to feed a generated WAV/PCM stream into the emulator microphone for repeatable E2E. Use the debug generated-event proof for installed-app coordinator/storage/playback validation until a real device, a host-audio launcher variant, or a controllable virtual audio device is added and documented.
 
 Android environment variables verified by `flutter doctor -v`:
 

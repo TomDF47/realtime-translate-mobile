@@ -22,6 +22,18 @@ enum LiveRealtimeStartResult {
   failed,
 }
 
+class LiveRealtimeDebugProofResult {
+  const LiveRealtimeDebugProofResult({
+    required this.transcriptEventCount,
+    required this.playbackChunkCount,
+    required this.simulatedReconnectCount,
+  });
+
+  final int transcriptEventCount;
+  final int playbackChunkCount;
+  final int simulatedReconnectCount;
+}
+
 class LiveRealtimeTranslationCoordinator {
   LiveRealtimeTranslationCoordinator({
     required this.sessionController,
@@ -148,6 +160,86 @@ class LiveRealtimeTranslationCoordinator {
     _activeTranscriptCommitTarget = null;
     await _closeRealtimeResources(graceful: true, finishTranscript: true);
     sessionController.stopMeeting();
+  }
+
+  Future<LiveRealtimeDebugProofResult>
+  debugInjectGeneratedSpeechStyleReconnectProof() async {
+    var assertEnabled = false;
+    assert(() {
+      assertEnabled = true;
+      return true;
+    }());
+    if (!assertEnabled) {
+      throw UnsupportedError('Debug realtime proof is disabled in release.');
+    }
+    if (_transcriptCommitter == null) {
+      throw StateError('Debug realtime proof requires an active meeting.');
+    }
+
+    _handleRealtimeEvent(
+      const OpenAiRealtimeTranscriptDelta(
+        type: 'session.input_transcript.delta',
+        kind: OpenAiRealtimeTranscriptKind.source,
+        delta: 'Generated ',
+      ),
+    );
+    _handleRealtimeEvent(
+      const OpenAiRealtimeTranscriptDelta(
+        type: 'session.input_transcript.delta',
+        kind: OpenAiRealtimeTranscriptKind.source,
+        delta: 'speech',
+      ),
+    );
+    _handleRealtimeEvent(
+      const OpenAiRealtimeTranscriptCompleted(
+        type: 'session.input_transcript.done',
+        kind: OpenAiRealtimeTranscriptKind.source,
+        transcript: 'Generated speech',
+      ),
+    );
+    _handleRealtimeEvent(
+      OpenAiRealtimeAudioDelta(
+        type: 'session.output_audio.delta',
+        base64Audio: base64Encode([1, 2, 3, 4]),
+      ),
+    );
+    await _drainDebugProofQueue();
+
+    final config = _activeConfig;
+    await playbackGateway.stop(clearQueue: true);
+    await playbackGateway.start(
+      TranslatedAudioPlaybackConfig.openAiRealtime(
+        sampleRateHz: config?.inputAudioRate ?? 24000,
+      ),
+    );
+
+    _handleRealtimeEvent(
+      OpenAiRealtimeAudioDelta(
+        type: 'session.output_audio.delta',
+        base64Audio: base64Encode([5, 6, 7, 8]),
+      ),
+    );
+    _handleRealtimeEvent(
+      const OpenAiRealtimeTranscriptDelta(
+        type: 'session.output_transcript.delta',
+        kind: OpenAiRealtimeTranscriptKind.translation,
+        delta: 'Generated ',
+      ),
+    );
+    _handleRealtimeEvent(
+      const OpenAiRealtimeTranscriptCompleted(
+        type: 'session.output_transcript.done',
+        kind: OpenAiRealtimeTranscriptKind.translation,
+        transcript: 'Generated translation.',
+      ),
+    );
+    await _drainDebugProofQueue();
+
+    return const LiveRealtimeDebugProofResult(
+      transcriptEventCount: 5,
+      playbackChunkCount: 1,
+      simulatedReconnectCount: 1,
+    );
   }
 
   void dispose() {
@@ -456,6 +548,12 @@ class LiveRealtimeTranslationCoordinator {
       }
     } finally {
       _closingIntentionally = false;
+    }
+  }
+
+  Future<void> _drainDebugProofQueue() async {
+    for (var i = 0; i < 6; i++) {
+      await Future<void>.delayed(Duration.zero);
     }
   }
 }

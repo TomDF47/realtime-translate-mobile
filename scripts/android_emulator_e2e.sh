@@ -12,10 +12,11 @@ APK_PATH="${APK_PATH:-$DEFAULT_APK}"
 SECRET_FILE="${OPENAI_SECRET_FILE:-$DEFAULT_SECRET_FILE}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-$DEFAULT_ARTIFACT_DIR}"
 USE_LIVE_CREDENTIAL=0
+RUN_DEBUG_LIVE_EVENTS=0
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--apk PATH]
+Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--debug-live-events] [--apk PATH]
 
 Installs the debug APK on Pixel_9_API_36_Play or an already-connected Android
 emulator, drives the phone-local setup flow with UIAutomator/adb, writes
@@ -25,6 +26,9 @@ Options:
   --with-live-credential  Read the OpenAI credential from the local secret file
                           and drive the setup -> permission -> live surface flow.
                           The credential is never printed. App data is cleared.
+  --debug-live-events     After reaching the live surface, drive the opt-in
+                          debug-only generated-event proof. Build the APK with
+                          --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true first.
   --apk PATH              APK to install. Defaults to build/app/outputs/flutter-apk/app-debug.apk.
   --help                  Show this help.
 USAGE
@@ -34,6 +38,10 @@ while (($#)); do
   case "$1" in
     --with-live-credential)
       USE_LIVE_CREDENTIAL=1
+      shift
+      ;;
+    --debug-live-events)
+      RUN_DEBUG_LIVE_EVENTS=1
       shift
       ;;
     --apk)
@@ -55,6 +63,11 @@ while (($#)); do
       ;;
   esac
 done
+
+if ((RUN_DEBUG_LIVE_EVENTS)) && ((! USE_LIVE_CREDENTIAL)); then
+  echo "--debug-live-events requires --with-live-credential" >&2
+  exit 2
+fi
 
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
@@ -209,7 +222,7 @@ enter_secret_text() {
   # credentials used here are expected to be ASCII token material. The value is
   # passed directly to adb without shell tracing or logging. Send it in chunks
   # because long input text commands can drop characters on some emulator builds.
-  local chunk_size=32
+  local chunk_size=8
   local index=0
   local chunk
   while ((index < ${#value})); do
@@ -315,12 +328,21 @@ if ((USE_LIVE_CREDENTIAL)); then
   screencap_to "$ARTIFACT_DIR/04-live-listening.png"
   dump_ui_to "$ARTIFACT_DIR/04-live-listening.xml"
 
+  if ((RUN_DEBUG_LIVE_EVENTS)); then
+    log "Running opt-in debug generated-event proof"
+    wait_for_ui "Run debug realtime proof" 10
+    tap_ui "Run debug realtime proof"
+    wait_for_ui "Debug realtime proof passed: 1 realtime row, 1 audio chunk" 30
+    screencap_to "$ARTIFACT_DIR/05-debug-realtime-proof.png"
+    dump_ui_to "$ARTIFACT_DIR/05-debug-realtime-proof.xml"
+  fi
+
   log "Opening scoped AI chat sheet without sending a prompt"
   tap_ui "Open AI chat"
   wait_for_ui "AI Chat" 20
   wait_for_ui "This meeting" 10
-  screencap_to "$ARTIFACT_DIR/05-ai-chat-this-meeting.png"
-  dump_ui_to "$ARTIFACT_DIR/05-ai-chat-this-meeting.xml"
+  screencap_to "$ARTIFACT_DIR/06-ai-chat-this-meeting.png"
+  dump_ui_to "$ARTIFACT_DIR/06-ai-chat-this-meeting.xml"
 fi
 
 cleanup_app_data

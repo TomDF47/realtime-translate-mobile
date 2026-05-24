@@ -243,3 +243,24 @@ Implications:
 - Real audible translated-audio validation still requires a real streaming session or controllable translated-audio source; do not claim spoken end-to-end translation from fake PCM16 queue tests.
 - Future iOS output must stay behind the same gateway and receive equivalent privacy/security review.
 - Any future playback package, resampler, audio effects SDK, route-management permission, or persisted audio cache must update the cybersecurity report and rerun supply-chain checks.
+
+## 2026-05-24 - Debug Installed-App Generated Event Proof
+
+Status: Accepted
+
+Decision:
+
+- Add an opt-in installed-app proof that is available only in debug builds compiled with `--dart-define=LIVE_TRANSLATE_DEBUG_E2E=true`.
+- Drive generated-speech-shaped realtime transcript/audio events through the app coordinator, simulate playback teardown/restart, and verify exactly one new realtime transcript row plus one recovered audio chunk through sanitized UI text.
+- Keep the proof absent from normal debug builds, absent from release UI through `kDebugMode`, and guarded in the coordinator by an assert-enabled runtime check.
+- Treat this as coordinator/storage/playback validation only, not as live OpenAI, physical microphone, or audible speaker evidence.
+
+Rationale:
+
+- The current `android-pixel9-headless` launcher hardcodes `-no-audio`, while the Android emulator exposes host microphone passthrough through `-allow-host-audio` but not a reliable documented generated WAV/PCM microphone injection path.
+- The debug proof gives the installed APK a repeatable E2E check for transcript de-duplication and playback recovery without storing audio fixtures, printing payloads, adding packages, or adding a production backdoor.
+
+Implications:
+
+- #6/#14 still need physical microphone/live speech validation and audible speaker validation on a real device, a host-audio emulator launcher variant, or a controllable virtual audio device.
+- Future agents must not present `--debug-live-events` as live OpenAI or microphone evidence.
