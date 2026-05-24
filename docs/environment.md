@@ -61,9 +61,10 @@ scripts/android_emulator_e2e.sh --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
+scripts/build_debug_apk_artifact.sh --release
 ```
 
-`scripts/build_debug_apk_artifact.sh` copies the debug APK to `/tmp` with a commit-and-timestamp filename and writes a `.sha256` sidecar. It does not read the local OpenAI secret file and is suitable for local APK handoff when live OpenAI quota is blocked.
+`scripts/build_debug_apk_artifact.sh` copies the requested APK to `/tmp` with a commit-and-timestamp filename and writes a `.sha256` sidecar. Debug is the default; `--debug-live-events` builds the debug-only E2E proof variant; `--release` builds a release APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback. Debug-signed release artifacts are local handoff artifacts only, not store-ready builds. The script does not read the local OpenAI secret file and is suitable for local APK handoff when live OpenAI quota is blocked.
 
 The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator when a live credential is requested, can run a non-live credential save/remove/reset gate with `--verify-credential-reset`, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
 
@@ -165,6 +166,8 @@ cp android/key.properties.example android/key.properties
 ```
 
 Then fill `android/key.properties` with local, uncommitted values. Do not commit `android/key.properties`, keystores, signing passwords, or certificates.
+
+If `android/key.properties` is absent, the Gradle release build uses the debug signing config as a local fallback. This keeps release-mode smoke builds possible, but those APKs must be treated as debug-signed handoff artifacts. Use `scripts/build_debug_apk_artifact.sh --release` to make that signing status explicit in the artifact filename and console output.
 
 ## Deferred V2 Configuration
 

@@ -5,19 +5,26 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_OUTPUT_DIR="/tmp"
 OUTPUT_DIR="${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}"
 BUILD_MODE="debug"
+REQUESTED_MODE="debug"
 ENABLE_DEBUG_LIVE_EVENTS=0
 SKIP_BUILD=0
+SIGNING_NOTE="debug build"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/build_debug_apk_artifact.sh [--debug-live-events] [--output-dir DIR] [--skip-build]
+Usage: scripts/build_debug_apk_artifact.sh [--release] [--debug-live-events] [--output-dir DIR] [--skip-build]
 
-Builds the Android debug APK and copies it to /tmp with a clear filename plus a
-SHA-256 sidecar. This script does not read or print OpenAI credentials.
+Builds an Android APK and copies it to /tmp with a clear filename plus a
+SHA-256 sidecar. Debug is the default. Release mode reports whether it used
+local release signing or the debug-signing fallback. This script does not read
+or print OpenAI credentials.
 
 Options:
+  --release            Build a release APK. If android/key.properties is absent,
+                       the project currently uses debug signing as a local
+                       fallback, and the artifact filename will say so.
   --debug-live-events  Build with LIVE_TRANSLATE_DEBUG_E2E=true for the
-                       installed-app generated-event E2E proof.
+                       installed-app generated-event E2E proof. Debug only.
   --output-dir DIR     Directory for copied APK artifacts. Defaults to /tmp.
   --skip-build         Copy the existing Flutter debug APK without rebuilding.
   --help               Show this help.
@@ -26,6 +33,10 @@ USAGE
 
 while (($#)); do
   case "$1" in
+    --release)
+      REQUESTED_MODE="release"
+      shift
+      ;;
     --debug-live-events)
       ENABLE_DEBUG_LIVE_EVENTS=1
       shift
@@ -58,21 +69,37 @@ export PATH="/home/tom/.local/share/flutter/bin:$PATH"
 
 cd "$PROJECT_ROOT"
 
-if ((ENABLE_DEBUG_LIVE_EVENTS)); then
+if [[ "$REQUESTED_MODE" == "release" ]] && ((ENABLE_DEBUG_LIVE_EVENTS)); then
+  echo "--debug-live-events is only valid for debug APK artifacts." >&2
+  exit 2
+fi
+
+if [[ "$REQUESTED_MODE" == "release" ]]; then
+  BUILD_ARGS=(build apk --release)
+  SOURCE_APK="$PROJECT_ROOT/build/app/outputs/flutter-apk/app-release.apk"
+  if [[ -f "$PROJECT_ROOT/android/key.properties" ]]; then
+    BUILD_MODE="release-local-signed"
+    SIGNING_NOTE="release build using local android/key.properties"
+  else
+    BUILD_MODE="release-debug-signed"
+    SIGNING_NOTE="release build using debug signing fallback; not store-ready"
+  fi
+elif ((ENABLE_DEBUG_LIVE_EVENTS)); then
   BUILD_ARGS=(build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true)
+  SOURCE_APK="$PROJECT_ROOT/build/app/outputs/flutter-apk/app-debug.apk"
   BUILD_MODE="debug-live-events"
 else
   BUILD_ARGS=(build apk --debug)
+  SOURCE_APK="$PROJECT_ROOT/build/app/outputs/flutter-apk/app-debug.apk"
 fi
 
 if ((SKIP_BUILD == 0)); then
   flutter "${BUILD_ARGS[@]}"
 fi
 
-SOURCE_APK="$PROJECT_ROOT/build/app/outputs/flutter-apk/app-debug.apk"
 if [[ ! -f "$SOURCE_APK" ]]; then
   echo "APK not found: $SOURCE_APK" >&2
-  echo "Run flutter build apk --debug first or omit --skip-build." >&2
+  echo "Run the matching flutter build command first or omit --skip-build." >&2
   exit 1
 fi
 
@@ -89,3 +116,4 @@ sha256sum "$DEST_APK" >"$DEST_SHA"
 
 printf 'APK artifact: %s\n' "$DEST_APK"
 printf 'SHA-256 sidecar: %s\n' "$DEST_SHA"
+printf 'Signing note: %s\n' "$SIGNING_NOTE"

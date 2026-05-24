@@ -115,9 +115,10 @@ scripts/android_emulator_e2e.sh --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
+scripts/build_debug_apk_artifact.sh --release
 ```
 
-For APK handoff without live OpenAI quota, `scripts/build_debug_apk_artifact.sh` produces `/tmp/realtime-translate-mobile-debug-<commit>-<timestamp>.apk` plus a `.sha256` sidecar. `--debug-live-events` produces the matching debug-only E2E proof build artifact. The script does not read the local OpenAI secret file.
+For APK handoff without live OpenAI quota, `scripts/build_debug_apk_artifact.sh` produces `/tmp/realtime-translate-mobile-<mode>-<commit>-<timestamp>.apk` plus a `.sha256` sidecar. Debug is the default, `--debug-live-events` produces the matching debug-only E2E proof build artifact, and `--release` produces a release-mode APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback; debug-signed release artifacts are not store-ready. The script does not read the local OpenAI secret file.
 
 Optional screenshot capture should write outside the repo by default:
 
@@ -130,6 +131,8 @@ The current app can verify the phone-local start surface, OpenAI setup-required 
 Latest debug APK handoff validation on 2026-05-24 20:09 AWST passed with `bash -n scripts/build_debug_apk_artifact.sh`, `git diff --check`, `bash scripts/check-docs.sh`, `flutter analyze`, `flutter test` (76 tests), `bash scripts/check-supply-chain.sh`, `scripts/build_debug_apk_artifact.sh`, and an installed no-credential emulator smoke using `scripts/android_emulator_e2e.sh --apk /tmp/realtime-translate-mobile-debug-ff4096c-20260524T120913Z.apk`. The emulator smoke did not read the live OpenAI secret and verified only install, launch, and the missing-credential gate.
 
 Latest credential reset E2E validation on 2026-05-24 20:20 AWST passed with `bash -n scripts/android_emulator_e2e.sh`, `flutter test test/widget_test.dart`, `flutter analyze`, `flutter test` (76 tests), `bash scripts/check-docs.sh`, `git diff --check`, `bash scripts/check-supply-chain.sh` with the documented Flutter `PATH`, `scripts/build_debug_apk_artifact.sh`, and `scripts/android_emulator_e2e.sh --apk /tmp/realtime-translate-mobile-debug-ac2e265-20260524T121915Z.apk --verify-credential-reset`. The emulator run used only a non-secret placeholder credential, verified the saved value was not visible after save, removed the credential, confirmed the removal action disappeared, and confirmed starting a meeting returned to the setup-required gate. It did not read the live OpenAI secret, call live OpenAI, validate microphone injection, or validate audible speaker output.
+
+Latest release APK handoff hardening on 2026-05-24 AWST added explicit `--release` artifact support. The script reports whether release mode used local `android/key.properties` signing or the debug-signing fallback, and filenames include `release-local-signed` or `release-debug-signed` accordingly. Validation passed with `bash -n scripts/build_debug_apk_artifact.sh`, `scripts/build_debug_apk_artifact.sh --help`, `flutter analyze`, `flutter test` (77 tests), `bash scripts/check-docs.sh`, `bash scripts/check-supply-chain.sh`, `git diff --check`, default debug artifact build, release artifact build, and a no-live installed emulator smoke against `/tmp/realtime-translate-mobile-release-debug-signed-8732d48-20260524T124418Z.apk`. That APK has SHA-256 `d55cf2e5f79bb0b0fa79e0fa217a7df18bf3d81196de680cd809345552f8d005`, uses the debug-signing fallback, and is only a local handoff/smoke artifact, not a store-ready release.
 
 ## CI Gates
 
