@@ -1,6 +1,6 @@
 # Cybersecurity Report
 
-Report date/time: 2026-05-24 09:35:30 AWST (Australia/Perth, UTC+08:00)
+Report date/time: 2026-05-24 10:16:47 AWST (Australia/Perth, UTC+08:00)
 
 Scope: Flutter scaffold dependency baseline, Android microphone-permission lifecycle update, and encrypted local meeting storage for the phone-only MVP. The repo now contains Flutter Android/iOS scaffold files, package manifests, a lockfile, Android Gradle build files, placeholder-only environment config, local signing placeholders, a native Android MethodChannel for runtime microphone permission, and a platform-backed secure storage repository.
 
@@ -8,7 +8,7 @@ Scope: Flutter scaffold dependency baseline, Android microphone-permission lifec
 
 The Flutter scaffold introduces pinned Dart package versions in `pubspec.lock`, Android Gradle build tooling, and a local signing placeholder. The app declares Android `RECORD_AUDIO` permission and requests it at runtime through app-owned native Android code before opening the mock live-session surface. The storage implementation adds `flutter_secure_storage` for encrypted local meeting, transcript/history, summary metadata, recent language route, recipient preference, sensitive preference, and future credential/session material storage. Android app backup is disabled in the manifest for the MVP data boundary. No app backend, AWS/Lambda token broker, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, analytics, or crash reporting code has been added.
 
-Current result: no known vulnerabilities or GitHub advisory hits were found for the introduced Pub packages or checked Maven build-tool packages during this pass. The repo still must rerun this report whenever package versions or build tooling change.
+Current result: no known vulnerabilities or GitHub advisory hits were found for the introduced Pub packages or checked Maven build-tool packages during this pass. OpenAI Realtime credential verification found a product/security blocker for #6: official docs show `gpt-realtime-translate` exists, but client-safe Realtime client secrets for web/mobile are minted by a developer-controlled server using a standard API key. #23 must decide the accepted credential/session approach before live OpenAI integration resumes. The repo still must rerun this report whenever package versions or build tooling change.
 
 ## MVP Security Posture
 
@@ -119,7 +119,7 @@ For each package or tool version introduced:
 
 ## Open Security Risks To Resolve During Implementation
 
-- Current OpenAI-supported direct mobile credential/session approach must be verified before coding.
+- #23 must decide the OpenAI Realtime mobile credential/session approach. Official docs verified on 2026-05-24 show `gpt-realtime-translate` and `v1/realtime/translations` exist, but safe client-side Realtime authentication uses short-lived client secrets minted by a developer-controlled server with a standard API key, which conflicts with the current no-backend MVP rule.
 - The final summary model and reasoning parameter names must be verified against current OpenAI API docs before coding.
 - Native secure-storage behavior should be smoke-tested on real Android and iOS devices before production release, especially for long transcript volume and backup/restore edge cases.
 - Any crash reporting or analytics SDK should be deferred unless a strong need and redaction/consent model are documented.

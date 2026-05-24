@@ -253,6 +253,7 @@ Open MVP/planning work:
 - #19 Maintain README and agent handoff docs during implementation.
 - #21 Add email export for transcripts and summaries.
 - #22 Implement dependency and supply-chain cybersecurity controls.
+- #23 Decide safe direct OpenAI mobile credential approach.
 
 Deferred V2/future issues:
 
@@ -276,7 +277,7 @@ Deferred V2/future issues:
 ## Open Questions To Resolve During Implementation
 
 - Final Android package name and signing certificate details.
-- Current OpenAI-supported direct mobile credential/session approach.
+- Current OpenAI-supported direct mobile credential/session approach. Verification on 2026-05-24 confirmed `gpt-realtime-translate` exists, but OpenAI's client-safe Realtime client secrets are minted by a developer-controlled server using a standard API key; #23 must decide how to reconcile that with the phone-only/no-backend MVP rule.
 - Current OpenAI Realtime Translation target output language support list and fallback route details.
 - Current OpenAI API support for GPT-5.5 and extra-high reasoning parameters for summary generation.
 - Whether the MVP uses user-provided OpenAI credential material or another currently supported direct OpenAI approach.

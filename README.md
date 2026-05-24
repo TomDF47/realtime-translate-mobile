@@ -38,6 +38,8 @@ Planning repo created. Supplied Android mockups have been received, copied into 
 
 The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, encrypted local meeting storage, and local meeting management. The current app can render the phone-local welcome/start screen, microphone permission denied state, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with stored metadata, select-and-continue behavior that appends local transcript history, delete controls, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, or server-side transcript handling.
 
+OpenAI Realtime verification for #6 found a credential blocker: `gpt-realtime-translate` is documented, but OpenAI's client-safe Realtime client secrets for web/mobile are minted by a developer-controlled server using a standard API key. That conflicts with the phone-only/no-backend MVP rule until #23 decides the accepted credential/session approach.
+
 Keep future work aligned to the GitHub issue acceptance criteria and preserve the phone-only MVP privacy boundary.
 
 ## Repository Map
@@ -103,7 +105,7 @@ flutter devices
 flutter run -d <android-emulator-id>
 ```
 
-Do not add real credentials to `.env.example` or any committed file. Use uncommitted local env files only for local development placeholders. Mobile credential/session material must not be bundled into the app; the implementation must verify the current OpenAI-supported direct mobile approach before coding.
+Do not add real credentials to `.env.example` or any committed file. Use uncommitted local env files only for local development placeholders. Mobile credential/session material must not be bundled into the app. #23 must decide the current OpenAI-supported direct mobile credential/session approach before #6 implementation resumes.
 
 For local Android release-signing experiments, copy [android/key.properties.example](android/key.properties.example) to `android/key.properties` and use local placeholder values only. `android/key.properties` is ignored and must not be committed.
 
@@ -134,6 +136,7 @@ Open MVP/planning work:
 - #19 Maintain README and agent handoff docs during implementation
 - #21 Add email export for transcripts and summaries
 - #22 Implement dependency and supply-chain cybersecurity controls
+- #23 Decide safe direct OpenAI mobile credential approach
 
 Deferred V2/future work:
 
