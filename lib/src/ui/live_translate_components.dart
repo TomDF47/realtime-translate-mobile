@@ -362,51 +362,60 @@ class StatusPill extends StatelessWidget {
 }
 
 class LanguageSelectorCard extends StatelessWidget {
-  const LanguageSelectorCard({super.key, required this.data});
+  const LanguageSelectorCard({super.key, required this.data, this.onTap});
 
   final LanguageSelectorData data;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final accentColor = AppColors.forAccent(data.accent);
+    final label =
+        '${data.eyebrow} language selector: ${data.primaryLabel} ${data.secondaryLabel}'
+            .trim();
+    final card = _Surface(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  data.eyebrow,
+                  style: AppTextStyles.compact(Theme.of(context).textTheme),
+                ),
+              ),
+              CircleAvatar(
+                backgroundColor: accentColor.withValues(alpha: 0.18),
+                foregroundColor: accentColor,
+                child: Icon(data.icon),
+              ),
+              const Icon(Icons.keyboard_arrow_down_rounded),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            data.primaryLabel,
+            style: AppTextStyles.label(Theme.of(context).textTheme),
+          ),
+          Text(
+            data.secondaryLabel,
+            style: AppTextStyles.label(Theme.of(context).textTheme),
+          ),
+        ],
+      ),
+    );
 
     return Semantics(
       container: true,
-      label:
-          '${data.eyebrow} language selector: ${data.primaryLabel} ${data.secondaryLabel}'
-              .trim(),
-      child: _Surface(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    data.eyebrow,
-                    style: AppTextStyles.compact(Theme.of(context).textTheme),
-                  ),
-                ),
-                CircleAvatar(
-                  backgroundColor: accentColor.withValues(alpha: 0.18),
-                  foregroundColor: accentColor,
-                  child: Icon(data.icon),
-                ),
-                const Icon(Icons.keyboard_arrow_down_rounded),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              data.primaryLabel,
-              style: AppTextStyles.label(Theme.of(context).textTheme),
-            ),
-            Text(
-              data.secondaryLabel,
-              style: AppTextStyles.label(Theme.of(context).textTheme),
-            ),
-          ],
-        ),
+      button: onTap != null,
+      label: label,
+      onTap: onTap,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        onTap: onTap,
+        child: card,
       ),
     );
   }

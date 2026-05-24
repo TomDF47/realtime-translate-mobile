@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'src/language/language_support.dart';
 import 'src/mock/mock_live_translate_data.dart';
 import 'src/session/live_session_controller.dart';
 import 'src/session/microphone_permission.dart';
@@ -537,6 +538,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
   }
 
+  void _showLanguageOptionsSheet({required bool isTarget}) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _LanguageOptionsSheet(isTarget: isTarget),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessionState = _sessionController.state;
@@ -564,6 +574,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         session: _sessionForSurface(_AppSurface.listening),
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
+        onOpenSourceLanguageOptions: () =>
+            _showLanguageOptionsSheet(isTarget: false),
+        onOpenTargetLanguageOptions: () =>
+            _showLanguageOptionsSheet(isTarget: true),
         onDirectionSwitch: _openSpeakingPaused,
         onBottomAction: _handleBottomAction,
       ),
@@ -571,6 +585,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         session: _sessionForSurface(_AppSurface.speakingPaused),
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
+        onOpenSourceLanguageOptions: () =>
+            _showLanguageOptionsSheet(isTarget: false),
+        onOpenTargetLanguageOptions: () =>
+            _showLanguageOptionsSheet(isTarget: true),
         onDirectionSwitch: _openListening,
         onBottomAction: _handleBottomAction,
       ),
@@ -858,6 +876,8 @@ class LiveSessionScreen extends StatelessWidget {
     required this.session,
     required this.onOpenMenu,
     required this.onOpenAssistant,
+    required this.onOpenSourceLanguageOptions,
+    required this.onOpenTargetLanguageOptions,
     required this.onDirectionSwitch,
     required this.onBottomAction,
   });
@@ -865,6 +885,8 @@ class LiveSessionScreen extends StatelessWidget {
   final LiveSessionViewData session;
   final VoidCallback onOpenMenu;
   final VoidCallback onOpenAssistant;
+  final VoidCallback onOpenSourceLanguageOptions;
+  final VoidCallback onOpenTargetLanguageOptions;
   final VoidCallback onDirectionSwitch;
   final ValueChanged<BottomControlActionData> onBottomAction;
 
@@ -888,6 +910,8 @@ class LiveSessionScreen extends StatelessWidget {
           _LanguageRouteRow(
             session: session,
             onDirectionSwitch: onDirectionSwitch,
+            onOpenSourceLanguageOptions: onOpenSourceLanguageOptions,
+            onOpenTargetLanguageOptions: onOpenTargetLanguageOptions,
           ),
           const SizedBox(height: AppSpacing.xs),
           _FeatureRow(features: session.features),
@@ -928,24 +952,38 @@ class _LanguageRouteRow extends StatelessWidget {
   const _LanguageRouteRow({
     required this.session,
     required this.onDirectionSwitch,
+    required this.onOpenSourceLanguageOptions,
+    required this.onOpenTargetLanguageOptions,
   });
 
   final LiveSessionViewData session;
   final VoidCallback onDirectionSwitch;
+  final VoidCallback onOpenSourceLanguageOptions;
+  final VoidCallback onOpenTargetLanguageOptions;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Expanded(child: LanguageSelectorCard(data: session.fromLanguage)),
+        Expanded(
+          child: LanguageSelectorCard(
+            data: session.fromLanguage,
+            onTap: onOpenSourceLanguageOptions,
+          ),
+        ),
         const SizedBox(width: AppSpacing.xs),
         DirectionSwitchButton(
           accent: session.mode.accent,
           onPressed: onDirectionSwitch,
         ),
         const SizedBox(width: AppSpacing.xs),
-        Expanded(child: LanguageSelectorCard(data: session.toLanguage)),
+        Expanded(
+          child: LanguageSelectorCard(
+            data: session.toLanguage,
+            onTap: onOpenTargetLanguageOptions,
+          ),
+        ),
       ],
     );
   }
@@ -964,6 +1002,92 @@ class _FeatureRow extends StatelessWidget {
         spacing: AppSpacing.xs,
         runSpacing: AppSpacing.xs,
         children: [for (final feature in features) FeatureChip(data: feature)],
+      ),
+    );
+  }
+}
+
+class _LanguageOptionsSheet extends StatelessWidget {
+  const _LanguageOptionsSheet({required this.isTarget});
+
+  final bool isTarget;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final languages = isTarget
+        ? LanguageSupport.realtimeTargetLanguages
+        : LanguageSupport.sourceLanguages;
+
+    return _SheetFrame(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SheetHandle(),
+          Text(
+            isTarget ? 'Realtime target languages' : 'Source languages',
+            style: AppTextStyles.title(textTheme),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            isTarget
+                ? 'Default target choices stay inside the conservative realtime output table.'
+                : 'Source speech can use auto-detect or a known local language preference.',
+            style: AppTextStyles.body(textTheme),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          for (final language in languages)
+            _LanguageOptionRow(
+              language: language,
+              statusLabel: isTarget ? 'Realtime output' : 'Source input',
+            ),
+          if (isTarget) ...[
+            const SizedBox(height: AppSpacing.sm),
+            const Divider(color: AppColors.border),
+            const SizedBox(height: AppSpacing.sm),
+            Text('Fallback route', style: AppTextStyles.label(textTheme)),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Japanese and other broader targets use a direct OpenAI fallback '
+              'route once credentials are configured.',
+              style: AppTextStyles.compact(textTheme),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.sm),
+          PrivacyNote(
+            label:
+                'Fallback keeps meeting content on device except for user-approved direct OpenAI requests.',
+            icon: Icons.lock_outline,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LanguageOptionRow extends StatelessWidget {
+  const _LanguageOptionRow({required this.language, required this.statusLabel});
+
+  final TranslationLanguage language;
+  final String statusLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const CircleAvatar(
+        backgroundColor: AppColors.surfacePressed,
+        foregroundColor: AppColors.teal,
+        child: Icon(Icons.language_rounded),
+      ),
+      title: Text(
+        language.displayLabel,
+        style: AppTextStyles.label(Theme.of(context).textTheme),
+      ),
+      subtitle: Text(
+        statusLabel,
+        style: AppTextStyles.compact(Theme.of(context).textTheme),
       ),
     );
   }

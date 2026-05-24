@@ -10,6 +10,7 @@ Flutter phone app
        model: gpt-realtime-translate
        sends microphone audio
        receives translated audio and transcript deltas
+       target language must pass the local realtime language table
 
 Flutter phone app
   -> OpenAI API directly for AI chat and summaries
@@ -91,6 +92,8 @@ assets/mockups/              Supplied Android mockups
 ```
 
 The current app shell renders the phone-local welcome/start surface, Android microphone permission gate, mockup-derived live translation surfaces, scoped AI chat sheet, encrypted local meeting history sheet, and local email export sheet. The lifecycle controller models permission, listening, read-aloud-paused, reconnecting, stop, app background/foreground, and audio-route state transitions. The storage layer persists meetings, transcript/history entries, summary metadata, recent language routes, recipient preferences, sensitive preferences, and future credential/session material through `flutter_secure_storage`, with Android backup disabled for app data. Meeting management can start a new local meeting, select a stored meeting, reopen it as the active encrypted local context, append continuation transcript history, and delete stored meeting metadata. Real microphone capture, direct OpenAI streaming, AI chat request execution, summary generation, native share handoff, and logging implementations remain scoped to their GitHub issues.
+
+Language support is centralized in `lib/src/language/language_support.dart`. The current table is conservative because official OpenAI Realtime Translation docs confirm the target-language parameter but do not publish a target-language enum. Default target options expose only English, Spanish, and French for realtime output; broader targets such as Japanese are represented as direct-OpenAI fallback-pending and stay inside the same phone-only privacy boundary.
 
 ## Prohibited MVP Flows
 

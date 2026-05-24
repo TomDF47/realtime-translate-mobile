@@ -136,6 +136,8 @@ Implementation requirements:
 - Make fallback behavior explicit in the UI rather than failing silently.
 - Keep fallback AI chat and translation routes phone-only except for direct OpenAI calls.
 
+Current implementation note: language support was verified on 2026-05-24 against the official OpenAI Realtime Translation guide, `gpt-realtime-translate` model page, and translation client-secret API reference. The official docs confirm the dedicated `/v1/realtime/translations` endpoint, streaming translated audio plus transcript deltas, one session per output language, and the `audio.output.language` target parameter, but they do not publish an authoritative target-language enum. Until OpenAI publishes or exposes that enum, the app uses a conservative realtime target list of English, Spanish, and French; broader targets such as Japanese are shown as direct-OpenAI fallback-pending and must not use AWS, an app backend, cloud sync, or server-side transcript handling.
+
 ## Meeting Management Requirements
 
 - User can start a new meeting.
@@ -234,6 +236,7 @@ Closed planning and implementation intake:
 - #1 Finalize product spec and mockup intake.
 - #2 Scaffold Flutter mobile app.
 - #3 Implement Flutter UI from supplied mockups for phone-only MVP.
+- #7 Implement language support and fallback routing.
 - #9 Implement local encrypted meeting storage.
 - #11 Document Android emulator workflow for Codex.
 - #13 Implement microphone permissions and live session lifecycle.
@@ -246,7 +249,6 @@ Closed planning and implementation intake:
 Open MVP/planning work:
 
 - #6 Integrate direct OpenAI Realtime Translation.
-- #7 Implement language support and fallback routing.
 - #8 Add scoped AI chat over local meetings.
 - #10 Maintain cybersecurity threat model and report.
 - #12 Create phone-only MVP test strategy.
@@ -279,7 +281,7 @@ Deferred V2/future issues:
 
 - Final Android package name and signing certificate details.
 - Current OpenAI-supported direct mobile credential/session approach. Verification on 2026-05-24 confirmed `gpt-realtime-translate` exists, but OpenAI's client-safe Realtime client secrets are minted by a developer-controlled server using a standard API key; #23 must decide how to reconcile that with the phone-only/no-backend MVP rule.
-- Current OpenAI Realtime Translation target output language support list and fallback route details.
+- Current OpenAI Realtime Translation docs do not expose an authoritative target output language enum. The MVP currently uses the conservative English/Spanish/French realtime table and direct-OpenAI fallback-pending handling described above.
 - Current OpenAI API support for GPT-5.5 and extra-high reasoning parameters for summary generation.
 - Whether the MVP uses user-provided OpenAI credential material or another currently supported direct OpenAI approach.
 - Whether diagnostics/crash reporting is included in MVP or deferred.

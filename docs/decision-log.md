@@ -73,3 +73,24 @@ Implications:
 
 - UI work must inspect the images before implementation.
 - Any intentional drift from the mockups must update [docs/mockup-ux-spec.md](mockup-ux-spec.md) or this decision log, depending on whether interpretation or product direction changed.
+
+## 2026-05-24 - Conservative Realtime Language Table
+
+Status: Accepted
+
+Decision:
+
+- Keep a typed, centralized language support table in the Flutter app.
+- Show only English, Spanish, and French as default realtime target languages until OpenAI publishes or exposes an authoritative Realtime Translation target-language enum.
+- Treat broader targets such as Japanese as direct-OpenAI fallback-pending, not as confirmed realtime targets.
+- Keep fallback routing phone-only and do not add AWS, app backend, cloud sync, server-side transcript handling, or server mailer behavior.
+
+Rationale:
+
+- Official OpenAI docs verified on 2026-05-24 confirm `gpt-realtime-translate`, `/v1/realtime/translations`, one session per target output language, and an `audio.output.language` parameter, but do not publish a target-language enum.
+- A conservative table avoids silently offering unverified realtime output targets while preserving a clear path for product-approved fallback.
+
+Implications:
+
+- Future implementation can widen the realtime target table only after current OpenAI docs, API metadata, or live API validation provides stronger evidence.
+- Unsupported target UI should make fallback state visible and should stay direct phone-to-OpenAI once #23 resolves credential handling.

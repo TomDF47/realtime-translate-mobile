@@ -47,6 +47,20 @@ void main() {
     expect(find.text('Translate Text'), findsOneWidget);
     expect(find.text('Jump to Live'), findsOneWidget);
 
+    await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Realtime target languages'), findsOneWidget);
+    expect(find.text('English (US)'), findsOneWidget);
+    expect(find.text('Spanish (ES)'), findsOneWidget);
+    expect(find.text('French (FR)'), findsOneWidget);
+    expect(find.text('Japanese (JP)'), findsNothing);
+    expect(find.text('Fallback route'), findsOneWidget);
+    expect(find.textContaining('direct OpenAI fallback'), findsOneWidget);
+
+    Navigator.of(tester.element(find.text('Realtime target languages'))).pop();
+    await tester.pumpAndSettle();
+
     await tester.tap(find.byTooltip('Open AI chat'));
     await tester.pumpAndSettle();
 
@@ -77,6 +91,7 @@ void main() {
 
     expect(find.text('English -> Japanese'), findsOneWidget);
     expect(find.text('Speaking'), findsOneWidget);
+    expect(find.text('Fallback pending'), findsOneWidget);
     expect(find.text('Read aloud is paused'), findsOneWidget);
     expect(find.text('Resume Read Aloud'), findsOneWidget);
 

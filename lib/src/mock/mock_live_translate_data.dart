@@ -146,8 +146,8 @@ abstract final class MockLiveTranslateData {
         isEnabled: true,
       ),
       FeatureChipData(
-        label: 'Speaker Active',
-        icon: Icons.spatial_audio_off_rounded,
+        label: 'Fallback pending',
+        icon: Icons.route_outlined,
         accent: LiveAccent.amber,
         isPassive: true,
       ),
