@@ -171,6 +171,30 @@ Implications:
 - #6 remains open for physical microphone translation smoke and audible Android speaker validation.
 - #14 remains open for live reconnect, credential-expiry, and transcript de-duplication behavior under real streaming.
 
+## 2026-05-24 - Controlled Generated Speech Reconnect Smoke Validates Endpoint Recovery
+
+Status: Accepted
+
+Decision:
+
+- Extend the redacted live OpenAI smoke harness with a controlled reconnect check for the dedicated `gpt-realtime-translate` profile.
+- Reuse local `espeak-ng` generated Spanish speech and keep generated WAV/PCM bytes in process memory only.
+- Open one live dedicated translation WebSocket, wait for session readiness, stream a small number of generated-speech chunks, intentionally close that socket, open a second live session, stream generated speech again, and pass only when transcript plus translated-audio events arrive from the recovered session.
+- Report only controlled reconnect count, chunk count, event counts, model, and endpoint path. Do not print transcript text, audio bytes, generated audio payloads, credential material, response bodies, or raw socket messages.
+- Treat this as live endpoint/harness recovery evidence only. Do not treat it as proof of Android physical microphone capture, installed-app transcript persistence, app-coordinator de-duplication, credential-expiry recovery, Android speaker audibility, or primary `gpt-realtime-2` spoken translation behavior.
+
+Rationale:
+
+- The generated-speech harness gives #14 a repeatable live streaming input source without emulator microphone injection or storing a live key in app/emulator data.
+- A deliberate socket close plus a second successful live session narrows the remaining reconnect risk while preserving the phone-only privacy boundary.
+- Keeping the check in the redacted host smoke avoids adding package dependencies, backend routes, committed fixtures, or mobile permissions.
+
+Implications:
+
+- #14 is advanced because a controlled live socket interruption can recover transcript and translated-audio evidence through the dedicated translation endpoint.
+- #14 remains open for app-coordinator reconnect de-duplication, credential-expiry/network-drop/rate-limit recovery, and audible Android output recovery under live streaming.
+- #6 remains open for physical microphone translation smoke and installed-app committed transcript validation from live speech.
+
 ## 2026-05-24 - Translated Audio Playback Starts As A Fakeable Local Queue
 
 Status: Accepted as first slice; Android production output added by `2026-05-24 - Android Translated Audio Output Uses App-Owned AudioTrack`

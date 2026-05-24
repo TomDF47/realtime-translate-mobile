@@ -97,6 +97,18 @@ Future<void> main(List<String> args) async {
       ),
     );
   }
+  if (selection.realtimeGeneratedSpeechReconnect) {
+    results.add(
+      await _runRealtimeGeneratedSpeechReconnectSmoke(
+        credential: credential,
+        name: 'realtime-translation-generated-speech-reconnect',
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'en',
+          profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+        ),
+      ),
+    );
+  }
 
   print('Live OpenAI smoke results:');
   for (final result in results) {
@@ -486,15 +498,11 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
       const Duration(seconds: 18),
     );
 
-    for (final chunk in _pcm16Chunks(
-      speech.pcm16!,
-      sampleRate: config.inputAudioRate,
-      chunkDuration: const Duration(milliseconds: 200),
-    )) {
-      session.appendPcm16Audio(chunk);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    }
-    session.appendPcm16Audio(_silencePcm16(config.inputAudioRate, 500));
+    await _appendGeneratedSpeech(
+      session: session,
+      config: config,
+      speech: speech.pcm16!,
+    );
 
     final evidence = await evidenceFuture;
     if (evidence.error != null) {
@@ -545,6 +553,202 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
   } finally {
     await session?.closeImmediately();
   }
+}
+
+Future<_SmokeResult> _runRealtimeGeneratedSpeechReconnectSmoke({
+  required String credential,
+  required String name,
+  required OpenAiRealtimeTranslationConfig config,
+}) async {
+  final speech = await _generateSpeechPcm16(config);
+  if (speech.failureNote != null) {
+    return _SmokeResult.failed(name, speech.failureNote!);
+  }
+
+  try {
+    final interruptedChunks = await _streamGeneratedSpeechUntilControlledClose(
+      credential: credential,
+      config: config,
+      speech: speech.pcm16!,
+      chunksBeforeClose: 2,
+    );
+    if (interruptedChunks <= 0) {
+      return _SmokeResult.failed(
+        name,
+        'websocket generatedSpeechReconnectNoInterruptedChunks '
+        'model=${config.profile.model} path=${config.profile.path}',
+      );
+    }
+
+    final recovered = await _streamGeneratedSpeechForEvidence(
+      credential: credential,
+      config: config,
+      speech: speech.pcm16!,
+    );
+    if (recovered.error != null) {
+      final error = recovered.error!;
+      return _SmokeResult.failed(
+        name,
+        'websocket generatedSpeechReconnectError '
+        'code=${error.code ?? 'unknown'} ${_safeRealtimeErrorParam(error)}'
+        'model=${config.profile.model} path=${config.profile.path}',
+      );
+    }
+
+    if (!recovered.hasTranscript || !recovered.hasTranslatedAudio) {
+      return _SmokeResult.failed(
+        name,
+        'websocket generatedSpeechReconnectMissingEvidence '
+        'interruptedChunks=$interruptedChunks '
+        'recoveredTranscriptEvents=${recovered.transcriptEvents} '
+        'recoveredTranslatedAudioEvents=${recovered.audioEvents} '
+        'model=${config.profile.model} path=${config.profile.path}',
+      );
+    }
+
+    return _SmokeResult.passed(
+      name,
+      'websocket controlledReconnect=1 interruptedChunks=$interruptedChunks '
+      'recoveredTranscriptEvents=${recovered.transcriptEvents} '
+      'recoveredTranslatedAudioEvents=${recovered.audioEvents} '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } on _RealtimeSmokeError catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket generatedSpeechReconnectError '
+      'code=${error.error.code ?? 'unknown'} '
+      '${_safeRealtimeErrorParam(error.error)}'
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } on WebSocketException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket handshakeFailed status=${error.httpStatusCode ?? 'unknown'} '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } on TimeoutException {
+    return _SmokeResult.failed(
+      name,
+      'websocket timeout model=${config.profile.model} '
+      'path=${config.profile.path}',
+    );
+  } on SocketException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket socketError=${error.osError?.errorCode ?? 'unknown'} '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  }
+}
+
+Future<int> _streamGeneratedSpeechUntilControlledClose({
+  required String credential,
+  required OpenAiRealtimeTranslationConfig config,
+  required List<int> speech,
+  required int chunksBeforeClose,
+}) async {
+  OpenAiRealtimeTranslationSession? session;
+  try {
+    session = await OpenAiRealtimeTranslationGateway().connect(
+      config: config,
+      credential: credential,
+    );
+    final readyEvent = await _waitForRealtimeReady(
+      session.events,
+      const Duration(seconds: 10),
+      requireSessionUpdated: true,
+    );
+    if (readyEvent == null) {
+      throw TimeoutException('sessionUpdateTimeout');
+    }
+    if (readyEvent is OpenAiRealtimeError) {
+      throw _RealtimeSmokeError(readyEvent);
+    }
+    if (readyEvent is OpenAiRealtimeSessionClosed) {
+      throw const SocketException('closedBeforeReady');
+    }
+
+    var appendedChunks = 0;
+    for (final chunk in _pcm16Chunks(
+      speech,
+      sampleRate: config.inputAudioRate,
+      chunkDuration: const Duration(milliseconds: 200),
+    )) {
+      session.appendPcm16Audio(chunk);
+      appendedChunks += 1;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      if (appendedChunks >= chunksBeforeClose) {
+        break;
+      }
+    }
+
+    await session.closeImmediately();
+    return appendedChunks;
+  } finally {
+    await session?.closeImmediately();
+  }
+}
+
+Future<_GeneratedSpeechEvidence> _streamGeneratedSpeechForEvidence({
+  required String credential,
+  required OpenAiRealtimeTranslationConfig config,
+  required List<int> speech,
+}) async {
+  OpenAiRealtimeTranslationSession? session;
+  try {
+    session = await OpenAiRealtimeTranslationGateway().connect(
+      config: config,
+      credential: credential,
+    );
+    final readyEvent = await _waitForRealtimeReady(
+      session.events,
+      const Duration(seconds: 10),
+      requireSessionUpdated: true,
+    );
+    if (readyEvent == null) {
+      throw TimeoutException('sessionUpdateTimeout');
+    }
+    if (readyEvent is OpenAiRealtimeError) {
+      return _GeneratedSpeechEvidence(
+        transcriptEvents: 0,
+        audioEvents: 0,
+        error: readyEvent,
+      );
+    }
+    if (readyEvent is OpenAiRealtimeSessionClosed) {
+      throw const SocketException('closedBeforeReady');
+    }
+
+    final evidenceFuture = _waitForGeneratedSpeechEvidence(
+      session.events,
+      const Duration(seconds: 18),
+    );
+    await _appendGeneratedSpeech(
+      session: session,
+      config: config,
+      speech: speech,
+    );
+    return evidenceFuture;
+  } finally {
+    await session?.closeImmediately();
+  }
+}
+
+Future<void> _appendGeneratedSpeech({
+  required OpenAiRealtimeTranslationSession session,
+  required OpenAiRealtimeTranslationConfig config,
+  required List<int> speech,
+}) async {
+  for (final chunk in _pcm16Chunks(
+    speech,
+    sampleRate: config.inputAudioRate,
+    chunkDuration: const Duration(milliseconds: 200),
+  )) {
+    session.appendPcm16Audio(chunk);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  }
+  session.appendPcm16Audio(_silencePcm16(config.inputAudioRate, 500));
 }
 
 List<int> _syntheticTonePcm16(OpenAiRealtimeTranslationConfig config) {
@@ -926,6 +1130,10 @@ void _printUsage() {
     '  --realtime-generated-speech'
     ' Stream local generated Spanish speech to the translation profile.',
   );
+  print(
+    '  --realtime-generated-speech-reconnect'
+    ' Force a controlled live-socket reconnect around generated speech.',
+  );
 }
 
 class _SmokeSelection {
@@ -938,6 +1146,7 @@ class _SmokeSelection {
     required this.realtimeSyntheticAudio,
     required this.realtimePrimarySyntheticAudio,
     required this.realtimeGeneratedSpeech,
+    required this.realtimeGeneratedSpeechReconnect,
   });
 
   final bool summary;
@@ -948,6 +1157,7 @@ class _SmokeSelection {
   final bool realtimeSyntheticAudio;
   final bool realtimePrimarySyntheticAudio;
   final bool realtimeGeneratedSpeech;
+  final bool realtimeGeneratedSpeechReconnect;
 
   static _SmokeSelection? fromArgs(List<String> args) {
     if (args.isEmpty || args.contains('--all')) {
@@ -960,6 +1170,7 @@ class _SmokeSelection {
         realtimeSyntheticAudio: true,
         realtimePrimarySyntheticAudio: true,
         realtimeGeneratedSpeech: true,
+        realtimeGeneratedSpeechReconnect: true,
       );
     }
 
@@ -977,6 +1188,7 @@ class _SmokeSelection {
       '--realtime-synthetic-audio',
       '--realtime-primary-synthetic-audio',
       '--realtime-generated-speech',
+      '--realtime-generated-speech-reconnect',
     };
     if (args.any((arg) => !knownArgs.contains(arg))) {
       return null;
@@ -996,8 +1208,17 @@ class _SmokeSelection {
         '--realtime-primary-synthetic-audio',
       ),
       realtimeGeneratedSpeech: args.contains('--realtime-generated-speech'),
+      realtimeGeneratedSpeechReconnect: args.contains(
+        '--realtime-generated-speech-reconnect',
+      ),
     );
   }
+}
+
+class _RealtimeSmokeError implements Exception {
+  const _RealtimeSmokeError(this.error);
+
+  final OpenAiRealtimeError error;
 }
 
 class _GeneratedSpeech {
