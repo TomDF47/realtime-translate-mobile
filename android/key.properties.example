@@ -1,7 +1,8 @@
 # Copy this file to android/key.properties for local release signing.
-# Never commit android/key.properties or keystore files.
+# Never commit android/key.properties, keystore files, passwords, aliases, or certificates.
+# Prefer an absolute storeFile path outside this repository.
 
 storePassword=<local-keystore-password>
 keyPassword=<local-key-password>
 keyAlias=<local-key-alias>
-storeFile=<path-to-local-keystore>
+storeFile=/absolute/path/outside/repo/to/local-release-keystore.jks

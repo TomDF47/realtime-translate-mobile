@@ -265,6 +265,7 @@ Open MVP/planning work:
 - #6 Integrate direct OpenAI Realtime Translation.
 - #14 Harden direct OpenAI realtime resilience.
 - #19 Maintain README and agent handoff docs during implementation.
+- #24 Track store-ready Android release signing.
 
 Deferred V2/future issues:
 
@@ -287,7 +288,7 @@ Deferred V2/future issues:
 
 ## Open Questions To Resolve During Implementation
 
-- Final Android package name and signing certificate details.
+- Final Android signing certificate details; tracked in #24 for store-ready release handoff.
 - The accepted credential/session implementation details for user-provided OpenAI credential material, including UX, encrypted storage reset/removal, and credential-invalid recovery.
 - Current OpenAI Realtime Translation docs do not expose an authoritative target output language enum. The MVP currently uses the conservative English/Spanish/French realtime table and direct-OpenAI fallback-pending handling described above.
 - Real microphone/audio behavior for `gpt-realtime-2` versus the dedicated `gpt-realtime-translate` fallback/profile under live streaming.

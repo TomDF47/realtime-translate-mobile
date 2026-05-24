@@ -65,11 +65,14 @@ scripts/build_debug_apk_artifact.sh --debug-live-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 scripts/build_debug_apk_artifact.sh --release
 scripts/final_qa_gate.sh --emulator-smoke
+scripts/final_qa_gate.sh --require-store-signing
 ```
 
 `scripts/build_debug_apk_artifact.sh` copies the requested APK to `/tmp` with a commit-and-timestamp filename and writes a `.sha256` sidecar. Debug is the default; `--debug-live-events` builds the debug-only E2E proof variant; `--release` builds a release APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback. Debug-signed release artifacts are local handoff artifacts only, not store-ready builds. The script does not read the local OpenAI secret file and is suitable for local APK handoff when live OpenAI quota is blocked.
 
 `scripts/final_qa_gate.sh` is the non-live final QA wrapper. It runs the standard Flutter/docs/supply-chain gates, shell syntax checks, `git diff --check`, and fresh debug plus release APK artifact builds. Add `--emulator-smoke` when an installed-app no-credential smoke is relevant; that mode installs the fresh release artifact, verifies the setup-required gate, writes proof under `/tmp/realtime-translate-mobile-e2e-final-qa`, clears app data, and still does not read the local OpenAI secret file.
+
+`scripts/check_android_release_signing.sh` is the store-ready Android signing preflight. It requires local uncommitted `android/key.properties`, required signing fields, non-placeholder values, and an existing keystore file outside the repo or ignored by git. With `--apk`, it also verifies the APK signature and fails if the artifact is Android debug-signed. `scripts/final_qa_gate.sh --require-store-signing` runs that preflight before the release build and checks the fresh release APK afterward. It reports only pass/fail status and never prints signing passwords, aliases, or keystore material.
 
 The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator when a live credential is requested, can run a non-live credential save/remove/reset gate with `--verify-credential-reset`, can run a non-secret invalid-placeholder auth recovery gate with `--verify-invalid-credential-recovery`, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
 
@@ -186,9 +189,9 @@ For local release-signing experiments only, copy:
 cp android/key.properties.example android/key.properties
 ```
 
-Then fill `android/key.properties` with local, uncommitted values. Do not commit `android/key.properties`, keystores, signing passwords, or certificates.
+Then fill `android/key.properties` with local, uncommitted values. Prefer an absolute `storeFile` path outside this repository. Do not commit `android/key.properties`, keystores, signing passwords, key aliases, or certificates.
 
-If `android/key.properties` is absent, the Gradle release build uses the debug signing config as a local fallback. This keeps release-mode smoke builds possible, but those APKs must be treated as debug-signed handoff artifacts. Use `scripts/build_debug_apk_artifact.sh --release` to make that signing status explicit in the artifact filename and console output.
+If `android/key.properties` is absent, the Gradle release build uses the debug signing config as a local fallback. This keeps release-mode smoke builds possible, but those APKs must be treated as debug-signed handoff artifacts. Use `scripts/build_debug_apk_artifact.sh --release` to make that signing status explicit in the artifact filename and console output. Use `scripts/check_android_release_signing.sh` or `scripts/final_qa_gate.sh --require-store-signing` before any store/device handoff that must be release-signed.
 
 ## Deferred V2 Configuration
 

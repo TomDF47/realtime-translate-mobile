@@ -13,6 +13,14 @@ if (releaseKeystorePropertiesFile.exists()) {
     releaseKeystoreProperties.load(FileInputStream(releaseKeystorePropertiesFile))
 }
 
+fun requiredReleaseSigningProperty(name: String): String {
+    val value = releaseKeystoreProperties[name] as String?
+    require(!value.isNullOrBlank()) {
+        "android/key.properties is missing required release signing field: $name"
+    }
+    return value
+}
+
 android {
     namespace = "com.tomdf47.realtime_translate_mobile"
     compileSdk = flutter.compileSdkVersion
@@ -36,10 +44,10 @@ android {
     signingConfigs {
         create("release") {
             if (releaseKeystorePropertiesFile.exists()) {
-                keyAlias = releaseKeystoreProperties["keyAlias"] as String
-                keyPassword = releaseKeystoreProperties["keyPassword"] as String
-                storeFile = file(releaseKeystoreProperties["storeFile"] as String)
-                storePassword = releaseKeystoreProperties["storePassword"] as String
+                keyAlias = requiredReleaseSigningProperty("keyAlias")
+                keyPassword = requiredReleaseSigningProperty("keyPassword")
+                storeFile = file(requiredReleaseSigningProperty("storeFile"))
+                storePassword = requiredReleaseSigningProperty("storePassword")
             }
         }
     }
