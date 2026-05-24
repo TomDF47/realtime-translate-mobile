@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -9,11 +7,14 @@ import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_meeting_summary.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
+import 'package:realtime_translate_mobile/src/mock/mock_live_translate_data.dart';
+import 'package:realtime_translate_mobile/src/session/live_session_controller.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/session/translated_audio_playback.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
+import 'package:realtime_translate_mobile/src/theme/live_translate_theme.dart';
 import 'package:realtime_translate_mobile/src/ui/live_translate_models.dart';
 
 void main() {
@@ -140,6 +141,67 @@ void main() {
       aiChatGateway.requests.single.context.transcriptEntryCount,
       greaterThan(0),
     );
+  });
+
+  testWidgets('shows reconnecting realtime recovery state on live surface', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _liveSessionHarness(
+        const LiveSessionState(
+          phase: LiveSessionPhase.reconnecting,
+          microphonePermission: MicrophonePermissionStatus.granted,
+          audioRoute: LiveAudioRoute.speaker,
+          isMicrophoneCaptureOpen: false,
+          isRealtimeSessionOpen: false,
+          isPlaybackQueueOpen: false,
+          realtimeRetryAttempt: 1,
+          realtimeReconnectDelay: Duration(milliseconds: 500),
+          notice: 'Connection interrupted. Reconnecting to OpenAI shortly.',
+        ),
+      ),
+    );
+
+    expect(find.text('Reconnecting to OpenAI'), findsOneWidget);
+    expect(
+      find.text('Connection interrupted. Reconnecting to OpenAI shortly.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Retry attempt 1'), findsOneWidget);
+    expect(find.text('Back to start'), findsOneWidget);
+    expect(find.text('Retry live session'), findsNothing);
+  });
+
+  testWidgets('shows stopped realtime recovery state with retry action', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _liveSessionHarness(
+        const LiveSessionState(
+          phase: LiveSessionPhase.offline,
+          microphonePermission: MicrophonePermissionStatus.granted,
+          audioRoute: LiveAudioRoute.speaker,
+          isMicrophoneCaptureOpen: false,
+          isRealtimeSessionOpen: false,
+          isPlaybackQueueOpen: false,
+          realtimeRetryAttempt: 5,
+          realtimeReconnectDelay: Duration.zero,
+          notice:
+              'Network connection appears offline. Live translation is paused.',
+        ),
+      ),
+    );
+
+    expect(find.text('Live translation paused'), findsOneWidget);
+    expect(
+      find.text(
+        'Network connection appears offline. Live translation is paused.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Retries exhausted after 5 attempts.'), findsOneWidget);
+    expect(find.text('Retry live session'), findsOneWidget);
+    expect(find.text('Back to start'), findsOneWidget);
   });
 
   testWidgets('opens all-meetings AI chat from meeting history', (
@@ -367,6 +429,23 @@ Future<void> _seedCredential(LocalMeetingRepository repository) {
   return OpenAiCredentialStore(
     repository: repository,
   ).saveUserProvidedCredential('placeholder-local-openai-credential');
+}
+
+Widget _liveSessionHarness(LiveSessionState state) {
+  return MaterialApp(
+    theme: LiveTranslateTheme.dark(),
+    home: LiveSessionScreen(
+      session: MockLiveTranslateData.listeningSession,
+      sessionState: state,
+      onOpenMenu: () {},
+      onOpenAssistant: () {},
+      onOpenSourceLanguageOptions: () {},
+      onOpenTargetLanguageOptions: () {},
+      onDirectionSwitch: () {},
+      onRetryLiveSession: () {},
+      onBottomAction: (_) {},
+    ),
+  );
 }
 
 class _FakePermissionGateway implements MicrophonePermissionGateway {

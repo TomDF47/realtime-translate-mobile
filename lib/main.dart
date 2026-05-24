@@ -293,6 +293,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           widget.permissionGateway ??
           MethodChannelMicrophonePermissionGateway(),
     );
+    _sessionController.addListener(_handleSessionStateChanged);
     _meetingRepository =
         widget.meetingRepository ??
         LocalMeetingRepository(store: FlutterSecureEncryptedLocalStore());
@@ -325,8 +326,17 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _realtimeCoordinator.dispose();
+    _sessionController.removeListener(_handleSessionStateChanged);
     _sessionController.dispose();
     super.dispose();
+  }
+
+  void _handleSessionStateChanged() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {});
   }
 
   @override
@@ -837,6 +847,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       ),
       _AppSurface.listening => LiveSessionScreen(
         session: _sessionForSurface(_AppSurface.listening),
+        sessionState: sessionState,
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
         onOpenSourceLanguageOptions: () =>
@@ -844,6 +855,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
         onDirectionSwitch: _openSpeakingPaused,
+        onRetryLiveSession: _openListening,
         onBottomAction: _handleBottomAction,
         debugHarness: _debugE2eHarnessEnabled
             ? DebugRealtimeProofPanel(
@@ -854,6 +866,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       ),
       _AppSurface.speakingPaused => LiveSessionScreen(
         session: _sessionForSurface(_AppSurface.speakingPaused),
+        sessionState: sessionState,
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
         onOpenSourceLanguageOptions: () =>
@@ -861,6 +874,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
         onDirectionSwitch: _openListening,
+        onRetryLiveSession: _openSpeakingPaused,
         onBottomAction: _handleBottomAction,
         debugHarness: _debugE2eHarnessEnabled
             ? DebugRealtimeProofPanel(
@@ -1230,21 +1244,25 @@ class LiveSessionScreen extends StatelessWidget {
   const LiveSessionScreen({
     super.key,
     required this.session,
+    required this.sessionState,
     required this.onOpenMenu,
     required this.onOpenAssistant,
     required this.onOpenSourceLanguageOptions,
     required this.onOpenTargetLanguageOptions,
     required this.onDirectionSwitch,
+    required this.onRetryLiveSession,
     required this.onBottomAction,
     this.debugHarness,
   });
 
   final LiveSessionViewData session;
+  final LiveSessionState sessionState;
   final VoidCallback onOpenMenu;
   final VoidCallback onOpenAssistant;
   final VoidCallback onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
   final VoidCallback onDirectionSwitch;
+  final VoidCallback onRetryLiveSession;
   final ValueChanged<BottomControlActionData> onBottomAction;
   final Widget? debugHarness;
 
@@ -1264,6 +1282,14 @@ class LiveSessionScreen extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           SessionStatusCard(session: session),
+          if (_RealtimeRecoveryBanner.shouldShow(sessionState)) ...[
+            const SizedBox(height: AppSpacing.xs),
+            _RealtimeRecoveryBanner(
+              state: sessionState,
+              onRetry: onRetryLiveSession,
+              onBack: () => onBottomAction(session.bottomControls.first),
+            ),
+          ],
           const SizedBox(height: AppSpacing.xs),
           _LanguageRouteRow(
             session: session,
@@ -1307,6 +1333,146 @@ class LiveSessionScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _RealtimeRecoveryBanner extends StatelessWidget {
+  const _RealtimeRecoveryBanner({
+    required this.state,
+    required this.onRetry,
+    required this.onBack,
+  });
+
+  final LiveSessionState state;
+  final VoidCallback onRetry;
+  final VoidCallback onBack;
+
+  static bool shouldShow(LiveSessionState state) {
+    return switch (state.phase) {
+      LiveSessionPhase.reconnecting ||
+      LiveSessionPhase.offline ||
+      LiveSessionPhase.error => true,
+      _ => false,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final accent = state.phase == LiveSessionPhase.error
+        ? LiveAccent.red
+        : LiveAccent.amber;
+    final accentColor = AppColors.forAccent(accent);
+
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: _title,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: accentColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: accentColor.withValues(alpha: 0.72)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(_icon, color: accentColor),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    _title,
+                    style: AppTextStyles.label(
+                      textTheme,
+                    ).copyWith(color: accentColor),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              state.notice ?? _fallbackNotice,
+              style: AppTextStyles.body(textTheme),
+            ),
+            if (_retryDetail != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                _retryDetail!,
+                style: AppTextStyles.compact(
+                  textTheme,
+                ).copyWith(color: AppColors.textSecondary),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.sm),
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.xs,
+              children: [
+                if (state.phase != LiveSessionPhase.reconnecting)
+                  FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Retry live session'),
+                  ),
+                OutlinedButton.icon(
+                  onPressed: onBack,
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: const Text('Back to start'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData get _icon {
+    return switch (state.phase) {
+      LiveSessionPhase.reconnecting => Icons.sync_rounded,
+      LiveSessionPhase.offline => Icons.wifi_off_rounded,
+      LiveSessionPhase.error => Icons.error_outline_rounded,
+      _ => Icons.info_outline_rounded,
+    };
+  }
+
+  String get _title {
+    return switch (state.phase) {
+      LiveSessionPhase.reconnecting => 'Reconnecting to OpenAI',
+      LiveSessionPhase.offline => 'Live translation paused',
+      LiveSessionPhase.error => 'Live translation stopped',
+      _ => 'Live translation needs attention',
+    };
+  }
+
+  String get _fallbackNotice {
+    return switch (state.phase) {
+      LiveSessionPhase.reconnecting =>
+        'Connection interrupted. Reconnecting to OpenAI shortly.',
+      LiveSessionPhase.offline =>
+        'Network connection appears offline. Live translation is paused.',
+      LiveSessionPhase.error =>
+        'OpenAI realtime session stopped. Restart the meeting when ready.',
+      _ => 'Live translation needs attention.',
+    };
+  }
+
+  String? get _retryDetail {
+    if (state.phase == LiveSessionPhase.reconnecting) {
+      final seconds = state.realtimeReconnectDelay.inMilliseconds / 1000;
+      return 'Retry attempt ${state.realtimeRetryAttempt}; next retry in ${seconds.toStringAsFixed(1)}s.';
+    }
+
+    if (state.phase == LiveSessionPhase.offline &&
+        state.realtimeRetryAttempt > 0) {
+      return 'Retries exhausted after ${state.realtimeRetryAttempt} attempts.';
+    }
+
+    return null;
   }
 }
 
