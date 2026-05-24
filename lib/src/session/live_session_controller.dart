@@ -43,6 +43,7 @@ class LiveSessionState {
     required this.isPlaybackQueueOpen,
     required this.realtimeRetryAttempt,
     required this.realtimeReconnectDelay,
+    this.realtimeRecoveryAction,
     this.notice,
   });
 
@@ -55,6 +56,7 @@ class LiveSessionState {
       isPlaybackQueueOpen = false,
       realtimeRetryAttempt = 0,
       realtimeReconnectDelay = Duration.zero,
+      realtimeRecoveryAction = null,
       notice = null;
 
   final LiveSessionPhase phase;
@@ -65,6 +67,7 @@ class LiveSessionState {
   final bool isPlaybackQueueOpen;
   final int realtimeRetryAttempt;
   final Duration realtimeReconnectDelay;
+  final OpenAiRealtimeRecoveryAction? realtimeRecoveryAction;
   final String? notice;
 
   LiveSessionState copyWith({
@@ -76,6 +79,8 @@ class LiveSessionState {
     bool? isPlaybackQueueOpen,
     int? realtimeRetryAttempt,
     Duration? realtimeReconnectDelay,
+    OpenAiRealtimeRecoveryAction? realtimeRecoveryAction,
+    bool clearRealtimeRecoveryAction = false,
     String? notice,
     bool clearNotice = false,
   }) {
@@ -91,6 +96,9 @@ class LiveSessionState {
       realtimeRetryAttempt: realtimeRetryAttempt ?? this.realtimeRetryAttempt,
       realtimeReconnectDelay:
           realtimeReconnectDelay ?? this.realtimeReconnectDelay,
+      realtimeRecoveryAction: clearRealtimeRecoveryAction
+          ? null
+          : realtimeRecoveryAction ?? this.realtimeRecoveryAction,
       notice: clearNotice ? null : notice ?? this.notice,
     );
   }
@@ -119,6 +127,7 @@ class LiveSessionController extends ChangeNotifier {
         isPlaybackQueueOpen: false,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
         notice: 'Microphone access is required before live translation starts.',
       ),
     );
@@ -134,6 +143,7 @@ class LiveSessionController extends ChangeNotifier {
           isPlaybackQueueOpen: false,
           realtimeRetryAttempt: 0,
           realtimeReconnectDelay: Duration.zero,
+          clearRealtimeRecoveryAction: true,
           notice:
               'No audio is captured before microphone permission is granted.',
         ),
@@ -150,6 +160,7 @@ class LiveSessionController extends ChangeNotifier {
         isPlaybackQueueOpen: false,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
         notice: 'Preparing the phone-local live session.',
       ),
     );
@@ -162,6 +173,7 @@ class LiveSessionController extends ChangeNotifier {
         isPlaybackQueueOpen: true,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
         clearNotice: true,
       ),
     );
@@ -185,6 +197,7 @@ class LiveSessionController extends ChangeNotifier {
         isPlaybackQueueOpen: false,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
+        realtimeRecoveryAction: OpenAiRealtimeRecoveryAction.credentialInvalid,
         notice:
             notice ??
             'Add an OpenAI credential stored on this device before live translation starts.',
@@ -203,6 +216,7 @@ class LiveSessionController extends ChangeNotifier {
           isPlaybackQueueOpen: false,
           realtimeRetryAttempt: 0,
           realtimeReconnectDelay: Duration.zero,
+          clearRealtimeRecoveryAction: true,
           notice:
               'Read-aloud playback is paused; transcript capture stays gated.',
         ),
@@ -224,6 +238,7 @@ class LiveSessionController extends ChangeNotifier {
         isPlaybackQueueOpen: true,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
         clearNotice: true,
       ),
     );
@@ -239,6 +254,7 @@ class LiveSessionController extends ChangeNotifier {
         isPlaybackQueueOpen: false,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
         clearNotice: true,
       ),
     );
@@ -259,6 +275,7 @@ class LiveSessionController extends ChangeNotifier {
               isPlaybackQueueOpen: false,
               realtimeRetryAttempt: 0,
               realtimeReconnectDelay: Duration.zero,
+              clearRealtimeRecoveryAction: true,
               notice:
                   'Session paused while the app is not foregrounded. Resume when ready.',
             ),
@@ -276,6 +293,8 @@ class LiveSessionController extends ChangeNotifier {
               isPlaybackQueueOpen: false,
               realtimeRetryAttempt: 1,
               realtimeReconnectDelay: Duration.zero,
+              realtimeRecoveryAction:
+                  OpenAiRealtimeRecoveryAction.reconnectAfterBackoff,
               notice: 'Ready to resume the direct live session.',
             ),
           );
@@ -305,6 +324,7 @@ class LiveSessionController extends ChangeNotifier {
             isPlaybackQueueOpen: false,
             realtimeRetryAttempt: decision.retryAttempt,
             realtimeReconnectDelay: decision.delay,
+            realtimeRecoveryAction: decision.action,
             notice: decision.userFacingNotice,
           ),
         );
@@ -327,6 +347,7 @@ class LiveSessionController extends ChangeNotifier {
             isPlaybackQueueOpen: false,
             realtimeRetryAttempt: decision.retryAttempt,
             realtimeReconnectDelay: Duration.zero,
+            realtimeRecoveryAction: decision.action,
             notice: decision.userFacingNotice,
           ),
         );
@@ -343,6 +364,7 @@ class LiveSessionController extends ChangeNotifier {
             isPlaybackQueueOpen: false,
             realtimeRetryAttempt: decision.retryAttempt,
             realtimeReconnectDelay: Duration.zero,
+            realtimeRecoveryAction: decision.action,
             notice: decision.userFacingNotice,
           ),
         );
@@ -359,6 +381,7 @@ class LiveSessionController extends ChangeNotifier {
             isPlaybackQueueOpen: false,
             realtimeRetryAttempt: decision.retryAttempt,
             realtimeReconnectDelay: Duration.zero,
+            realtimeRecoveryAction: decision.action,
             notice: decision.userFacingNotice,
           ),
         );
@@ -379,6 +402,7 @@ class LiveSessionController extends ChangeNotifier {
         isPlaybackQueueOpen: true,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
         clearNotice: true,
       ),
     );

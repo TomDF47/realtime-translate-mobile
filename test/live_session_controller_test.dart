@@ -222,9 +222,14 @@ void main() {
     );
 
     expect(controller.state.phase, LiveSessionPhase.credentialInvalid);
+    expect(
+      controller.state.realtimeRecoveryAction,
+      OpenAiRealtimeRecoveryAction.credentialInvalid,
+    );
     expect(controller.state.isRealtimeSessionOpen, isFalse);
 
     await controller.startMeeting();
+    expect(controller.state.realtimeRecoveryAction, isNull);
     controller.applyRealtimeRecoveryDecision(
       policy.plan(
         failure: OpenAiRealtimeFailure.sessionClosed(),
@@ -233,6 +238,10 @@ void main() {
     );
 
     expect(controller.state.phase, LiveSessionPhase.offline);
+    expect(
+      controller.state.realtimeRecoveryAction,
+      OpenAiRealtimeRecoveryAction.offline,
+    );
     expect(controller.state.isMicrophoneCaptureOpen, isFalse);
     expect(controller.state.isRealtimeSessionOpen, isFalse);
     expect(controller.state.isPlaybackQueueOpen, isFalse);

@@ -6,6 +6,7 @@ import 'package:realtime_translate_mobile/src/export/local_meeting_exporter.dart
 import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_meeting_summary.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 import 'package:realtime_translate_mobile/src/mock/mock_live_translate_data.dart';
 import 'package:realtime_translate_mobile/src/session/live_session_controller.dart';
@@ -213,6 +214,39 @@ void main() {
     );
     expect(find.text('Retries exhausted after 5 attempts.'), findsOneWidget);
     expect(find.text('Retry live session'), findsOneWidget);
+    expect(find.text('Back to start'), findsOneWidget);
+  });
+
+  testWidgets('shows unsupported language recovery without retry loop', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _liveSessionHarness(
+        const LiveSessionState(
+          phase: LiveSessionPhase.error,
+          microphonePermission: MicrophonePermissionStatus.granted,
+          audioRoute: LiveAudioRoute.speaker,
+          isMicrophoneCaptureOpen: false,
+          isRealtimeSessionOpen: false,
+          isPlaybackQueueOpen: false,
+          realtimeRetryAttempt: 0,
+          realtimeReconnectDelay: Duration.zero,
+          realtimeRecoveryAction:
+              OpenAiRealtimeRecoveryAction.unsupportedLanguage,
+          notice:
+              'This target language is not available for realtime output. Choose another target language.',
+        ),
+      ),
+    );
+
+    expect(find.text('Language not supported'), findsOneWidget);
+    expect(
+      find.text(
+        'This target language is not available for realtime output. Choose another target language.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Retry live session'), findsNothing);
     expect(find.text('Back to start'), findsOneWidget);
   });
 

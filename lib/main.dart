@@ -10,6 +10,7 @@ import 'src/openai/openai_ai_chat.dart';
 import 'src/openai/openai_configuration.dart';
 import 'src/openai/openai_credential_store.dart';
 import 'src/openai/openai_meeting_summary.dart';
+import 'src/openai/openai_realtime_resilience.dart';
 import 'src/openai/openai_realtime_translation.dart';
 import 'src/session/live_session_controller.dart';
 import 'src/session/microphone_capture.dart';
@@ -1412,7 +1413,7 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.xs,
               children: [
-                if (state.phase != LiveSessionPhase.reconnecting)
+                if (_showRetryAction)
                   FilledButton.icon(
                     onPressed: onRetry,
                     icon: const Icon(Icons.refresh_rounded),
@@ -1444,7 +1445,11 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
     return switch (state.phase) {
       LiveSessionPhase.reconnecting => 'Reconnecting to OpenAI',
       LiveSessionPhase.offline => 'Live translation paused',
-      LiveSessionPhase.error => 'Live translation stopped',
+      LiveSessionPhase.error =>
+        state.realtimeRecoveryAction ==
+                OpenAiRealtimeRecoveryAction.unsupportedLanguage
+            ? 'Language not supported'
+            : 'Live translation stopped',
       _ => 'Live translation needs attention',
     };
   }
@@ -1456,7 +1461,10 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
       LiveSessionPhase.offline =>
         'Network connection appears offline. Live translation is paused.',
       LiveSessionPhase.error =>
-        'OpenAI realtime session stopped. Restart the meeting when ready.',
+        state.realtimeRecoveryAction ==
+                OpenAiRealtimeRecoveryAction.unsupportedLanguage
+            ? 'This target language is not available for realtime output. Choose another target language.'
+            : 'OpenAI realtime session stopped. Restart the meeting when ready.',
       _ => 'Live translation needs attention.',
     };
   }
@@ -1473,6 +1481,19 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
     }
 
     return null;
+  }
+
+  bool get _showRetryAction {
+    if (state.phase == LiveSessionPhase.reconnecting) {
+      return false;
+    }
+
+    if (state.realtimeRecoveryAction ==
+        OpenAiRealtimeRecoveryAction.unsupportedLanguage) {
+      return false;
+    }
+
+    return true;
   }
 }
 
