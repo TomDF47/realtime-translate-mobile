@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 
@@ -9,6 +11,7 @@ import '../openai/openai_realtime_translation.dart';
 import 'live_session_controller.dart';
 import 'microphone_capture.dart';
 import 'realtime_transcript_committer.dart';
+import 'translated_audio_playback.dart';
 
 typedef LiveRealtimeReconnectDelay = Future<void> Function(Duration delay);
 
@@ -25,15 +28,18 @@ class LiveRealtimeTranslationCoordinator {
     required this.credentialStore,
     required this.captureGateway,
     required this.realtimeGateway,
+    TranslatedAudioPlaybackGateway? playbackGateway,
     this.reconnectPolicy = const OpenAiRealtimeReconnectPolicy(),
     this.reconnectDelay = Future.delayed,
     this.diagnostics = const PrivacySafeDiagnostics(),
-  });
+  }) : playbackGateway =
+           playbackGateway ?? NoopTranslatedAudioPlaybackGateway();
 
   final LiveSessionController sessionController;
   final OpenAiCredentialStore credentialStore;
   final MicrophoneCaptureGateway captureGateway;
   final RealtimeTranslationGateway realtimeGateway;
+  final TranslatedAudioPlaybackGateway playbackGateway;
   final OpenAiRealtimeReconnectPolicy reconnectPolicy;
   final LiveRealtimeReconnectDelay reconnectDelay;
   final PrivacySafeDiagnostics diagnostics;
@@ -74,16 +80,23 @@ class LiveRealtimeTranslationCoordinator {
       return LiveRealtimeStartResult.permissionNotGranted;
     }
 
+    RealtimeTranslationSession? realtimeSession;
     try {
-      final realtimeSession = await realtimeGateway.connect(
+      realtimeSession = await realtimeGateway.connect(
         config: config,
         credential: credential,
+      );
+      await playbackGateway.start(
+        TranslatedAudioPlaybackConfig.openAiRealtime(
+          sampleRateHz: config.inputAudioRate,
+        ),
       );
       _bindRealtimeSession(
         realtimeSession,
         transcriptCommitTarget: transcriptCommitTarget,
         resetTranscriptCommitter: true,
       );
+      realtimeSession = null;
       await captureGateway.start(
         MicrophoneCaptureConfig.openAiRealtime(
           sampleRateHz: config.inputAudioRate,
@@ -101,6 +114,7 @@ class LiveRealtimeTranslationCoordinator {
       );
       return LiveRealtimeStartResult.started;
     } catch (error) {
+      await realtimeSession?.closeImmediately();
       await _closeRealtimeResources(graceful: false, finishTranscript: true);
       sessionController.applyRealtimeRecoveryDecision(
         reconnectPolicy.plan(
@@ -196,6 +210,8 @@ class LiveRealtimeTranslationCoordinator {
         _commitTranscript(_transcriptCommitter?.commitDelta(event));
       case OpenAiRealtimeTranscriptCompleted():
         _commitTranscript(_transcriptCommitter?.commitCompleted(event));
+      case OpenAiRealtimeAudioDelta():
+        _enqueueTranslatedAudio(event);
       case OpenAiRealtimeError():
         unawaited(
           _handleRealtimeFailure(
@@ -231,6 +247,51 @@ class LiveRealtimeTranslationCoordinator {
           },
         );
       }),
+    );
+  }
+
+  void _enqueueTranslatedAudio(OpenAiRealtimeAudioDelta event) {
+    unawaited(
+      _decodeAndEnqueueTranslatedAudio(event).catchError((
+        Object error,
+        StackTrace stackTrace,
+      ) {
+        diagnostics.warning(
+          'live_realtime.playback_enqueue_failed',
+          fields: {
+            'operation': 'realtime.playback.enqueue',
+            'result': 'failed',
+            'errorCode': error.runtimeType.toString(),
+          },
+        );
+        unawaited(
+          _handleRealtimeFailure(
+            const OpenAiRealtimeFailure(
+              kind: OpenAiRealtimeFailureKind.fatal,
+              diagnosticCode: 'playback_enqueue_failed',
+            ),
+            allowReconnect: false,
+          ),
+        );
+      }),
+    );
+  }
+
+  Future<void> _decodeAndEnqueueTranslatedAudio(
+    OpenAiRealtimeAudioDelta event,
+  ) async {
+    final bytes = base64Decode(event.base64Audio);
+    if (bytes.isEmpty) {
+      return;
+    }
+
+    final config = _activeConfig;
+    await playbackGateway.enqueuePcm16(
+      TranslatedAudioPcm16Chunk(
+        bytes: Uint8List.fromList(bytes),
+        sampleRateHz: config?.inputAudioRate ?? 24000,
+        channelCount: 1,
+      ),
     );
   }
 
@@ -291,6 +352,7 @@ class LiveRealtimeTranslationCoordinator {
       return;
     }
 
+    RealtimeTranslationSession? realtimeSession;
     try {
       final credential = await credentialStore.readCredentialForNetworkUse();
       if (credential == null || credential.isEmpty) {
@@ -304,11 +366,22 @@ class LiveRealtimeTranslationCoordinator {
         return;
       }
 
-      final realtimeSession = await realtimeGateway.connect(
+      realtimeSession = await realtimeGateway.connect(
         config: config,
         credential: credential,
       );
       if (_isDisposed || generation != _reconnectGeneration) {
+        await realtimeSession.closeImmediately();
+        return;
+      }
+
+      await playbackGateway.start(
+        TranslatedAudioPlaybackConfig.openAiRealtime(
+          sampleRateHz: config.inputAudioRate,
+        ),
+      );
+      if (_isDisposed || generation != _reconnectGeneration) {
+        await playbackGateway.stop(clearQueue: true);
         await realtimeSession.closeImmediately();
         return;
       }
@@ -318,6 +391,7 @@ class LiveRealtimeTranslationCoordinator {
         transcriptCommitTarget: transcriptCommitTarget,
         resetTranscriptCommitter: false,
       );
+      realtimeSession = null;
       await captureGateway.start(
         MicrophoneCaptureConfig.openAiRealtime(
           sampleRateHz: config.inputAudioRate,
@@ -339,6 +413,7 @@ class LiveRealtimeTranslationCoordinator {
       if (_isDisposed || generation != _reconnectGeneration) {
         return;
       }
+      await realtimeSession?.closeImmediately();
       await _handleRealtimeFailure(
         OpenAiRealtimeFailure.fromSocketError(error),
         allowReconnect: true,
@@ -369,6 +444,7 @@ class LiveRealtimeTranslationCoordinator {
     try {
       await captureSubscription?.cancel();
       await captureGateway.stop();
+      await playbackGateway.stop(clearQueue: true);
       await realtimeSubscription?.cancel();
       if (graceful) {
         await realtimeSession?.closeGracefully();

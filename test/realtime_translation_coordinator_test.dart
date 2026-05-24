@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
@@ -11,6 +12,7 @@ import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/session/realtime_translation_coordinator.dart';
 import 'package:realtime_translate_mobile/src/session/realtime_transcript_committer.dart';
+import 'package:realtime_translate_mobile/src/session/translated_audio_playback.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
 import 'package:realtime_translate_mobile/src/storage/local_storage_models.dart';
@@ -77,6 +79,38 @@ void main() {
     );
     expect(harness.realtimeGateway.session.appendedChunks.single, [0, 1, 2, 3]);
   });
+
+  test(
+    'decodes realtime translated audio deltas into playback queue',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+
+      final result = await harness.coordinator.start(config: config);
+      harness.realtimeGateway.session.addEvent(
+        OpenAiRealtimeAudioDelta(
+          type: 'session.output_audio.delta',
+          base64Audio: base64Encode([4, 5, 6, 7]),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(result, LiveRealtimeStartResult.started);
+      expect(harness.playbackGateway.startCount, 1);
+      expect(
+        harness.playbackGateway.lastConfig,
+        isA<TranslatedAudioPlaybackConfig>()
+            .having((value) => value.sampleRateHz, 'sampleRateHz', 24000)
+            .having((value) => value.channelCount, 'channelCount', 1),
+      );
+      expect(harness.playbackGateway.enqueuedChunks, hasLength(1));
+      expect(harness.playbackGateway.enqueuedChunks.single.bytes, [4, 5, 6, 7]);
+      expect(harness.playbackGateway.enqueuedChunks.single.sampleRateHz, 24000);
+      expect(harness.playbackGateway.enqueuedChunks.single.channelCount, 1);
+    },
+  );
 
   test(
     'commits realtime transcript deltas into active meeting storage',
@@ -200,6 +234,8 @@ void main() {
 
     expect(harness.captureGateway.stopCount, greaterThanOrEqualTo(1));
     expect(harness.captureGateway.isCapturing, isFalse);
+    expect(harness.playbackGateway.stopCount, greaterThanOrEqualTo(1));
+    expect(harness.playbackGateway.isOpen, isFalse);
     expect(harness.realtimeGateway.session.closeGracefullyCount, 1);
     expect(harness.controller.state.phase, LiveSessionPhase.localSetup);
     expect(harness.controller.state.isMicrophoneCaptureOpen, isFalse);
@@ -224,6 +260,8 @@ void main() {
     expect(harness.controller.state.isRealtimeSessionOpen, isFalse);
     expect(harness.captureGateway.isCapturing, isFalse);
     expect(harness.captureGateway.stopCount, greaterThanOrEqualTo(1));
+    expect(harness.playbackGateway.isOpen, isFalse);
+    expect(harness.playbackGateway.stopCount, greaterThanOrEqualTo(1));
   });
 
   test(
@@ -274,6 +312,8 @@ void main() {
       expect(reconnectDelays, hasLength(1));
       expect(harness.realtimeGateway.connectCount, 2);
       expect(harness.captureGateway.startCount, 2);
+      expect(harness.playbackGateway.startCount, 2);
+      expect(harness.playbackGateway.stopCount, greaterThanOrEqualTo(1));
       expect(harness.controller.state.phase, LiveSessionPhase.listening);
       expect(harness.controller.state.realtimeRetryAttempt, 0);
 
@@ -355,6 +395,7 @@ void main() {
           .transcriptEntries;
       expect(harness.realtimeGateway.connectCount, 2);
       expect(harness.controller.state.phase, LiveSessionPhase.offline);
+      expect(harness.playbackGateway.isOpen, isFalse);
       expect(entries, hasLength(1));
       expect(entries.single.originalText, 'Hola');
       expect(entries.single.status, 'interrupted');
@@ -373,6 +414,7 @@ void main() {
     expect(harness.controller.state.phase, LiveSessionPhase.readAloudPaused);
     expect(harness.controller.state.isMicrophoneCaptureOpen, isFalse);
     expect(harness.captureGateway.isCapturing, isFalse);
+    expect(harness.playbackGateway.isOpen, isFalse);
     expect(harness.realtimeGateway.session.closeImmediatelyCount, 1);
   });
 }
@@ -388,6 +430,7 @@ class _Harness {
     : permissionGateway = _FakePermissionGateway(permissionStatus),
       repository = LocalMeetingRepository(store: MemoryEncryptedLocalStore()),
       captureGateway = _FakeMicrophoneCaptureGateway(),
+      playbackGateway = _FakeTranslatedAudioPlaybackGateway(),
       realtimeGateway = _FakeRealtimeTranslationGateway() {
     controller = LiveSessionController(permissionGateway: permissionGateway);
     credentialStore = OpenAiCredentialStore(repository: repository);
@@ -396,6 +439,7 @@ class _Harness {
       credentialStore: credentialStore,
       captureGateway: captureGateway,
       realtimeGateway: realtimeGateway,
+      playbackGateway: playbackGateway,
     );
   }
 
@@ -412,6 +456,7 @@ class _Harness {
       credentialStore: harness.credentialStore,
       captureGateway: harness.captureGateway,
       realtimeGateway: harness.realtimeGateway,
+      playbackGateway: harness.playbackGateway,
       reconnectPolicy: reconnectPolicy,
       reconnectDelay: reconnectDelay ?? (_) => Future<void>.value(),
     );
@@ -426,6 +471,7 @@ class _Harness {
   final _FakePermissionGateway permissionGateway;
   final LocalMeetingRepository repository;
   final _FakeMicrophoneCaptureGateway captureGateway;
+  final _FakeTranslatedAudioPlaybackGateway playbackGateway;
   final _FakeRealtimeTranslationGateway realtimeGateway;
   late LiveSessionController controller;
   late OpenAiCredentialStore credentialStore;
@@ -487,6 +533,43 @@ class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
         duration: const Duration(milliseconds: 200),
       ),
     );
+  }
+}
+
+class _FakeTranslatedAudioPlaybackGateway
+    implements TranslatedAudioPlaybackGateway {
+  bool _isOpen = false;
+  int startCount = 0;
+  int stopCount = 0;
+  TranslatedAudioPlaybackConfig? lastConfig;
+  final List<TranslatedAudioPcm16Chunk> enqueuedChunks = [];
+
+  @override
+  bool get isOpen => _isOpen;
+
+  @override
+  Future<void> start(TranslatedAudioPlaybackConfig config) async {
+    startCount += 1;
+    lastConfig = config;
+    _isOpen = true;
+  }
+
+  @override
+  Future<void> enqueuePcm16(TranslatedAudioPcm16Chunk chunk) async {
+    if (!_isOpen) {
+      throw StateError('Playback queue is closed.');
+    }
+
+    enqueuedChunks.add(chunk);
+  }
+
+  @override
+  Future<void> stop({required bool clearQueue}) async {
+    stopCount += 1;
+    _isOpen = false;
+    if (clearQueue) {
+      enqueuedChunks.clear();
+    }
   }
 }
 

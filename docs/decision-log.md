@@ -145,4 +145,28 @@ Rationale:
 Implications:
 
 - Future audio package, SDK, resampling, or playback additions must update the cybersecurity report and rerun supply-chain checks.
-- Real microphone translation smoke, decoded translated-audio playback, and transcript persistence remain open #6/#14 work.
+- Real microphone translation smoke, native translated-audio speaker output, and live transcript validation remain open #6/#14 work.
+
+## 2026-05-24 - Translated Audio Playback Starts As A Fakeable Local Queue
+
+Status: Accepted
+
+Decision:
+
+- Decode OpenAI realtime translated-audio deltas into PCM16 chunks inside the phone app.
+- Send decoded chunks only to a local `TranslatedAudioPlaybackGateway` seam.
+- Keep the first production gateway as a no-op placeholder that does not retain audio-derived data.
+- Start the playback gateway only after credential, microphone permission, and realtime connection gates pass.
+- Stop and clear playback resources during reconnecting, offline, credential-invalid, backgrounded, stopped, and failed reconnect states.
+- Do not add an audio playback package, native speaker output engine, backend relay, logging sink, or extra Android permission in this software-only slice.
+
+Rationale:
+
+- The fakeable gateway lets tests prove decoded translated-audio routing and reconnect teardown/restart behavior without requiring a physical speaker path or controllable microphone source.
+- Keeping audio-derived payloads in transient memory only preserves the phone-only privacy boundary while native output remains unimplemented.
+- A no-dependency seam keeps supply-chain risk low until the app is ready for a focused Android/iOS audio-output implementation.
+
+Implications:
+
+- Native speaker output is still open #6/#14 work and must update the cybersecurity report, dependency checks, and tests when implemented.
+- Diagnostics around playback must remain limited to sanitized operation/result/error labels and must never include audio bytes, base64 chunks, transcript text, translated text, or credentials.
