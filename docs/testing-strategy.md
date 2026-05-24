@@ -11,6 +11,7 @@ flutter analyze
 flutter test
 bash scripts/check-docs.sh
 bash scripts/check-supply-chain.sh
+scripts/final_qa_gate.sh
 ```
 
 Optional live OpenAI smoke, only when a credential is supplied through the process environment from an uncommitted local source:
@@ -117,9 +118,12 @@ flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 scripts/build_debug_apk_artifact.sh --release
+scripts/final_qa_gate.sh --emulator-smoke
 ```
 
 For APK handoff without live OpenAI quota, `scripts/build_debug_apk_artifact.sh` produces `/tmp/realtime-translate-mobile-<mode>-<commit>-<timestamp>.apk` plus a `.sha256` sidecar. Debug is the default, `--debug-live-events` produces the matching debug-only E2E proof build artifact, and `--release` produces a release-mode APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback; debug-signed release artifacts are not store-ready. The script does not read the local OpenAI secret file.
+
+For a one-command non-live pre-handoff gate, `scripts/final_qa_gate.sh` runs Flutter analysis/tests, docs and supply-chain checks, shell syntax checks, `git diff --check`, and fresh debug plus release APK artifact builds. `scripts/final_qa_gate.sh --emulator-smoke` also installs the fresh release artifact and verifies the missing-credential setup gate without reading the live OpenAI secret or making a live OpenAI request.
 
 Optional screenshot capture should write outside the repo by default:
 
@@ -151,3 +155,5 @@ Latest focused validation for the direct realtime recovery-label slice was 2026-
 Latest host validation for installed invalid-credential recovery was 2026-05-24 21:17 AWST. `bash -n scripts/android_emulator_e2e.sh`, `flutter test test/openai_realtime_translation_test.dart test/openai_realtime_resilience_test.dart test/realtime_translation_coordinator_test.dart`, `flutter analyze`, `flutter test` (83 tests), `scripts/build_debug_apk_artifact.sh`, and `scripts/android_emulator_e2e.sh --apk /tmp/realtime-translate-mobile-debug-61b9239-20260524T131539Z.apk --verify-invalid-credential-recovery` passed. The emulator run used only a non-secret invalid placeholder credential, pre-granted microphone permission for the negative auth path, observed the realtime auth rejection, verified setup-required recovery, wrote proof under `/tmp/realtime-translate-mobile-e2e-invalid-credential-precommit`, and cleared app data afterward.
 
 Latest host validation for debug installed-app persistence proof was 2026-05-24 21:40 AWST. `bash -n scripts/android_emulator_e2e.sh`, `git diff --check`, `bash scripts/check-docs.sh`, `flutter analyze`, `flutter test` (83 tests), `bash scripts/check-supply-chain.sh`, `scripts/build_debug_apk_artifact.sh --debug-live-events`, and `scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events --apk /tmp/realtime-translate-mobile-debug-live-events-2287189-20260524T133629Z.apk` passed. The APK SHA-256 was `da4ed0de8aeb1c355c5e6c4e1ed1369d8f9167a2f616b5aabd9ab0c4e0c227c1`. The emulator run saved the live credential through the app UI without printing it, accepted microphone permission, ran the debug generated-event proof, restarted the app, verified `4 transcript lines` in encrypted meeting history, reopened the meeting, verified `This meeting` AI context saw `5 local transcript lines`, wrote proof under `/tmp/realtime-translate-mobile-e2e-persistence-precommit`, and cleared app data afterward. Exact key scan counts after cleanup were repo `0`, `/tmp` `0`, `/home/tom/.openclaw/logs` `0`, process environments `0`, and `~/.codex/auth.json` `0`. This did not prove physical microphone input, live transcript persistence from real speech, live OpenAI reconnect in the app, credential-expiry recovery, or audible speaker output.
+
+Latest non-live final QA gate validation was 2026-05-24 21:49 AWST. `scripts/final_qa_gate.sh --emulator-smoke` passed with `flutter pub get`, `flutter analyze`, `flutter test` (82 tests), `bash scripts/check-docs.sh`, `bash scripts/check-supply-chain.sh`, shell syntax checks for repo scripts, `git diff --check`, fresh debug and release APK artifact builds, and a no-live installed-app smoke against `/tmp/realtime-translate-mobile-release-debug-signed-bdd6dcb-20260524T134822Z.apk`. The debug APK SHA-256 was `fe446ad7670619dae3b401d850af4b36b9cce4205428b8c52f73479092030706`; the release APK SHA-256 was `9f51c22befa8f96091108aff2def2e64d898e1b18d1909cae8f6e804ed40e07d`. The release artifact used the debug-signing fallback because local `android/key.properties` was absent, so it is not store-ready. The emulator smoke wrote proof under `/tmp/realtime-translate-mobile-e2e-final-qa`, cleared app data afterward, did not read the local OpenAI secret, did not call live OpenAI, and made no microphone-injection or audible-speaker claim.
