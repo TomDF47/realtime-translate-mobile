@@ -8,7 +8,7 @@ Diagnostics flow through `PrivacySafeDiagnostics` in `lib/src/diagnostics/privac
 
 - The default sink is no-op.
 - Any future sink must receive records only after field allowlisting, redaction, and omission.
-- Current wired paths cover live-session state transitions and OpenAI credential status/read/save/remove events.
+- Current wired paths cover live-session state transitions, realtime recovery decisions, and OpenAI credential status/read/save/remove events.
 - Diagnostic records are for local state only; they are not analytics, crash reports, telemetry, or backend logs.
 
 ## Allowed Fields
@@ -49,6 +49,7 @@ Current tests in `test/privacy_safe_diagnostics_test.dart` prove:
 - secret-like OpenAI keys and session tokens are redacted
 - email addresses, prompts, transcript text, translated text, request bodies, and recipient fields do not appear in serialized diagnostic records
 - live-session diagnostics record state transitions only, not user-facing notices or payloads
+- realtime recovery diagnostics record sanitized error code, retry attempt, and backoff milliseconds only
 - OpenAI credential diagnostics never include credential values or API-key field names
 
 Run:

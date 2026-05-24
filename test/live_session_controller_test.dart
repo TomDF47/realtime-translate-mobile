@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:realtime_translate_mobile/src/diagnostics/privacy_safe_diagnostics.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
 import 'package:realtime_translate_mobile/src/session/live_session_controller.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 
@@ -135,6 +137,140 @@ void main() {
     expect(controller.state.isRealtimeSessionOpen, isFalse);
     expect(controller.state.isPlaybackQueueOpen, isFalse);
   });
+
+  test(
+    'retryable realtime failure enters reconnecting with closed resources',
+    () async {
+      final sink = MemoryPrivacySafeDiagnosticsSink();
+      final controller = LiveSessionController(
+        permissionGateway: _FixedPermissionGateway(
+          MicrophonePermissionStatus.granted,
+        ),
+        diagnostics: PrivacySafeDiagnostics(sink: sink),
+      );
+      const policy = OpenAiRealtimeReconnectPolicy(
+        maxAttempts: 2,
+        initialDelay: Duration(seconds: 1),
+        jitterRatio: 0.2,
+      );
+
+      await controller.startMeeting();
+      final decision = policy.plan(
+        failure: OpenAiRealtimeFailure.sessionClosed(),
+        retryAttempt: 1,
+        jitterSample: 1,
+      );
+      controller.applyRealtimeRecoveryDecision(decision);
+
+      expect(controller.state.phase, LiveSessionPhase.reconnecting);
+      expect(controller.state.isMicrophoneCaptureOpen, isFalse);
+      expect(controller.state.isRealtimeSessionOpen, isFalse);
+      expect(controller.state.isPlaybackQueueOpen, isFalse);
+      expect(controller.state.realtimeRetryAttempt, 1);
+      expect(
+        controller.state.realtimeReconnectDelay,
+        const Duration(milliseconds: 1200),
+      );
+      expect(
+        sink.records.map((record) => record.event),
+        contains('live_session.realtime_recovery_decision'),
+      );
+      expect(_serializeAll(sink.records), isNot(contains('sk-')));
+      expect(_serializeAll(sink.records), isNot(contains('transcript')));
+    },
+  );
+
+  test('realtime recovery can return to listening after reconnect', () async {
+    final controller = LiveSessionController(
+      permissionGateway: _FixedPermissionGateway(
+        MicrophonePermissionStatus.granted,
+      ),
+    );
+    const policy = OpenAiRealtimeReconnectPolicy();
+
+    await controller.startMeeting();
+    controller.applyRealtimeRecoveryDecision(
+      policy.plan(
+        failure: OpenAiRealtimeFailure.sessionClosed(),
+        retryAttempt: 1,
+      ),
+    );
+    controller.markRealtimeRecovered();
+
+    expect(controller.state.phase, LiveSessionPhase.listening);
+    expect(controller.state.isMicrophoneCaptureOpen, isTrue);
+    expect(controller.state.isRealtimeSessionOpen, isTrue);
+    expect(controller.state.isPlaybackQueueOpen, isTrue);
+    expect(controller.state.realtimeRetryAttempt, 0);
+    expect(controller.state.realtimeReconnectDelay, Duration.zero);
+  });
+
+  test('credential and exhausted network decisions fail closed', () async {
+    final controller = LiveSessionController(
+      permissionGateway: _FixedPermissionGateway(
+        MicrophonePermissionStatus.granted,
+      ),
+    );
+    const policy = OpenAiRealtimeReconnectPolicy(maxAttempts: 1);
+
+    await controller.startMeeting();
+    controller.applyRealtimeRecoveryDecision(
+      policy.plan(
+        failure: OpenAiRealtimeFailure.classifyCode('invalid_api_key'),
+        retryAttempt: 1,
+      ),
+    );
+
+    expect(controller.state.phase, LiveSessionPhase.credentialInvalid);
+    expect(controller.state.isRealtimeSessionOpen, isFalse);
+
+    await controller.startMeeting();
+    controller.applyRealtimeRecoveryDecision(
+      policy.plan(
+        failure: OpenAiRealtimeFailure.sessionClosed(),
+        retryAttempt: 2,
+      ),
+    );
+
+    expect(controller.state.phase, LiveSessionPhase.offline);
+    expect(controller.state.isMicrophoneCaptureOpen, isFalse);
+    expect(controller.state.isRealtimeSessionOpen, isFalse);
+    expect(controller.state.isPlaybackQueueOpen, isFalse);
+  });
+
+  test('realtime recovery diagnostics redact unsafe error codes', () async {
+    final sink = MemoryPrivacySafeDiagnosticsSink();
+    final controller = LiveSessionController(
+      permissionGateway: _FixedPermissionGateway(
+        MicrophonePermissionStatus.granted,
+      ),
+      diagnostics: PrivacySafeDiagnostics(sink: sink),
+    );
+    final fakeApiKey = 'sk-${List.filled(24, 'a').join()}';
+
+    await controller.startMeeting();
+    controller.applyRealtimeRecoveryDecision(
+      OpenAiRealtimeReconnectDecision(
+        action: OpenAiRealtimeRecoveryAction.fatalError,
+        failure: OpenAiRealtimeFailure(
+          kind: OpenAiRealtimeFailureKind.fatal,
+          diagnosticCode: fakeApiKey,
+        ),
+        retryAttempt: 1,
+        delay: Duration.zero,
+      ),
+    );
+
+    final serialized = _serializeAll(sink.records);
+    expect(serialized, isNot(contains(fakeApiKey)));
+    expect(serialized, contains(PrivacySafeDiagnostics.redacted));
+  });
+}
+
+String _serializeAll(Iterable<PrivacySafeDiagnosticRecord> records) {
+  return records
+      .map((record) => '${record.event} ${record.severity} ${record.fields}')
+      .join('\n');
 }
 
 class _FixedPermissionGateway implements MicrophonePermissionGateway {

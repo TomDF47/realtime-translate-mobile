@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../diagnostics/privacy_safe_diagnostics.dart';
+import '../openai/openai_realtime_resilience.dart';
 import 'microphone_permission.dart';
 
 enum LiveSessionPhase {
@@ -40,6 +41,8 @@ class LiveSessionState {
     required this.isMicrophoneCaptureOpen,
     required this.isRealtimeSessionOpen,
     required this.isPlaybackQueueOpen,
+    required this.realtimeRetryAttempt,
+    required this.realtimeReconnectDelay,
     this.notice,
   });
 
@@ -50,6 +53,8 @@ class LiveSessionState {
       isMicrophoneCaptureOpen = false,
       isRealtimeSessionOpen = false,
       isPlaybackQueueOpen = false,
+      realtimeRetryAttempt = 0,
+      realtimeReconnectDelay = Duration.zero,
       notice = null;
 
   final LiveSessionPhase phase;
@@ -58,6 +63,8 @@ class LiveSessionState {
   final bool isMicrophoneCaptureOpen;
   final bool isRealtimeSessionOpen;
   final bool isPlaybackQueueOpen;
+  final int realtimeRetryAttempt;
+  final Duration realtimeReconnectDelay;
   final String? notice;
 
   LiveSessionState copyWith({
@@ -67,6 +74,8 @@ class LiveSessionState {
     bool? isMicrophoneCaptureOpen,
     bool? isRealtimeSessionOpen,
     bool? isPlaybackQueueOpen,
+    int? realtimeRetryAttempt,
+    Duration? realtimeReconnectDelay,
     String? notice,
     bool clearNotice = false,
   }) {
@@ -79,6 +88,9 @@ class LiveSessionState {
       isRealtimeSessionOpen:
           isRealtimeSessionOpen ?? this.isRealtimeSessionOpen,
       isPlaybackQueueOpen: isPlaybackQueueOpen ?? this.isPlaybackQueueOpen,
+      realtimeRetryAttempt: realtimeRetryAttempt ?? this.realtimeRetryAttempt,
+      realtimeReconnectDelay:
+          realtimeReconnectDelay ?? this.realtimeReconnectDelay,
       notice: clearNotice ? null : notice ?? this.notice,
     );
   }
@@ -105,6 +117,8 @@ class LiveSessionController extends ChangeNotifier {
         isMicrophoneCaptureOpen: false,
         isRealtimeSessionOpen: false,
         isPlaybackQueueOpen: false,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
         notice: 'Microphone access is required before live translation starts.',
       ),
     );
@@ -118,6 +132,8 @@ class LiveSessionController extends ChangeNotifier {
           isMicrophoneCaptureOpen: false,
           isRealtimeSessionOpen: false,
           isPlaybackQueueOpen: false,
+          realtimeRetryAttempt: 0,
+          realtimeReconnectDelay: Duration.zero,
           notice:
               'No audio is captured before microphone permission is granted.',
         ),
@@ -132,6 +148,8 @@ class LiveSessionController extends ChangeNotifier {
         isMicrophoneCaptureOpen: false,
         isRealtimeSessionOpen: false,
         isPlaybackQueueOpen: false,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
         notice: 'Preparing the phone-local live session.',
       ),
     );
@@ -142,6 +160,8 @@ class LiveSessionController extends ChangeNotifier {
         isMicrophoneCaptureOpen: true,
         isRealtimeSessionOpen: true,
         isPlaybackQueueOpen: true,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
         clearNotice: true,
       ),
     );
@@ -163,6 +183,8 @@ class LiveSessionController extends ChangeNotifier {
         isMicrophoneCaptureOpen: false,
         isRealtimeSessionOpen: false,
         isPlaybackQueueOpen: false,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
         notice:
             notice ??
             'Add an OpenAI credential stored on this device before live translation starts.',
@@ -179,6 +201,8 @@ class LiveSessionController extends ChangeNotifier {
           isMicrophoneCaptureOpen: true,
           isRealtimeSessionOpen: true,
           isPlaybackQueueOpen: false,
+          realtimeRetryAttempt: 0,
+          realtimeReconnectDelay: Duration.zero,
           notice:
               'Read-aloud playback is paused; transcript capture stays gated.',
         ),
@@ -198,6 +222,8 @@ class LiveSessionController extends ChangeNotifier {
         isMicrophoneCaptureOpen: true,
         isRealtimeSessionOpen: true,
         isPlaybackQueueOpen: true,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
         clearNotice: true,
       ),
     );
@@ -211,6 +237,8 @@ class LiveSessionController extends ChangeNotifier {
         isMicrophoneCaptureOpen: false,
         isRealtimeSessionOpen: false,
         isPlaybackQueueOpen: false,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
         clearNotice: true,
       ),
     );
@@ -229,6 +257,8 @@ class LiveSessionController extends ChangeNotifier {
               isMicrophoneCaptureOpen: false,
               isRealtimeSessionOpen: false,
               isPlaybackQueueOpen: false,
+              realtimeRetryAttempt: 0,
+              realtimeReconnectDelay: Duration.zero,
               notice:
                   'Session paused while the app is not foregrounded. Resume when ready.',
             ),
@@ -244,6 +274,8 @@ class LiveSessionController extends ChangeNotifier {
               isMicrophoneCaptureOpen: false,
               isRealtimeSessionOpen: false,
               isPlaybackQueueOpen: false,
+              realtimeRetryAttempt: 1,
+              realtimeReconnectDelay: Duration.zero,
               notice: 'Ready to resume the direct live session.',
             ),
           );
@@ -255,6 +287,101 @@ class LiveSessionController extends ChangeNotifier {
 
   void handleAudioRouteChange(LiveAudioRoute route) {
     _setState(_state.copyWith(audioRoute: route));
+  }
+
+  void applyRealtimeRecoveryDecision(OpenAiRealtimeReconnectDecision decision) {
+    _pausedByLifecycle = false;
+    switch (decision.action) {
+      case OpenAiRealtimeRecoveryAction.reconnectAfterBackoff:
+        _recordRealtimeRecoveryDecision(
+          decision,
+          severity: DiagnosticSeverity.warning,
+        );
+        _setState(
+          _state.copyWith(
+            phase: LiveSessionPhase.reconnecting,
+            isMicrophoneCaptureOpen: false,
+            isRealtimeSessionOpen: false,
+            isPlaybackQueueOpen: false,
+            realtimeRetryAttempt: decision.retryAttempt,
+            realtimeReconnectDelay: decision.delay,
+            notice: decision.userFacingNotice,
+          ),
+        );
+      case OpenAiRealtimeRecoveryAction.credentialInvalid:
+        _recordRealtimeRecoveryDecision(
+          decision,
+          severity: DiagnosticSeverity.warning,
+        );
+        markCredentialInvalid(notice: decision.userFacingNotice);
+      case OpenAiRealtimeRecoveryAction.unsupportedLanguage:
+        _recordRealtimeRecoveryDecision(
+          decision,
+          severity: DiagnosticSeverity.warning,
+        );
+        _setState(
+          _state.copyWith(
+            phase: LiveSessionPhase.error,
+            isMicrophoneCaptureOpen: false,
+            isRealtimeSessionOpen: false,
+            isPlaybackQueueOpen: false,
+            realtimeRetryAttempt: decision.retryAttempt,
+            realtimeReconnectDelay: Duration.zero,
+            notice: decision.userFacingNotice,
+          ),
+        );
+      case OpenAiRealtimeRecoveryAction.offline:
+        _recordRealtimeRecoveryDecision(
+          decision,
+          severity: DiagnosticSeverity.error,
+        );
+        _setState(
+          _state.copyWith(
+            phase: LiveSessionPhase.offline,
+            isMicrophoneCaptureOpen: false,
+            isRealtimeSessionOpen: false,
+            isPlaybackQueueOpen: false,
+            realtimeRetryAttempt: decision.retryAttempt,
+            realtimeReconnectDelay: Duration.zero,
+            notice: decision.userFacingNotice,
+          ),
+        );
+      case OpenAiRealtimeRecoveryAction.fatalError:
+        _recordRealtimeRecoveryDecision(
+          decision,
+          severity: DiagnosticSeverity.error,
+        );
+        _setState(
+          _state.copyWith(
+            phase: LiveSessionPhase.error,
+            isMicrophoneCaptureOpen: false,
+            isRealtimeSessionOpen: false,
+            isPlaybackQueueOpen: false,
+            realtimeRetryAttempt: decision.retryAttempt,
+            realtimeReconnectDelay: Duration.zero,
+            notice: decision.userFacingNotice,
+          ),
+        );
+    }
+  }
+
+  void markRealtimeRecovered() {
+    if (!_state.microphonePermission.isGranted) {
+      return;
+    }
+
+    _pausedByLifecycle = false;
+    _setState(
+      _state.copyWith(
+        phase: LiveSessionPhase.listening,
+        isMicrophoneCaptureOpen: true,
+        isRealtimeSessionOpen: true,
+        isPlaybackQueueOpen: true,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
+        clearNotice: true,
+      ),
+    );
   }
 
   LiveSessionPhase _permissionDeniedPhase(
@@ -281,8 +408,27 @@ class LiveSessionController extends ChangeNotifier {
         'isMicrophoneCaptureOpen': value.isMicrophoneCaptureOpen,
         'isRealtimeSessionOpen': value.isRealtimeSessionOpen,
         'isPlaybackQueueOpen': value.isPlaybackQueueOpen,
+        'retryAttempt': value.realtimeRetryAttempt,
+        'backoffMs': value.realtimeReconnectDelay.inMilliseconds,
       },
     );
     notifyListeners();
+  }
+
+  void _recordRealtimeRecoveryDecision(
+    OpenAiRealtimeReconnectDecision decision, {
+    required DiagnosticSeverity severity,
+  }) {
+    diagnostics.record(
+      'live_session.realtime_recovery_decision',
+      severity: severity,
+      fields: {
+        'operation': 'realtime.reconnect',
+        'result': decision.action.name,
+        'errorCode': decision.failure.diagnosticCode,
+        'retryAttempt': decision.retryAttempt,
+        'backoffMs': decision.delay.inMilliseconds,
+      },
+    );
   }
 }
