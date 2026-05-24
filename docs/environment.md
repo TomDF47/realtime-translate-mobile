@@ -69,7 +69,7 @@ scripts/build_debug_apk_artifact.sh --release
 
 The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator when a live credential is requested, can run a non-live credential save/remove/reset gate with `--verify-credential-reset`, can run a non-secret invalid-placeholder auth recovery gate with `--verify-invalid-credential-recovery`, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
 
-The `--debug-live-events` mode requires the debug Dart define shown above. It is an installed-app coordinator/storage/playback proof that reports only row/audio counts; it does not use a production hook, live OpenAI speech, emulator microphone input, or audible speaker validation.
+The `--debug-live-events` mode requires the debug Dart define shown above. It is an installed-app coordinator/storage/playback persistence proof that reports only sanitized row/audio/context counts: after the generated-event proof, the E2E driver restarts the app, verifies the generated row remains visible in encrypted meeting history, reopens the meeting, and verifies `This meeting` AI context sees the persisted local transcript count. It does not use a production hook, live OpenAI speech, emulator microphone input, or audible speaker validation.
 
 Android emulator available on Tom's Fedora machine:
 

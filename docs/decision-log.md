@@ -251,14 +251,14 @@ Status: Accepted
 Decision:
 
 - Add an opt-in installed-app proof that is available only in debug builds compiled with `--dart-define=LIVE_TRANSLATE_DEBUG_E2E=true`.
-- Drive generated-speech-shaped realtime transcript/audio events through the app coordinator, simulate playback teardown/restart, and verify exactly one new realtime transcript row plus one recovered audio chunk through sanitized UI text.
+- Drive generated-speech-shaped realtime transcript/audio events through the app coordinator, simulate playback teardown/restart, verify exactly one new realtime transcript row plus one recovered audio chunk through sanitized UI text, restart the app, verify the generated row persists in encrypted meeting history, reopen the meeting, and verify `This meeting` AI context sees the persisted local transcript count.
 - Keep the proof absent from normal debug builds, absent from release UI through `kDebugMode`, and guarded in the coordinator by an assert-enabled runtime check.
 - Treat this as coordinator/storage/playback validation only, not as live OpenAI, physical microphone, or audible speaker evidence.
 
 Rationale:
 
 - The current `android-pixel9-headless` launcher hardcodes `-no-audio`, while the Android emulator exposes host microphone passthrough through `-allow-host-audio` but not a reliable documented generated WAV/PCM microphone injection path.
-- The debug proof gives the installed APK a repeatable E2E check for transcript de-duplication and playback recovery without storing audio fixtures, printing payloads, adding packages, or adding a production backdoor.
+- The debug proof gives the installed APK a repeatable E2E check for transcript de-duplication, playback recovery, encrypted history persistence after process restart, and local AI-context visibility without storing audio fixtures, printing payloads, adding packages, or adding a production backdoor.
 
 Implications:
 

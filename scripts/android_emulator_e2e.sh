@@ -29,7 +29,9 @@ Options:
                           and drive the setup -> permission -> live surface flow.
                           The credential is never printed. App data is cleared.
   --debug-live-events     After reaching the live surface, drive the opt-in
-                          debug-only generated-event proof. Build the APK with
+                          debug-only generated-event proof, restart the app,
+                          and verify persisted meeting history / AI context.
+                          Build the APK with
                           --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true first.
   --verify-credential-reset
                           Save a non-secret placeholder credential through the
@@ -392,6 +394,8 @@ if ((VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
 fi
 
 if ((USE_LIVE_CREDENTIAL)); then
+  AI_CHAT_OPENED=0
+
   log "Saving live credential through the app UI without printing it"
   tap_ui "Open OpenAI setup"
   wait_for_ui "OpenAI setup" 20
@@ -436,14 +440,38 @@ if ((USE_LIVE_CREDENTIAL)); then
     wait_for_ui "Debug realtime proof passed: 1 realtime row, 1 audio chunk" 30
     screencap_to "$ARTIFACT_DIR/05-debug-realtime-proof.png"
     dump_ui_to "$ARTIFACT_DIR/05-debug-realtime-proof.xml"
+
+    log "Restarting app to verify persisted debug proof row"
+    adb_cmd shell am force-stop "$PACKAGE_NAME" >/dev/null
+    adb_cmd shell am start -n "$PACKAGE_NAME/$MAIN_ACTIVITY" >/dev/null
+    wait_for_ui "Start new meeting" 30
+    wait_for_ui "Open meeting history" 10
+    tap_ui "Open meeting history"
+    wait_for_ui "Project timeline review" 20
+    wait_for_ui "4 transcript lines" 10
+    screencap_to "$ARTIFACT_DIR/06-debug-realtime-proof-history-after-restart.png"
+    dump_ui_to "$ARTIFACT_DIR/06-debug-realtime-proof-history-after-restart.xml"
+
+    log "Reopening persisted meeting and verifying this-meeting AI context"
+    tap_ui "Project timeline review"
+    wait_for_ui "Listening" 30
+    tap_ui "Open AI chat"
+    wait_for_ui "AI Chat" 20
+    wait_for_ui "This meeting" 10
+    wait_for_ui "Ready to answer from 5 local transcript lines." 10
+    screencap_to "$ARTIFACT_DIR/07-ai-chat-this-meeting-persisted-context.png"
+    dump_ui_to "$ARTIFACT_DIR/07-ai-chat-this-meeting-persisted-context.xml"
+    AI_CHAT_OPENED=1
   fi
 
-  log "Opening scoped AI chat sheet without sending a prompt"
-  tap_ui "Open AI chat"
-  wait_for_ui "AI Chat" 20
-  wait_for_ui "This meeting" 10
-  screencap_to "$ARTIFACT_DIR/06-ai-chat-this-meeting.png"
-  dump_ui_to "$ARTIFACT_DIR/06-ai-chat-this-meeting.xml"
+  if ((AI_CHAT_OPENED == 0)); then
+    log "Opening scoped AI chat sheet without sending a prompt"
+    tap_ui "Open AI chat"
+    wait_for_ui "AI Chat" 20
+    wait_for_ui "This meeting" 10
+    screencap_to "$ARTIFACT_DIR/06-ai-chat-this-meeting.png"
+    dump_ui_to "$ARTIFACT_DIR/06-ai-chat-this-meeting.xml"
+  fi
 fi
 
 cleanup_app_data
