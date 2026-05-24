@@ -133,6 +133,7 @@ Closed planning and implementation intake:
 - #7 Implement language support and fallback routing
 - #9 Implement local encrypted meeting storage
 - #11 Document Android emulator workflow for Codex
+- #12 Create phone-only MVP test strategy
 - #13 Implement microphone permissions and live session lifecycle
 - #15 Implement privacy-safe local logging and diagnostics controls
 - #16 Add CI quality gates for docs, Flutter, and secret safety
@@ -147,7 +148,6 @@ Open MVP/planning work:
 - #6 Integrate direct OpenAI Realtime Translation
 - #8 Add scoped AI chat over local meetings
 - #10 Maintain cybersecurity threat model and report
-- #12 Create phone-only MVP test strategy
 - #14 Harden direct OpenAI realtime resilience
 - #19 Maintain README and agent handoff docs during implementation
 - #21 Add email export for transcripts and summaries
