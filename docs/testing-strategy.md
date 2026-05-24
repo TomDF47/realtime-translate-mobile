@@ -109,10 +109,14 @@ Repeatable installed-app E2E sequence:
 ```bash
 export PATH=/home/tom/.local/share/flutter/bin:$PATH
 flutter build apk --debug
+scripts/build_debug_apk_artifact.sh
 scripts/android_emulator_e2e.sh --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
+scripts/build_debug_apk_artifact.sh --debug-live-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 ```
+
+For APK handoff without live OpenAI quota, `scripts/build_debug_apk_artifact.sh` produces `/tmp/realtime-translate-mobile-debug-<commit>-<timestamp>.apk` plus a `.sha256` sidecar. `--debug-live-events` produces the matching debug-only E2E proof build artifact. The script does not read the local OpenAI secret file.
 
 Optional screenshot capture should write outside the repo by default:
 
@@ -121,6 +125,8 @@ adb exec-out screencap -p > /tmp/live-translate-mobile-smoke.png
 ```
 
 The current app can verify the phone-local start surface, OpenAI setup-required and encrypted credential setup/reset states, Android microphone runtime permission dialog/denied state, teal listening screen after a local credential is configured, realtime target language options, scoped AI chat bottom sheet for `This meeting`, `All meetings` AI chat from meeting history, amber paused read-aloud screen with unsupported-target fallback credential state, encrypted meeting history sheet with continue/delete controls, appended local meeting history after reopening a saved meeting, email export sheet with remembered recipient preferences/add-remove controls, transcript native share handoff, summary generation UI state, encrypted local summary persistence, Summary/Both local export composition, and large-text/compact-viewport behavior for those core surfaces. The installed E2E driver passed on 2026-05-24 by driving the missing-credential gate, encrypted credential save, runtime microphone permission, live listening surface, and `This meeting` AI chat sheet on `Pixel_9_API_36_Play`, with artifacts under `/tmp/realtime-translate-mobile-e2e` and app data cleared afterward. The debug-only generated-event E2E mode is now documented for installed-app coordinator/storage/playback de-duplication when a debug APK is built with `LIVE_TRANSLATE_DEBUG_E2E=true`. Direct realtime WebSocket profile/event behavior, PCM16 capture lifecycle, translated-audio playback queue decode/recovery behavior, Android playback MethodChannel behavior, realtime coordinator behavior including generated-speech-style reconnect storage continuity, debug generated-event proof counters, realtime resilience classification/backoff behavior, direct summary Responses request behavior, generated spoken-audio transcript/translated-audio event arrival, and controlled generated-speech reconnect recovery are covered by local fake gateways, controller/coordinator tests, focused playback tests, and the redacted live OpenAI smoke harness. Direct OpenAI realtime audio streaming with a physical microphone source, audible Android speaker recovery under live streaming, committed real transcript deltas from the installed app, credential-expiry recovery, transcript de-duplication under real live OpenAI app-coordinator reconnect streaming, iOS share handoff, production-volume storage behavior, and privacy routing assertions become required as their implementation issues land.
+
+Latest debug APK handoff validation on 2026-05-24 20:09 AWST passed with `bash -n scripts/build_debug_apk_artifact.sh`, `git diff --check`, `bash scripts/check-docs.sh`, `flutter analyze`, `flutter test` (76 tests), `bash scripts/check-supply-chain.sh`, `scripts/build_debug_apk_artifact.sh`, and an installed no-credential emulator smoke using `scripts/android_emulator_e2e.sh --apk /tmp/realtime-translate-mobile-debug-ff4096c-20260524T120913Z.apk`. The emulator smoke did not read the live OpenAI secret and verified only install, launch, and the missing-credential gate.
 
 ## CI Gates
 

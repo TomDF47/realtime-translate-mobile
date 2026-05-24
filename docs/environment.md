@@ -55,10 +55,14 @@ Installed APK emulator E2E, only when `/home/tom/.openclaw/secrets/realtime-tran
 ```bash
 export PATH=/home/tom/.local/share/flutter/bin:$PATH
 flutter build apk --debug
+scripts/build_debug_apk_artifact.sh
 scripts/android_emulator_e2e.sh --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
+scripts/build_debug_apk_artifact.sh --debug-live-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 ```
+
+`scripts/build_debug_apk_artifact.sh` copies the debug APK to `/tmp` with a commit-and-timestamp filename and writes a `.sha256` sidecar. It does not read the local OpenAI secret file and is suitable for local APK handoff when live OpenAI quota is blocked.
 
 The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
 

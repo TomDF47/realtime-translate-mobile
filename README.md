@@ -67,6 +67,7 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [.github/workflows/flutter.yml](.github/workflows/flutter.yml): CI Flutter analysis, tests, and supply-chain gate.
 - [scripts/check-docs.sh](scripts/check-docs.sh): docs link and secret-pattern sanity check.
 - [scripts/check-supply-chain.sh](scripts/check-supply-chain.sh): local dependency advisory, secret-pattern, and Android permission gate.
+- [scripts/build_debug_apk_artifact.sh](scripts/build_debug_apk_artifact.sh): repeatable debug APK builder/copier that writes a clearly named APK plus SHA-256 sidecar under `/tmp` without reading OpenAI credentials.
 - [scripts/live_openai_smoke.dart](scripts/live_openai_smoke.dart): redacted live OpenAI smoke harness for Responses summary/AI chat, realtime endpoint availability, synthetic PCM16 append checks, local generated-speech realtime translation validation, and controlled generated-speech reconnect validation.
 - [scripts/android_emulator_e2e.sh](scripts/android_emulator_e2e.sh): installed-APK Android emulator E2E driver for the start/setup/permission/live-surface/AI-chat path, plus an opt-in debug-only generated-event proof when the APK is built with `LIVE_TRANSLATE_DEBUG_E2E=true`; artifacts are written under `/tmp` and app data is cleared afterward.
 - [pubspec.yaml](pubspec.yaml) and [pubspec.lock](pubspec.lock): Flutter package manifest and pinned dependency lockfile.
@@ -131,11 +132,13 @@ For Android debug build and smoke checks:
 ```bash
 export PATH=/home/tom/.local/share/flutter/bin:$PATH
 flutter build apk --debug
+scripts/build_debug_apk_artifact.sh
 android-pixel9-headless
 flutter devices
 flutter run -d <android-emulator-id>
 scripts/android_emulator_e2e.sh --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
+scripts/build_debug_apk_artifact.sh --debug-live-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 ```
 
@@ -242,6 +245,7 @@ CI gates run on pull requests and pushes to `main`:
 Additional checks for app changes:
 
 - Latest host validation for the realtime recovery UI slice was 2026-05-24 19:54 AWST. `flutter pub get`, `flutter analyze`, `flutter test` (76 tests), `bash scripts/check-docs.sh`, `bash scripts/check-supply-chain.sh`, `git diff --check`, `flutter build apk --debug`, and `scripts/android_emulator_e2e.sh --with-live-credential` passed. Redacted live OpenAI smoke `--all` could not produce valid live results because the local secret returned `insufficient_quota` for Responses and Realtime requests. Key scan counts after live/emulator cleanup were repo `0`, `/tmp` `0`, `/home/tom/.openclaw/logs` `0`, process environments `0`, and `~/.codex/auth.json` `0`. This slice adds no dependencies, Android permissions, backend routes, production debug hooks, OpenAI request-format changes, or credential logging. The current `android-pixel9-headless` workflow still launches with `-no-audio`, so no physical microphone or audible speaker-output claim is made.
+- Latest host validation for the debug APK handoff slice was 2026-05-24 20:09 AWST. `bash -n scripts/build_debug_apk_artifact.sh`, `git diff --check`, `bash scripts/check-docs.sh`, `flutter analyze`, `flutter test` (76 tests), `bash scripts/check-supply-chain.sh`, `scripts/build_debug_apk_artifact.sh`, and `scripts/android_emulator_e2e.sh --apk /tmp/realtime-translate-mobile-debug-ff4096c-20260524T120913Z.apk` passed. The emulator run intentionally used no live credential and verified the installed APK start surface plus missing-credential gate only; no OpenAI quota, microphone injection, or speaker-output claim was made.
 
 - Secret scan or equivalent check for standard OpenAI API key leakage.
 - Dependency/advisory checks for pinned Flutter/Dart/native package versions.
