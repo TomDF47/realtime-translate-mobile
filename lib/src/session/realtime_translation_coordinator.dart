@@ -10,6 +10,8 @@ import 'live_session_controller.dart';
 import 'microphone_capture.dart';
 import 'realtime_transcript_committer.dart';
 
+typedef LiveRealtimeReconnectDelay = Future<void> Function(Duration delay);
+
 enum LiveRealtimeStartResult {
   started,
   missingCredential,
@@ -24,6 +26,7 @@ class LiveRealtimeTranslationCoordinator {
     required this.captureGateway,
     required this.realtimeGateway,
     this.reconnectPolicy = const OpenAiRealtimeReconnectPolicy(),
+    this.reconnectDelay = Future.delayed,
     this.diagnostics = const PrivacySafeDiagnostics(),
   });
 
@@ -32,14 +35,19 @@ class LiveRealtimeTranslationCoordinator {
   final MicrophoneCaptureGateway captureGateway;
   final RealtimeTranslationGateway realtimeGateway;
   final OpenAiRealtimeReconnectPolicy reconnectPolicy;
+  final LiveRealtimeReconnectDelay reconnectDelay;
   final PrivacySafeDiagnostics diagnostics;
 
   RealtimeTranslationSession? _realtimeSession;
   StreamSubscription<MicrophonePcm16Chunk>? _captureSubscription;
   StreamSubscription<OpenAiRealtimeEvent>? _realtimeSubscription;
   LiveRealtimeTranscriptCommitter? _transcriptCommitter;
+  OpenAiRealtimeTranslationConfig? _activeConfig;
+  LiveRealtimeTranscriptCommitTarget? _activeTranscriptCommitTarget;
   bool _closingIntentionally = false;
   bool _handlingFailure = false;
+  bool _isDisposed = false;
+  int _reconnectGeneration = 0;
 
   bool get isStreaming {
     return _realtimeSession != null && captureGateway.isCapturing;
@@ -49,7 +57,11 @@ class LiveRealtimeTranslationCoordinator {
     required OpenAiRealtimeTranslationConfig config,
     LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
   }) async {
-    await _closeRealtimeResources(graceful: false);
+    _isDisposed = false;
+    _cancelPendingReconnect();
+    _activeConfig = config;
+    _activeTranscriptCommitTarget = transcriptCommitTarget;
+    await _closeRealtimeResources(graceful: false, finishTranscript: true);
 
     final credential = await credentialStore.readCredentialForNetworkUse();
     if (credential == null || credential.isEmpty) {
@@ -67,32 +79,10 @@ class LiveRealtimeTranslationCoordinator {
         config: config,
         credential: credential,
       );
-      _realtimeSession = realtimeSession;
-      _transcriptCommitter = transcriptCommitTarget == null
-          ? null
-          : LiveRealtimeTranscriptCommitter(transcriptCommitTarget);
-      _realtimeSubscription = realtimeSession.events.listen(
-        _handleRealtimeEvent,
-        onError: (error) {
-          unawaited(
-            _handleRealtimeFailure(
-              OpenAiRealtimeFailure.fromSocketError(error),
-            ),
-          );
-        },
-      );
-      _captureSubscription = captureGateway.chunks.listen(
-        (chunk) => realtimeSession.appendPcm16Audio(chunk.bytes),
-        onError: (error) {
-          unawaited(
-            _handleRealtimeFailure(
-              OpenAiRealtimeFailure(
-                kind: OpenAiRealtimeFailureKind.fatal,
-                diagnosticCode: error.runtimeType.toString(),
-              ),
-            ),
-          );
-        },
+      _bindRealtimeSession(
+        realtimeSession,
+        transcriptCommitTarget: transcriptCommitTarget,
+        resetTranscriptCommitter: true,
       );
       await captureGateway.start(
         MicrophoneCaptureConfig.openAiRealtime(
@@ -111,7 +101,7 @@ class LiveRealtimeTranslationCoordinator {
       );
       return LiveRealtimeStartResult.started;
     } catch (error) {
-      await _closeRealtimeResources(graceful: false);
+      await _closeRealtimeResources(graceful: false, finishTranscript: true);
       sessionController.applyRealtimeRecoveryDecision(
         reconnectPolicy.plan(
           failure: OpenAiRealtimeFailure.fromSocketError(error),
@@ -129,19 +119,71 @@ class LiveRealtimeTranslationCoordinator {
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
-        unawaited(_closeRealtimeResources(graceful: false));
+        _cancelPendingReconnect();
+        unawaited(
+          _closeRealtimeResources(graceful: false, finishTranscript: true),
+        );
       case AppLifecycleState.resumed:
         break;
     }
   }
 
   Future<void> stop() async {
-    await _closeRealtimeResources(graceful: true);
+    _cancelPendingReconnect();
+    _activeConfig = null;
+    _activeTranscriptCommitTarget = null;
+    await _closeRealtimeResources(graceful: true, finishTranscript: true);
     sessionController.stopMeeting();
   }
 
   void dispose() {
-    unawaited(_closeRealtimeResources(graceful: false));
+    _isDisposed = true;
+    _cancelPendingReconnect();
+    _activeConfig = null;
+    _activeTranscriptCommitTarget = null;
+    unawaited(_closeRealtimeResources(graceful: false, finishTranscript: true));
+  }
+
+  void _bindRealtimeSession(
+    RealtimeTranslationSession realtimeSession, {
+    required LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
+    required bool resetTranscriptCommitter,
+  }) {
+    _realtimeSession = realtimeSession;
+    if (resetTranscriptCommitter) {
+      _transcriptCommitter = transcriptCommitTarget == null
+          ? null
+          : LiveRealtimeTranscriptCommitter(transcriptCommitTarget);
+    } else if (_transcriptCommitter == null && transcriptCommitTarget != null) {
+      _transcriptCommitter = LiveRealtimeTranscriptCommitter(
+        transcriptCommitTarget,
+      );
+    }
+    _realtimeSubscription = realtimeSession.events.listen(
+      _handleRealtimeEvent,
+      onError: (error) {
+        unawaited(
+          _handleRealtimeFailure(
+            OpenAiRealtimeFailure.fromSocketError(error),
+            allowReconnect: true,
+          ),
+        );
+      },
+    );
+    _captureSubscription = captureGateway.chunks.listen(
+      (chunk) => realtimeSession.appendPcm16Audio(chunk.bytes),
+      onError: (error) {
+        unawaited(
+          _handleRealtimeFailure(
+            OpenAiRealtimeFailure(
+              kind: OpenAiRealtimeFailureKind.fatal,
+              diagnosticCode: error.runtimeType.toString(),
+            ),
+            allowReconnect: true,
+          ),
+        );
+      },
+    );
   }
 
   void _handleRealtimeEvent(OpenAiRealtimeEvent event) {
@@ -158,11 +200,15 @@ class LiveRealtimeTranslationCoordinator {
         unawaited(
           _handleRealtimeFailure(
             OpenAiRealtimeFailure.fromRealtimeError(event),
+            allowReconnect: true,
           ),
         );
       case OpenAiRealtimeSessionClosed():
         unawaited(
-          _handleRealtimeFailure(OpenAiRealtimeFailure.sessionClosed()),
+          _handleRealtimeFailure(
+            OpenAiRealtimeFailure.sessionClosed(),
+            allowReconnect: true,
+          ),
         );
       default:
         break;
@@ -188,26 +234,126 @@ class LiveRealtimeTranslationCoordinator {
     );
   }
 
-  Future<void> _handleRealtimeFailure(OpenAiRealtimeFailure failure) async {
+  Future<void> _handleRealtimeFailure(
+    OpenAiRealtimeFailure failure, {
+    required bool allowReconnect,
+  }) async {
     if (_handlingFailure || _closingIntentionally) {
       return;
     }
 
     _handlingFailure = true;
     try {
-      await _closeRealtimeResources(graceful: false);
-      sessionController.applyRealtimeRecoveryDecision(
-        reconnectPolicy.plan(
-          failure: failure,
-          retryAttempt: sessionController.state.realtimeRetryAttempt + 1,
-        ),
+      final decision = reconnectPolicy.plan(
+        failure: failure,
+        retryAttempt: sessionController.state.realtimeRetryAttempt + 1,
       );
+      final shouldScheduleReconnect = allowReconnect && decision.shouldRetry;
+      await _closeRealtimeResources(
+        graceful: false,
+        finishTranscript: !shouldScheduleReconnect,
+      );
+      sessionController.applyRealtimeRecoveryDecision(decision);
+      if (shouldScheduleReconnect) {
+        _scheduleReconnect(decision);
+      }
     } finally {
       _handlingFailure = false;
     }
   }
 
-  Future<void> _closeRealtimeResources({required bool graceful}) async {
+  void _scheduleReconnect(OpenAiRealtimeReconnectDecision decision) {
+    final config = _activeConfig;
+    if (config == null || _isDisposed) {
+      return;
+    }
+
+    final generation = ++_reconnectGeneration;
+    final transcriptCommitTarget = _activeTranscriptCommitTarget;
+    unawaited(
+      _reconnectAfterBackoff(
+        generation: generation,
+        decision: decision,
+        config: config,
+        transcriptCommitTarget: transcriptCommitTarget,
+      ),
+    );
+  }
+
+  Future<void> _reconnectAfterBackoff({
+    required int generation,
+    required OpenAiRealtimeReconnectDecision decision,
+    required OpenAiRealtimeTranslationConfig config,
+    required LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
+  }) async {
+    await reconnectDelay(decision.delay);
+    if (_isDisposed || generation != _reconnectGeneration) {
+      return;
+    }
+
+    try {
+      final credential = await credentialStore.readCredentialForNetworkUse();
+      if (credential == null || credential.isEmpty) {
+        await _handleRealtimeFailure(
+          const OpenAiRealtimeFailure(
+            kind: OpenAiRealtimeFailureKind.credentialRejected,
+            diagnosticCode: 'credential_missing',
+          ),
+          allowReconnect: false,
+        );
+        return;
+      }
+
+      final realtimeSession = await realtimeGateway.connect(
+        config: config,
+        credential: credential,
+      );
+      if (_isDisposed || generation != _reconnectGeneration) {
+        await realtimeSession.closeImmediately();
+        return;
+      }
+
+      _bindRealtimeSession(
+        realtimeSession,
+        transcriptCommitTarget: transcriptCommitTarget,
+        resetTranscriptCommitter: false,
+      );
+      await captureGateway.start(
+        MicrophoneCaptureConfig.openAiRealtime(
+          sampleRateHz: config.inputAudioRate,
+        ),
+      );
+      sessionController.markRealtimeRecovered();
+      diagnostics.info(
+        'live_realtime.reconnect_succeeded',
+        fields: {
+          'operation': 'realtime.reconnect',
+          'model': config.profile.model,
+          'realtimeProfile': config.profile.name,
+          'targetLanguage': config.targetLanguageCode,
+          'retryAttempt': decision.retryAttempt,
+          'result': 'success',
+        },
+      );
+    } catch (error) {
+      if (_isDisposed || generation != _reconnectGeneration) {
+        return;
+      }
+      await _handleRealtimeFailure(
+        OpenAiRealtimeFailure.fromSocketError(error),
+        allowReconnect: true,
+      );
+    }
+  }
+
+  void _cancelPendingReconnect() {
+    _reconnectGeneration += 1;
+  }
+
+  Future<void> _closeRealtimeResources({
+    required bool graceful,
+    required bool finishTranscript,
+  }) async {
     final realtimeSession = _realtimeSession;
     final realtimeSubscription = _realtimeSubscription;
     final captureSubscription = _captureSubscription;
@@ -215,7 +361,9 @@ class LiveRealtimeTranslationCoordinator {
     _realtimeSession = null;
     _realtimeSubscription = null;
     _captureSubscription = null;
-    _transcriptCommitter = null;
+    if (finishTranscript) {
+      _transcriptCommitter = null;
+    }
 
     _closingIntentionally = true;
     try {
@@ -227,7 +375,9 @@ class LiveRealtimeTranslationCoordinator {
       } else {
         await realtimeSession?.closeImmediately();
       }
-      await transcriptCommitter?.finish(interrupted: !graceful);
+      if (finishTranscript) {
+        await transcriptCommitter?.finish(interrupted: !graceful);
+      }
     } finally {
       _closingIntentionally = false;
     }

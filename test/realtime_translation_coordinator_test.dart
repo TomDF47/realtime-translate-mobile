@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 import 'package:realtime_translate_mobile/src/session/live_session_controller.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
@@ -208,6 +209,7 @@ void main() {
   test('realtime failure closes capture while reconnecting', () async {
     final harness = await _Harness.create(
       permissionStatus: MicrophonePermissionStatus.granted,
+      reconnectDelay: (_) => Future<void>.delayed(const Duration(days: 1)),
     );
 
     await harness.coordinator.start(config: config);
@@ -224,6 +226,141 @@ void main() {
     expect(harness.captureGateway.stopCount, greaterThanOrEqualTo(1));
   });
 
+  test(
+    'retryable realtime failure reconnects without duplicating transcript row',
+    () async {
+      final reconnectDelays = <Duration>[];
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectDelay: (delay) async {
+          reconnectDelays.add(delay);
+        },
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 5);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Reconnect smoke',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hola',
+          ),
+        )
+        ..addEvent(const OpenAiRealtimeSessionClosed(type: 'socket.closed'));
+      await _drainAsync();
+
+      expect(reconnectDelays, hasLength(1));
+      expect(harness.realtimeGateway.connectCount, 2);
+      expect(harness.captureGateway.startCount, 2);
+      expect(harness.controller.state.phase, LiveSessionPhase.listening);
+      expect(harness.controller.state.realtimeRetryAttempt, 0);
+
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Hello',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Hello.',
+          ),
+        );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, 'Hola');
+      expect(entries.single.translatedText, 'Hello.');
+      expect(entries.single.status, 'final');
+    },
+  );
+
+  test(
+    'failed reconnect exhausts policy and marks partial transcript interrupted',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectPolicy: const OpenAiRealtimeReconnectPolicy(maxAttempts: 1),
+        reconnectDelay: (_) async {},
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 6);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Reconnect exhausted',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.failNextConnect = true;
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hola',
+          ),
+        )
+        ..addEvent(const OpenAiRealtimeSessionClosed(type: 'socket.closed'));
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(harness.realtimeGateway.connectCount, 2);
+      expect(harness.controller.state.phase, LiveSessionPhase.offline);
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, 'Hola');
+      expect(entries.single.status, 'interrupted');
+    },
+  );
+
   test('background lifecycle closes capture and realtime resources', () async {
     final harness = await _Harness.create(
       permissionStatus: MicrophonePermissionStatus.granted,
@@ -238,6 +375,12 @@ void main() {
     expect(harness.captureGateway.isCapturing, isFalse);
     expect(harness.realtimeGateway.session.closeImmediatelyCount, 1);
   });
+}
+
+Future<void> _drainAsync() async {
+  for (var i = 0; i < 6; i++) {
+    await Future<void>.delayed(Duration.zero);
+  }
 }
 
 class _Harness {
@@ -259,8 +402,19 @@ class _Harness {
   static Future<_Harness> create({
     required MicrophonePermissionStatus permissionStatus,
     bool seedCredential = true,
+    OpenAiRealtimeReconnectPolicy reconnectPolicy =
+        const OpenAiRealtimeReconnectPolicy(),
+    LiveRealtimeReconnectDelay? reconnectDelay,
   }) async {
     final harness = _Harness._(permissionStatus: permissionStatus);
+    harness.coordinator = LiveRealtimeTranslationCoordinator(
+      sessionController: harness.controller,
+      credentialStore: harness.credentialStore,
+      captureGateway: harness.captureGateway,
+      realtimeGateway: harness.realtimeGateway,
+      reconnectPolicy: reconnectPolicy,
+      reconnectDelay: reconnectDelay ?? (_) => Future<void>.value(),
+    );
     if (seedCredential) {
       await harness.credentialStore.saveUserProvidedCredential(
         'placeholder-credential',
@@ -337,11 +491,13 @@ class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
 }
 
 class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
-  final _FakeRealtimeTranslationSession session =
-      _FakeRealtimeTranslationSession();
+  final List<_FakeRealtimeTranslationSession> sessions = [];
   final List<OpenAiRealtimeTranslationConfig> configs = [];
   final List<String> credentials = [];
   int connectCount = 0;
+  bool failNextConnect = false;
+
+  _FakeRealtimeTranslationSession get session => sessions.last;
 
   @override
   Future<RealtimeTranslationSession> connect({
@@ -349,6 +505,13 @@ class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
     required String credential,
   }) async {
     connectCount += 1;
+    if (failNextConnect) {
+      failNextConnect = false;
+      throw StateError('socket reconnect failed');
+    }
+
+    final session = _FakeRealtimeTranslationSession();
+    sessions.add(session);
     configs.add(config);
     credentials.add(credential);
     return session;
