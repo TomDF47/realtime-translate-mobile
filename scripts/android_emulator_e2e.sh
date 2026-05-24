@@ -7,6 +7,8 @@ DEFAULT_APK="build/app/outputs/flutter-apk/app-debug.apk"
 DEFAULT_SECRET_FILE="/home/tom/.openclaw/secrets/realtime-translate-openai-api-key"
 DEFAULT_ARTIFACT_DIR="/tmp/realtime-translate-mobile-e2e"
 EMULATOR_LOG="/tmp/realtime-translate-emulator.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AUDIO_EMULATOR_LAUNCHER="$SCRIPT_DIR/android_pixel9_host_audio.sh"
 
 APK_PATH="${APK_PATH:-$DEFAULT_APK}"
 SECRET_FILE="${OPENAI_SECRET_FILE:-$DEFAULT_SECRET_FILE}"
@@ -47,8 +49,10 @@ Options:
                           Does not read live secrets.
   --require-device-audio  Before installed-app validation, fail if the selected
                           emulator/device is known not to have usable audio.
-                          This currently rejects emulators launched with
-                          -no-audio so mic/speaker claims cannot pass silently.
+                          This rejects emulators launched with -no-audio and
+                          requires emulator launches to include
+                          -allow-host-audio so mic/speaker claims cannot pass
+                          silently. Physical devices are accepted.
   --audio-preflight-only  Run only the device-audio preflight and exit. Does not
                           install the APK, read live secrets, or launch the app.
   --apk PATH              APK to install. Defaults to build/app/outputs/flutter-apk/app-debug.apk.
@@ -160,7 +164,9 @@ ensure_emulator() {
   fi
 
   log "Starting Pixel_9_API_36_Play in the background; emulator log: $EMULATOR_LOG"
-  if command -v android-pixel9-headless >/dev/null 2>&1; then
+  if ((REQUIRE_DEVICE_AUDIO)) && [[ -x "$AUDIO_EMULATOR_LAUNCHER" ]]; then
+    nohup "$AUDIO_EMULATOR_LAUNCHER" >"$EMULATOR_LOG" 2>&1 &
+  elif command -v android-pixel9-headless >/dev/null 2>&1; then
     nohup android-pixel9-headless >"$EMULATOR_LOG" 2>&1 &
   else
     nohup "$ANDROID_HOME/emulator/emulator" \
@@ -201,11 +207,12 @@ selected_device_is_emulator() {
 emulator_process_args() {
   local serial_port
   serial_port="${ADB_SERIAL#emulator-}"
-  ps -eo args |
+  ps -eo comm=,args= |
     awk -v serial="$ADB_SERIAL" -v port="$serial_port" '
-      /[q]emu-system/ || /[e]mulator/ {
-        if ($0 ~ ("-port " port) || $0 ~ ("-ports " port ",") || $0 ~ serial || $0 ~ "Pixel_9_API_36_Play") {
-          print
+      $1 ~ /^(emulator|qemu-system)/ {
+        args = substr($0, index($0, $2))
+        if (args ~ ("-port " port) || args ~ ("-ports " port ",") || args ~ serial || args ~ "Pixel_9_API_36_Play") {
+          print args
         }
       }
     ' |
@@ -220,18 +227,21 @@ run_audio_preflight() {
   is_emulator="false"
   args=""
   status="pass"
-  detail="physical-or-unknown-device; emulator -no-audio not detected"
+  detail="physical device or non-emulator Android device"
 
   if selected_device_is_emulator; then
     is_emulator="true"
     args="$(emulator_process_args || true)"
-    detail="emulator audio is not explicitly disabled"
+    detail="emulator launched with explicit host audio"
     if [[ -z "$args" ]]; then
       status="fail"
       detail="could not inspect emulator process arguments for audio flags"
     elif grep -Fq -- "-no-audio" <<<"$args"; then
       status="fail"
       detail="emulator was launched with -no-audio"
+    elif ! grep -Fq -- "-allow-host-audio" <<<"$args"; then
+      status="fail"
+      detail="emulator was not launched with -allow-host-audio"
     fi
   fi
 

@@ -264,3 +264,25 @@ Implications:
 
 - #6/#14 still need physical microphone/live speech validation and audible speaker validation on a real device, a host-audio emulator launcher variant, or a controllable virtual audio device.
 - Future agents must not present `--debug-live-events` as live OpenAI or microphone evidence.
+
+## 2026-05-24 - Host-Audio Emulator Target For Live Audio Validation
+
+Status: Accepted as a validation path, not product evidence
+
+Decision:
+
+- Add `scripts/android_pixel9_host_audio.sh` as the repo-local `Pixel_9_API_36_Play` launcher for live #6/#14 audio validation attempts.
+- Launch that emulator with `-allow-host-audio` and without `-no-audio`.
+- Make `scripts/android_emulator_e2e.sh --require-device-audio` use the repo-local host-audio launcher when no Android device is already connected.
+- Keep the no-audio guard strict: physical Android devices pass the target preflight, but emulators must expose process arguments containing `-allow-host-audio` and must not include `-no-audio`.
+
+Rationale:
+
+- Tom's global `android-pixel9-headless` helper remains the standard no-window emulator for non-audio Android checks, but it hardcodes `-no-audio`.
+- The repo needs a concrete, testable target before any physical microphone or audible speaker validation claim can be made.
+- Requiring `-allow-host-audio` avoids treating an unspecified emulator launch as audio-capable while preserving a physical-device path.
+
+Implications:
+
+- Passing `--require-device-audio --audio-preflight-only` proves target readiness only. It does not prove microphone capture, translated-audio audibility, installed-app live transcript persistence, or realtime reconnect behavior.
+- If the host-audio emulator cannot produce usable microphone/speaker evidence in practice, #6/#14 should use a physical Android device or a documented controllable virtual audio route rather than weakening the guard.
