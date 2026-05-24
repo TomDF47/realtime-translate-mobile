@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
@@ -12,10 +13,12 @@ void main() {
   ) async {
     final semanticsHandle = tester.ensureSemantics();
     try {
+      final repository = _testRepository();
+      await _seedCredential(repository);
       await tester.pumpWidget(
         LiveTranslateApp(
           permissionGateway: _FakePermissionGateway.granted(),
-          meetingRepository: _testRepository(),
+          meetingRepository: repository,
         ),
       );
 
@@ -35,6 +38,14 @@ void main() {
         ),
         matchesSemantics(
           label: 'Open meeting history',
+          isButton: true,
+          hasTapAction: true,
+        ),
+      );
+      expect(
+        tester.getSemantics(find.widgetWithText(FilledButton, 'OpenAI setup')),
+        matchesSemantics(
+          label: 'OpenAI setup',
           isButton: true,
           hasTapAction: true,
         ),
@@ -90,10 +101,12 @@ void main() {
   ) async {
     _configureCompactLargeTextViewport(tester);
 
+    final repository = _testRepository();
+    await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
-        meetingRepository: _testRepository(),
+        meetingRepository: repository,
       ),
     );
     await tester.pumpAndSettle();
@@ -138,6 +151,12 @@ void main() {
 
 LocalMeetingRepository _testRepository() {
   return LocalMeetingRepository(store: MemoryEncryptedLocalStore());
+}
+
+Future<void> _seedCredential(LocalMeetingRepository repository) {
+  return OpenAiCredentialStore(
+    repository: repository,
+  ).saveUserProvidedCredential('placeholder-local-openai-credential');
 }
 
 void _configureCompactLargeTextViewport(WidgetTester tester) {

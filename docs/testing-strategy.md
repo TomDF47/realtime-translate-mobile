@@ -13,7 +13,7 @@ bash scripts/check-docs.sh
 bash scripts/check-supply-chain.sh
 ```
 
-`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. `scripts/check-supply-chain.sh` checks for obvious credential leaks, verifies Android permission additions against the current allowlist, and queries OSV for pinned hosted Pub and Gradle/Maven runtime package versions. Current Flutter tests cover the phone-local start surface, mockup-derived listening/AI chat/amber/export surfaces, microphone permission denied UI, deterministic session lifecycle transitions that keep capture/realtime/playback resources closed until permission is granted, encrypted local repository behavior for meetings, transcript/history entries, summary metadata, language routes, recipient preferences, sensitive preferences, credential/session material, meeting management for deleting or continuing a saved meeting with appended local history, the conservative realtime language support table, direct-OpenAI fallback-pending routing for unsupported targets, semantic labels for core controls, and compact large-text rendering across setup, live, assistant, amber, and export surfaces.
+`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. `scripts/check-supply-chain.sh` checks for obvious credential leaks, verifies Android permission additions against the current allowlist, and queries OSV for pinned hosted Pub and Gradle/Maven runtime package versions. Current Flutter tests cover the phone-local start surface, OpenAI setup-required UI, encrypted OpenAI credential save/read/reset behavior without displaying the saved value, mockup-derived listening/AI chat/amber/export surfaces, microphone permission denied UI, deterministic session lifecycle transitions that keep capture/realtime/playback resources closed until permission and local credential gates pass, encrypted local repository behavior for meetings, transcript/history entries, summary metadata, language routes, recipient preferences, sensitive preferences, credential/session material, meeting management for deleting or continuing a saved meeting with appended local history, the conservative realtime language support table, direct-OpenAI fallback credential routing for unsupported targets, semantic labels for core controls, and compact large-text rendering across setup, live, assistant, amber, and export surfaces.
 
 ## Flutter App Gates
 
@@ -28,7 +28,7 @@ Expected coverage areas:
 
 - Session state model transitions: local setup, meeting selection, connecting, listening, speaking, read-aloud paused, reconnecting, offline, credential invalid, and error.
 - Microphone permission states: granted, denied, permanently denied, and revoked.
-- Direct OpenAI integration seams for realtime translation, AI chat, and summary generation.
+- Direct OpenAI integration seams for realtime translation, credential-invalid handling, AI chat, and summary generation.
 - Language support table and unsupported-target fallback behavior.
 - Local encrypted storage read/write/delete behavior for meetings, transcript/history, summary metadata, preferences, remembered recipients, last selected recipients, and any credential/session material.
 - Meeting management: start new meeting, select old meeting, continue from meeting, delete meeting.
@@ -99,7 +99,7 @@ Optional screenshot capture should write outside the repo by default:
 adb exec-out screencap -p > /tmp/live-translate-mobile-smoke.png
 ```
 
-The current app can verify the phone-local start surface, Android microphone runtime permission dialog/denied state, teal listening screen, realtime target language options, scoped AI chat bottom sheet, amber paused read-aloud screen with unsupported-target fallback-pending state, encrypted meeting history sheet with continue/delete controls, appended local meeting history after reopening a saved meeting, email export sheet with remembered recipient preferences, and large-text/compact-viewport behavior for those core surfaces. Real microphone capture, direct OpenAI streaming, native share handoff, production-volume storage behavior, and privacy routing assertions become required as their implementation issues land.
+The current app can verify the phone-local start surface, OpenAI setup-required and encrypted credential setup/reset states, Android microphone runtime permission dialog/denied state, teal listening screen after a local credential is configured, realtime target language options, scoped AI chat bottom sheet, amber paused read-aloud screen with unsupported-target fallback credential state, encrypted meeting history sheet with continue/delete controls, appended local meeting history after reopening a saved meeting, email export sheet with remembered recipient preferences, and large-text/compact-viewport behavior for those core surfaces. Real microphone capture, direct OpenAI streaming, native share handoff, production-volume storage behavior, and privacy routing assertions become required as their implementation issues land.
 
 ## CI Gates
 

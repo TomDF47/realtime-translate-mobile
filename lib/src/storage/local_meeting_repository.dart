@@ -126,6 +126,23 @@ class LocalMeetingRepository {
     );
   }
 
+  Future<Map<String, String>> loadCredentialSessionMaterial() async {
+    final snapshot = await loadSnapshot();
+    return snapshot.credentialSessionMaterial;
+  }
+
+  Future<void> deleteCredentialSessionMaterialKeys(Set<String> keys) async {
+    final snapshot = await loadSnapshot();
+    await saveSnapshot(
+      snapshot.copyWith(
+        credentialSessionMaterial: {
+          for (final entry in snapshot.credentialSessionMaterial.entries)
+            if (!keys.contains(entry.key)) entry.key: entry.value,
+        },
+      ),
+    );
+  }
+
   Future<void> deleteAllLocalData() {
     return store.delete(key: storageKey);
   }

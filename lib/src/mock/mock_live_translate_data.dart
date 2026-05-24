@@ -15,6 +15,11 @@ abstract final class MockLiveTranslateData {
       icon: Icons.history_rounded,
       semanticLabel: 'Open meeting history',
     ),
+    LocalSetupActionData(
+      label: 'OpenAI setup',
+      icon: Icons.key_rounded,
+      semanticLabel: 'OpenAI setup',
+    ),
   ];
 
   static const footerBadges = [

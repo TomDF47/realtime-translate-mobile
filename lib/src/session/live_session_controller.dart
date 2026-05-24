@@ -150,6 +150,21 @@ class LiveSessionController extends ChangeNotifier {
     return permissionGateway.openAppSettings();
   }
 
+  void markCredentialInvalid({String? notice}) {
+    _pausedByLifecycle = false;
+    _setState(
+      _state.copyWith(
+        phase: LiveSessionPhase.credentialInvalid,
+        isMicrophoneCaptureOpen: false,
+        isRealtimeSessionOpen: false,
+        isPlaybackQueueOpen: false,
+        notice:
+            notice ??
+            'Add an OpenAI credential stored on this device before live translation starts.',
+      ),
+    );
+  }
+
   void enterSpeakingPaused() {
     if (_state.microphonePermission.isGranted) {
       _pausedByLifecycle = false;

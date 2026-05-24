@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import 'src/language/language_support.dart';
 import 'src/mock/mock_live_translate_data.dart';
+import 'src/openai/openai_configuration.dart';
+import 'src/openai/openai_credential_store.dart';
 import 'src/session/live_session_controller.dart';
 import 'src/session/microphone_permission.dart';
 import 'src/storage/encrypted_local_store.dart';
@@ -228,8 +230,11 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     with WidgetsBindingObserver {
   late final LiveSessionController _sessionController;
   late final LocalMeetingRepository _meetingRepository;
+  late final OpenAiCredentialStore _openAiCredentialStore;
   _AppSurface _surface = _AppSurface.setup;
   List<StoredMeeting> _storedMeetings = const [];
+  OpenAiCredentialStatus _openAiCredentialStatus =
+      const OpenAiCredentialStatus.missing();
   String? _activeMeetingId;
 
   @override
@@ -244,7 +249,11 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     _meetingRepository =
         widget.meetingRepository ??
         LocalMeetingRepository(store: FlutterSecureEncryptedLocalStore());
+    _openAiCredentialStore = OpenAiCredentialStore(
+      repository: _meetingRepository,
+    );
     unawaited(_loadStoredMeetings());
+    unawaited(_loadOpenAiCredentialStatus());
   }
 
   @override
@@ -280,6 +289,18 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
   Future<void> _startMeeting() async {
     _activeMeetingId = null;
+    final credentialStatus = await _openAiCredentialStore.loadStatus();
+    if (!mounted) {
+      return;
+    }
+
+    _openAiCredentialStatus = credentialStatus;
+    if (!credentialStatus.isConfigured) {
+      _sessionController.markCredentialInvalid();
+      setState(() => _surface = _AppSurface.setup);
+      return;
+    }
+
     await _sessionController.startMeeting();
     if (!mounted) {
       return;
@@ -304,6 +325,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     setState(() => _storedMeetings = snapshot.meetings);
+  }
+
+  Future<void> _loadOpenAiCredentialStatus() async {
+    final status = await _openAiCredentialStore.loadStatus();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _openAiCredentialStatus = status);
   }
 
   Future<void> _persistMeetingFromSession(LiveSessionViewData session) async {
@@ -334,6 +364,18 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   Future<bool> _ensureMicrophoneReady() async {
     if (_sessionController.state.microphonePermission.isGranted) {
       return true;
+    }
+
+    final credentialStatus = await _openAiCredentialStore.loadStatus();
+    if (!mounted) {
+      return false;
+    }
+
+    _openAiCredentialStatus = credentialStatus;
+    if (!credentialStatus.isConfigured) {
+      _sessionController.markCredentialInvalid();
+      setState(() => _surface = _AppSurface.setup);
+      return false;
     }
 
     await _sessionController.startMeeting();
@@ -440,12 +482,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
   Future<void> _openSpeakingPausedAfterPermission() async {
     if (!_sessionController.state.microphonePermission.isGranted) {
-      await _sessionController.startMeeting();
-      if (!mounted) {
-        return;
-      }
-      if (_sessionController.state.phase != LiveSessionPhase.listening) {
-        setState(() {});
+      final isReady = await _ensureMicrophoneReady();
+      if (!isReady || !mounted) {
         return;
       }
     }
@@ -529,6 +567,19 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
   }
 
+  void _showOpenAiSetupSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _OpenAiSetupSheet(
+        credentialStore: _openAiCredentialStore,
+        initialStatus: _openAiCredentialStatus,
+        onCredentialChanged: _loadOpenAiCredentialStatus,
+      ),
+    );
+  }
+
   void _showExportSheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -565,10 +616,20 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       );
     }
 
+    if (sessionState.phase == LiveSessionPhase.credentialInvalid) {
+      return _OpenAiCredentialRequiredScreen(
+        status: _openAiCredentialStatus,
+        notice: sessionState.notice,
+        onOpenSetup: _showOpenAiSetupSheet,
+        onBack: _openSetup,
+      );
+    }
+
     return switch (_surface) {
       _AppSurface.setup => LocalSetupScreen(
         onStartMeeting: _startMeeting,
         onOpenMeetingHistory: _showMeetingHistory,
+        onOpenOpenAiSetup: _showOpenAiSetupSheet,
       ),
       _AppSurface.listening => LiveSessionScreen(
         session: _sessionForSurface(_AppSurface.listening),
@@ -601,6 +662,7 @@ class LocalSetupScreen extends StatelessWidget {
     super.key,
     this.onStartMeeting,
     this.onOpenMeetingHistory,
+    this.onOpenOpenAiSetup,
   });
 
   static const _privacyLabel =
@@ -608,6 +670,7 @@ class LocalSetupScreen extends StatelessWidget {
 
   final VoidCallback? onStartMeeting;
   final VoidCallback? onOpenMeetingHistory;
+  final VoidCallback? onOpenOpenAiSetup;
 
   @override
   Widget build(BuildContext context) {
@@ -624,6 +687,7 @@ class LocalSetupScreen extends StatelessWidget {
                   _LocalSetupActions(
                     onStartMeeting: onStartMeeting ?? () {},
                     onOpenMeetingHistory: onOpenMeetingHistory ?? () {},
+                    onOpenOpenAiSetup: onOpenOpenAiSetup ?? () {},
                   ),
                   const Padding(
                     padding: EdgeInsets.only(top: AppSpacing.xxl),
@@ -675,10 +739,12 @@ class _LocalSetupActions extends StatelessWidget {
   const _LocalSetupActions({
     required this.onStartMeeting,
     required this.onOpenMeetingHistory,
+    required this.onOpenOpenAiSetup,
   });
 
   final VoidCallback onStartMeeting;
   final VoidCallback onOpenMeetingHistory;
+  final VoidCallback onOpenOpenAiSetup;
 
   @override
   Widget build(BuildContext context) {
@@ -689,7 +755,11 @@ class _LocalSetupActions extends StatelessWidget {
         for (var index = 0; index < actions.length; index++) ...[
           LocalSetupActionButton(
             action: actions[index],
-            onPressed: index == 0 ? onStartMeeting : onOpenMeetingHistory,
+            onPressed: switch (index) {
+              0 => onStartMeeting,
+              1 => onOpenMeetingHistory,
+              _ => onOpenOpenAiSetup,
+            },
           ),
           if (index < actions.length - 1) const SizedBox(height: AppSpacing.sm),
         ],
@@ -813,6 +883,76 @@ class _MicrophonePermissionScreen extends StatelessWidget {
                   const PrivacyNote(
                     label:
                         'No audio is captured before microphone permission is granted.',
+                    icon: Icons.lock_outline_rounded,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _OpenAiCredentialRequiredScreen extends StatelessWidget {
+  const _OpenAiCredentialRequiredScreen({
+    required this.status,
+    required this.notice,
+    required this.onOpenSetup,
+    required this.onBack,
+  });
+
+  final OpenAiCredentialStatus status;
+  final String? notice;
+  final VoidCallback onOpenSetup;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return LiveTranslateShell(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const WaveLogo(accent: LiveAccent.amber),
+                  const SizedBox(height: AppSpacing.xxl),
+                  Text(
+                    'OpenAI setup required',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.display(
+                      textTheme,
+                    ).copyWith(fontSize: 36),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    notice ?? status.displayLabel,
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.body(textTheme).copyWith(fontSize: 18),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  _PermissionActionButton(
+                    label: 'Open OpenAI setup',
+                    icon: Icons.key_rounded,
+                    onPressed: onOpenSetup,
+                    isPrimary: true,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _PermissionActionButton(
+                    label: 'Back to start',
+                    icon: Icons.arrow_back_rounded,
+                    onPressed: onBack,
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  const PrivacyNote(
+                    label:
+                        'Your OpenAI credential is stored only in encrypted local device storage and is never bundled with the app.',
                     icon: Icons.lock_outline_rounded,
                   ),
                 ],
@@ -1357,6 +1497,179 @@ class _MeetingRow extends StatelessWidget {
         icon: const Icon(Icons.delete_outline_rounded),
       ),
       onTap: onTap,
+    );
+  }
+}
+
+class _OpenAiSetupSheet extends StatefulWidget {
+  const _OpenAiSetupSheet({
+    required this.credentialStore,
+    required this.initialStatus,
+    required this.onCredentialChanged,
+  });
+
+  final OpenAiCredentialStore credentialStore;
+  final OpenAiCredentialStatus initialStatus;
+  final Future<void> Function() onCredentialChanged;
+
+  @override
+  State<_OpenAiSetupSheet> createState() => _OpenAiSetupSheetState();
+}
+
+class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
+  late OpenAiCredentialStatus _status = widget.initialStatus;
+  final TextEditingController _credentialController = TextEditingController();
+  bool _isSaving = false;
+  String? _errorLabel;
+
+  @override
+  void dispose() {
+    _credentialController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refreshStatus() async {
+    final status = await widget.credentialStore.loadStatus();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _status = status);
+    await widget.onCredentialChanged();
+  }
+
+  Future<void> _saveCredential() async {
+    final credential = _credentialController.text.trim();
+    if (credential.isEmpty) {
+      setState(() => _errorLabel = 'Enter a credential before saving.');
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _errorLabel = null;
+    });
+
+    try {
+      await widget.credentialStore.saveUserProvidedCredential(credential);
+      _credentialController.clear();
+      await _refreshStatus();
+    } on ArgumentError {
+      if (mounted) {
+        setState(() => _errorLabel = 'Enter a credential before saving.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  Future<void> _clearCredential() async {
+    setState(() {
+      _isSaving = true;
+      _errorLabel = null;
+    });
+
+    await widget.credentialStore.clearCredential();
+    await _refreshStatus();
+
+    if (mounted) {
+      setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final configuredAt = _status.configuredAt;
+
+    return _SheetFrame(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SheetHandle(),
+          Row(
+            children: [
+              const Icon(Icons.key_rounded, color: AppColors.teal),
+              const SizedBox(width: AppSpacing.sm),
+              Text('OpenAI setup', style: AppTextStyles.title(textTheme)),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Close OpenAI setup',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          StatusPill(
+            label: _status.displayLabel,
+            accent: _status.isConfigured ? LiveAccent.teal : LiveAccent.amber,
+          ),
+          if (configuredAt != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Configured ${_timeLabel(configuredAt)}',
+              style: AppTextStyles.compact(textTheme),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'Realtime: ${OpenAiConfiguration.realtimeModel}  |  Fallback: '
+            '${OpenAiConfiguration.translationFallbackModel}',
+            style: AppTextStyles.compact(textTheme),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _credentialController,
+            obscureText: true,
+            enableSuggestions: false,
+            autocorrect: false,
+            autofillHints: const [AutofillHints.password],
+            onChanged: (_) => setState(() => _errorLabel = null),
+            decoration: InputDecoration(
+              labelText: 'OpenAI API key',
+              helperText: 'Stored encrypted on this device only.',
+              errorText: _errorLabel,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.card),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _isSaving ? null : _saveCredential,
+              icon: const Icon(Icons.lock_rounded),
+              label: Text(
+                _status.isConfigured
+                    ? 'Replace encrypted credential'
+                    : 'Save encrypted credential',
+              ),
+            ),
+          ),
+          if (_status.isConfigured) ...[
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _isSaving ? null : _clearCredential,
+                icon: const Icon(Icons.delete_outline_rounded),
+                label: const Text('Remove credential from this device'),
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          const PrivacyNote(
+            label:
+                'The app never displays a saved credential. It is read back only for a direct OpenAI request initiated from this phone.',
+            icon: Icons.lock_outline_rounded,
+          ),
+        ],
+      ),
     );
   }
 }

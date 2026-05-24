@@ -30,7 +30,7 @@ void main() {
     expect(fallbackPlan.type, TranslationRouteType.directOpenAiFallback);
     expect(
       fallbackPlan.availability,
-      TranslationRouteAvailability.pendingCredentialDecision,
+      TranslationRouteAvailability.requiresLocalCredential,
     );
     expect(fallbackPlan.usesRealtime, isFalse);
     expect(fallbackPlan.userMessage, contains('phone-only direct OpenAI'));

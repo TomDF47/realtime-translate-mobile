@@ -119,6 +119,22 @@ void main() {
 
     expect(controller.state.audioRoute, LiveAudioRoute.headphones);
   });
+
+  test('credential invalid state keeps live resources closed', () async {
+    final controller = LiveSessionController(
+      permissionGateway: _FixedPermissionGateway(
+        MicrophonePermissionStatus.granted,
+      ),
+    );
+
+    await controller.startMeeting();
+    controller.markCredentialInvalid();
+
+    expect(controller.state.phase, LiveSessionPhase.credentialInvalid);
+    expect(controller.state.isMicrophoneCaptureOpen, isFalse);
+    expect(controller.state.isRealtimeSessionOpen, isFalse);
+    expect(controller.state.isPlaybackQueueOpen, isFalse);
+  });
 }
 
 class _FixedPermissionGateway implements MicrophonePermissionGateway {

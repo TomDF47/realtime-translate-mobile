@@ -1,6 +1,6 @@
 enum TranslationRouteType { realtime, directOpenAiFallback }
 
-enum TranslationRouteAvailability { available, pendingCredentialDecision }
+enum TranslationRouteAvailability { available, requiresLocalCredential }
 
 class TranslationLanguage {
   const TranslationLanguage({
@@ -210,7 +210,7 @@ abstract final class LanguageSupport {
       source: source,
       target: target,
       type: TranslationRouteType.directOpenAiFallback,
-      availability: TranslationRouteAvailability.pendingCredentialDecision,
+      availability: TranslationRouteAvailability.requiresLocalCredential,
       userMessage:
           '${target.name} requires the phone-only direct OpenAI fallback path.',
     );

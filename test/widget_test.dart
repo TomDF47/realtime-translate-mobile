@@ -2,19 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
 
 void main() {
   testWidgets('shows phone-local start surface', (tester) async {
-    await tester.pumpWidget(
-      LiveTranslateApp(meetingRepository: _testRepository()),
-    );
+    final repository = _testRepository();
+    await tester.pumpWidget(LiveTranslateApp(meetingRepository: repository));
 
     expect(find.text('Live Translate'), findsOneWidget);
     expect(find.text('Start new meeting'), findsOneWidget);
     expect(find.text('Open meeting history'), findsOneWidget);
+    expect(find.text('OpenAI setup'), findsOneWidget);
     expect(
       find.text(
         'Transcripts are stored on device only. Your conversations stay private.',
@@ -29,13 +30,50 @@ void main() {
     expect(find.byIcon(Icons.add), findsNothing);
   });
 
+  testWidgets('saves OpenAI credential locally before live start', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    await tester.pumpWidget(LiveTranslateApp(meetingRepository: repository));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('OpenAI setup required'), findsOneWidget);
+    expect(find.text('Open OpenAI setup'), findsOneWidget);
+
+    await tester.tap(find.text('Open OpenAI setup'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byType(TextField).last,
+      'placeholder-local-openai-credential',
+    );
+    await tester.tap(find.text('Save encrypted credential'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('OpenAI credential stored on this device'),
+      findsOneWidget,
+    );
+    expect(find.text('placeholder-local-openai-credential'), findsNothing);
+    expect(
+      await OpenAiCredentialStore(
+        repository: repository,
+      ).readCredentialForNetworkUse(),
+      'placeholder-local-openai-credential',
+    );
+  });
+
   testWidgets('opens teal listening and scoped AI chat surfaces', (
     tester,
   ) async {
+    final repository = _testRepository();
+    await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
-        meetingRepository: _testRepository(),
+        meetingRepository: repository,
       ),
     );
 
@@ -77,6 +115,7 @@ void main() {
     tester,
   ) async {
     final repository = _testRepository();
+    await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
@@ -118,10 +157,12 @@ void main() {
   testWidgets('blocks live session when microphone permission is denied', (
     tester,
   ) async {
+    final repository = _testRepository();
+    await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.denied(),
-        meetingRepository: _testRepository(),
+        meetingRepository: repository,
       ),
     );
 
@@ -141,6 +182,7 @@ void main() {
 
   testWidgets('persists and deletes local meeting history', (tester) async {
     final repository = _testRepository();
+    await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
@@ -170,6 +212,7 @@ void main() {
     tester,
   ) async {
     final repository = _testRepository();
+    await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
@@ -207,6 +250,12 @@ void main() {
 
 LocalMeetingRepository _testRepository() {
   return LocalMeetingRepository(store: MemoryEncryptedLocalStore());
+}
+
+Future<void> _seedCredential(LocalMeetingRepository repository) {
+  return OpenAiCredentialStore(
+    repository: repository,
+  ).saveUserProvidedCredential('placeholder-local-openai-credential');
 }
 
 class _FakePermissionGateway implements MicrophonePermissionGateway {
