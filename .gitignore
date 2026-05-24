@@ -8,6 +8,7 @@ build/
 # Android / Gradle
 .gradle/
 local.properties
+android/key.properties
 
 # iOS / macOS
 Pods/
@@ -21,4 +22,3 @@ DerivedData/
 .env
 .env.*
 !.env.example
-

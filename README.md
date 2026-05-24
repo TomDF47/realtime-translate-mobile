@@ -36,9 +36,9 @@ The app should feel premium, clean, and executive-grade. The MVP is phone-only a
 
 Planning repo created. Supplied Android mockups have been received, copied into [assets/mockups](assets/mockups), and captured in [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md). The canonical build-ready spec is [docs/live-translate-build-spec.md](docs/live-translate-build-spec.md).
 
-Agentic development handoff docs are in place for workflow, architecture, environment placeholders, testing strategy, V2 scope, cybersecurity reporting, and decision logging. The repo does not yet contain a Flutter scaffold, app package manifest, lockfile, backend implementation, or runtime package versions.
+The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, a phone-local welcome/start screen, widget smoke test, and Android signing placeholders. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, or server-side transcript handling.
 
-Do not start Flutter implementation until the implementation issue is explicitly picked up. Keep work aligned to the GitHub issue acceptance criteria.
+Keep future work aligned to the GitHub issue acceptance criteria and preserve the phone-only MVP privacy boundary.
 
 ## Repository Map
 
@@ -56,28 +56,47 @@ Do not start Flutter implementation until the implementation issue is explicitly
 - [docs/codex-starter-prompt.md](docs/codex-starter-prompt.md): starter prompt for the first Flutter implementation pass.
 - [.env.example](.env.example): placeholder-only environment contract.
 - [scripts/check-docs.sh](scripts/check-docs.sh): docs link and secret-pattern sanity check.
+- [pubspec.yaml](pubspec.yaml) and [pubspec.lock](pubspec.lock): Flutter package manifest and pinned dependency lockfile.
+- [lib/main.dart](lib/main.dart): current phone-local Flutter start surface.
+- [test/widget_test.dart](test/widget_test.dart): current Flutter widget smoke test.
+- [android](android): Android Flutter project, app namespace, debug build config, and local signing placeholder.
+- [ios](ios): iOS-compatible Flutter project shell.
 
 ## Local Setup
 
-For the current docs/planning repo:
+Use the local Flutter SDK installed for this workspace:
 
 ```bash
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+flutter pub get
+flutter analyze
+flutter test
 bash scripts/check-docs.sh
+```
+
+For Android debug build and smoke checks:
+
+```bash
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+flutter build apk --debug
+android-pixel9-headless
+flutter devices
+flutter run -d <android-emulator-id>
 ```
 
 Do not add real credentials to `.env.example` or any committed file. Use uncommitted local env files only for local development placeholders. Mobile credential/session material must not be bundled into the app; the implementation must verify the current OpenAI-supported direct mobile approach before coding.
 
-Once Flutter code exists, update this README with the exact install, analyze, test, run, dependency-check, and Android smoke commands.
+For local Android release-signing experiments, copy [android/key.properties.example](android/key.properties.example) to `android/key.properties` and use local placeholder values only. `android/key.properties` is ignored and must not be committed.
 
 ## GitHub Issue Map
 
-Closed planning intake:
+Closed planning and implementation intake:
 
 - #1 Finalize product spec and mockup intake
+- #2 Scaffold Flutter mobile app
 
 Open MVP/planning work:
 
-- #2 Scaffold Flutter mobile app
 - #3 Implement Flutter UI from supplied mockups for phone-only MVP
 - #6 Integrate direct OpenAI Realtime Translation
 - #7 Implement language support and fallback routing
@@ -127,16 +146,18 @@ The mockups remain the visual source of truth. MVP behavior has changed to phone
 
 ## Verification
 
-Current docs-only gate:
+Current local gates:
 
 ```bash
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+flutter pub get
+flutter analyze
+flutter test
 bash scripts/check-docs.sh
 ```
 
-Expected gates once implementation exists:
+Additional checks for app changes:
 
-- `flutter analyze`
-- `flutter test`
 - Secret scan or equivalent check for standard OpenAI API key leakage
 - Dependency/advisory checks for pinned Flutter/Dart/native package versions
 - Android emulator smoke check using `android-pixel9-headless`

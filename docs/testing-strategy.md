@@ -2,13 +2,17 @@
 
 This is the MVP verification plan. Keep commands concrete as implementation lands.
 
-## Current Docs-Only Gate
+## Current Local Gates
 
 ```bash
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+flutter pub get
+flutter analyze
+flutter test
 bash scripts/check-docs.sh
 ```
 
-This checks local Markdown links and scans for likely committed OpenAI secret patterns.
+`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. The current Flutter widget test verifies that the scaffold renders a phone-local start surface and does not show cloud sign-in or Flutter demo copy.
 
 ## Flutter App Gates
 
@@ -76,6 +80,24 @@ Once Flutter exists, smoke checks should cover:
 - Safe-area behavior around Android status and navigation bars.
 
 Record emulator command output, screenshot notes, or exact blockers in the issue before closing UI or Android verification work.
+
+Current command sequence:
+
+```bash
+android-pixel9-headless
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+adb devices
+flutter devices
+flutter run -d <android-emulator-id>
+```
+
+Optional screenshot capture should write outside the repo by default:
+
+```bash
+adb exec-out screencap -p > /tmp/live-translate-mobile-smoke.png
+```
+
+The current scaffold can only verify the phone-local start surface. The teal listening, scoped AI chat, amber paused read-aloud, meeting management, and email export smoke paths become required as their implementation issues land.
 
 ## CI Direction
 

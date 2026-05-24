@@ -1,0 +1,7 @@
+# Copy this file to android/key.properties for local release signing.
+# Never commit android/key.properties or keystore files.
+
+storePassword=<local-keystore-password>
+keyPassword=<local-key-password>
+keyAlias=<local-key-alias>
+storeFile=<path-to-local-keystore>

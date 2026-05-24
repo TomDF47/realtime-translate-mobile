@@ -228,13 +228,13 @@ It is known to segfault on this Fedora/KDE/Wayland setup.
 
 ## GitHub Issue Map
 
-Closed planning intake:
+Closed planning and implementation intake:
 
 - #1 Finalize product spec and mockup intake.
+- #2 Scaffold Flutter mobile app.
 
 Open MVP/planning work:
 
-- #2 Scaffold Flutter mobile app.
 - #3 Implement Flutter UI from supplied mockups for phone-only MVP.
 - #6 Integrate direct OpenAI Realtime Translation.
 - #7 Implement language support and fallback routing.

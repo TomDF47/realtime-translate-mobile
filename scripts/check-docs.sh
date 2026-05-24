@@ -34,6 +34,9 @@ while IFS='|' read -r file raw_target; do
 done < <(
   find . \
     -path ./.git -prune -o \
+    -path ./.dart_tool -prune -o \
+    -path ./.gradle -prune -o \
+    -path ./android/.gradle -prune -o \
     -path ./build -prune -o \
     -name '*.md' -type f -print0 |
   xargs -0 perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV|$1\n" }'
@@ -43,6 +46,9 @@ echo "Checking for likely committed OpenAI secret patterns..."
 secret_hits="$(
   find . \
     -path ./.git -prune -o \
+    -path ./.dart_tool -prune -o \
+    -path ./.gradle -prune -o \
+    -path ./android/.gradle -prune -o \
     -path ./build -prune -o \
     -path ./assets/mockups -prune -o \
     -type f -print0 |

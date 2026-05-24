@@ -70,18 +70,22 @@ Email export is user initiated.
 - The app should hand the export to the device-native mail/share composer where practical.
 - The app must not add a server mailer, backend relay, or cloud export queue in the MVP.
 
-## Suggested Future Repo Layout
+## Current Repo Layout
 
-When implementation begins, keep boundaries visible:
+The first Flutter scaffold keeps boundaries visible:
 
 ```text
-app/ or mobile/              Flutter application
+android/                     Android Flutter project and app namespace
+ios/                         iOS-compatible Flutter project shell
+lib/                         Flutter app code
+test/                        Flutter tests
+pubspec.yaml                 Flutter package manifest
+pubspec.lock                 Pinned Dart package versions
 docs/                        Product, architecture, setup, testing, decisions
 assets/mockups/              Supplied Android mockups
-test/                        Flutter tests once scaffolded
 ```
 
-Use the actual Flutter scaffold conventions when the app is created; update this section if the final layout differs.
+The current app shell renders a phone-local welcome/start surface only. Live translation, encrypted storage, AI chat, export, and logging implementations remain scoped to their GitHub issues.
 
 ## Prohibited MVP Flows
 
