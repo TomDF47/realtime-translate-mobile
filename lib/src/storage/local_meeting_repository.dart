@@ -60,6 +60,30 @@ class LocalMeetingRepository {
         else
           meeting,
     ];
+    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    await saveSnapshot(snapshot.copyWith(meetings: meetings));
+  }
+
+  Future<void> upsertTranscriptEntry({
+    required String meetingId,
+    required StoredTranscriptEntry entry,
+    required DateTime updatedAt,
+  }) async {
+    final snapshot = await loadSnapshot();
+    final meetings = [
+      for (final meeting in snapshot.meetings)
+        if (meeting.id == meetingId)
+          meeting.copyWith(
+            updatedAt: updatedAt,
+            transcriptEntries: _upsertTranscriptEntry(
+              meeting.transcriptEntries,
+              entry,
+            ),
+          )
+        else
+          meeting,
+    ];
+    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     await saveSnapshot(snapshot.copyWith(meetings: meetings));
   }
 
@@ -168,4 +192,19 @@ class LocalMeetingRepository {
   Future<void> deleteAllLocalData() {
     return store.delete(key: storageKey);
   }
+}
+
+List<StoredTranscriptEntry> _upsertTranscriptEntry(
+  List<StoredTranscriptEntry> entries,
+  StoredTranscriptEntry entry,
+) {
+  final updated = [...entries];
+  final existingIndex = updated.indexWhere((item) => item.id == entry.id);
+  if (existingIndex == -1) {
+    updated.add(entry);
+  } else {
+    updated[existingIndex] = entry;
+  }
+
+  return updated;
 }

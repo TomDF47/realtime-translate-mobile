@@ -8,6 +8,7 @@ import '../openai/openai_realtime_resilience.dart';
 import '../openai/openai_realtime_translation.dart';
 import 'live_session_controller.dart';
 import 'microphone_capture.dart';
+import 'realtime_transcript_committer.dart';
 
 enum LiveRealtimeStartResult {
   started,
@@ -36,6 +37,7 @@ class LiveRealtimeTranslationCoordinator {
   RealtimeTranslationSession? _realtimeSession;
   StreamSubscription<MicrophonePcm16Chunk>? _captureSubscription;
   StreamSubscription<OpenAiRealtimeEvent>? _realtimeSubscription;
+  LiveRealtimeTranscriptCommitter? _transcriptCommitter;
   bool _closingIntentionally = false;
   bool _handlingFailure = false;
 
@@ -45,6 +47,7 @@ class LiveRealtimeTranslationCoordinator {
 
   Future<LiveRealtimeStartResult> start({
     required OpenAiRealtimeTranslationConfig config,
+    LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
   }) async {
     await _closeRealtimeResources(graceful: false);
 
@@ -65,6 +68,9 @@ class LiveRealtimeTranslationCoordinator {
         credential: credential,
       );
       _realtimeSession = realtimeSession;
+      _transcriptCommitter = transcriptCommitTarget == null
+          ? null
+          : LiveRealtimeTranscriptCommitter(transcriptCommitTarget);
       _realtimeSubscription = realtimeSession.events.listen(
         _handleRealtimeEvent,
         onError: (error) {
@@ -144,6 +150,10 @@ class LiveRealtimeTranslationCoordinator {
     }
 
     switch (event) {
+      case OpenAiRealtimeTranscriptDelta():
+        _commitTranscript(_transcriptCommitter?.commitDelta(event));
+      case OpenAiRealtimeTranscriptCompleted():
+        _commitTranscript(_transcriptCommitter?.commitCompleted(event));
       case OpenAiRealtimeError():
         unawaited(
           _handleRealtimeFailure(
@@ -157,6 +167,25 @@ class LiveRealtimeTranslationCoordinator {
       default:
         break;
     }
+  }
+
+  void _commitTranscript(Future<void>? commit) {
+    if (commit == null) {
+      return;
+    }
+
+    unawaited(
+      commit.catchError((Object error, StackTrace stackTrace) {
+        diagnostics.warning(
+          'live_realtime.transcript_commit_failed',
+          fields: {
+            'operation': 'realtime.transcript.commit',
+            'result': 'failed',
+            'errorCode': error.runtimeType.toString(),
+          },
+        );
+      }),
+    );
   }
 
   Future<void> _handleRealtimeFailure(OpenAiRealtimeFailure failure) async {
@@ -182,9 +211,11 @@ class LiveRealtimeTranslationCoordinator {
     final realtimeSession = _realtimeSession;
     final realtimeSubscription = _realtimeSubscription;
     final captureSubscription = _captureSubscription;
+    final transcriptCommitter = _transcriptCommitter;
     _realtimeSession = null;
     _realtimeSubscription = null;
     _captureSubscription = null;
+    _transcriptCommitter = null;
 
     _closingIntentionally = true;
     try {
@@ -196,6 +227,7 @@ class LiveRealtimeTranslationCoordinator {
       } else {
         await realtimeSession?.closeImmediately();
       }
+      await transcriptCommitter?.finish(interrupted: !graceful);
     } finally {
       _closingIntentionally = false;
     }

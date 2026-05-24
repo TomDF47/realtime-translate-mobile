@@ -51,6 +51,69 @@ void main() {
     );
   });
 
+  test('upserts a realtime transcript entry without duplicate rows', () async {
+    final repository = LocalMeetingRepository(
+      store: MemoryEncryptedLocalStore(),
+    );
+    final createdAt = DateTime.utc(2026, 5, 24, 1);
+    final firstDeltaAt = DateTime.utc(2026, 5, 24, 1, 0, 1);
+    final secondDeltaAt = DateTime.utc(2026, 5, 24, 1, 0, 2);
+
+    await repository.upsertMeeting(
+      StoredMeeting(
+        id: 'meeting-1',
+        title: 'Realtime transcript',
+        createdAt: createdAt,
+        updatedAt: createdAt,
+        sourceLanguageLabel: 'Auto-detect Spanish',
+        targetLanguageLabel: 'English',
+        transcriptEntries: const [],
+        summaryMetadata: const StoredSummaryMetadata.empty(),
+      ),
+    );
+    await repository.upsertTranscriptEntry(
+      meetingId: 'meeting-1',
+      updatedAt: firstDeltaAt,
+      entry: StoredTranscriptEntry(
+        id: 'meeting-1-realtime-1',
+        meetingId: 'meeting-1',
+        languageCode: 'EN',
+        originalText: 'Hola',
+        translatedText: 'Hello',
+        timestamp: firstDeltaAt,
+        speakerLabel: null,
+        confidence: null,
+        status: 'partial',
+        playbackState: 'none',
+      ),
+    );
+    await repository.upsertTranscriptEntry(
+      meetingId: 'meeting-1',
+      updatedAt: secondDeltaAt,
+      entry: StoredTranscriptEntry(
+        id: 'meeting-1-realtime-1',
+        meetingId: 'meeting-1',
+        languageCode: 'EN',
+        originalText: 'Hola',
+        translatedText: 'Hello there.',
+        timestamp: firstDeltaAt,
+        speakerLabel: null,
+        confidence: null,
+        status: 'final',
+        playbackState: 'none',
+      ),
+    );
+
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.meetings.single.transcriptEntries, hasLength(1));
+    expect(
+      snapshot.meetings.single.transcriptEntries.single.translatedText,
+      'Hello there.',
+    );
+    expect(snapshot.meetings.single.transcriptEntries.single.status, 'final');
+    expect(snapshot.meetings.single.updatedAt, secondDeltaAt);
+  });
+
   test('stores generated meeting summaries locally with metadata', () async {
     final repository = LocalMeetingRepository(
       store: MemoryEncryptedLocalStore(),

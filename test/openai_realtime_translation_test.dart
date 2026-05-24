@@ -80,6 +80,15 @@ void main() {
       OpenAiRealtimeTranscriptKind.translation,
     );
 
+    final completed = OpenAiRealtimeEventParser.parse({
+      'type': 'session.output_transcript.done',
+      'transcript': 'Hello.',
+    });
+    expect(completed, isA<OpenAiRealtimeTranscriptCompleted>());
+    final parsedCompleted = completed! as OpenAiRealtimeTranscriptCompleted;
+    expect(parsedCompleted.kind, OpenAiRealtimeTranscriptKind.translation);
+    expect(parsedCompleted.transcript, 'Hello.');
+
     expect(
       OpenAiRealtimeEventParser.parse({'type': 'session.updated'}),
       isA<OpenAiRealtimeSessionLifecycleEvent>(),

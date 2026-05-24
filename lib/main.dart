@@ -14,6 +14,7 @@ import 'src/session/live_session_controller.dart';
 import 'src/session/microphone_capture.dart';
 import 'src/session/microphone_permission.dart';
 import 'src/session/realtime_translation_coordinator.dart';
+import 'src/session/realtime_transcript_committer.dart';
 import 'src/storage/encrypted_local_store.dart';
 import 'src/storage/local_meeting_repository.dart';
 import 'src/storage/local_storage_models.dart';
@@ -339,28 +340,55 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   Future<void> _startMeeting() async {
-    _activeMeetingId = null;
+    final meetingId = 'meeting-${DateTime.now().microsecondsSinceEpoch}';
+    _activeMeetingId = meetingId;
+    await _persistMeetingFromSession(MockLiveTranslateData.listeningSession);
+    if (!mounted) {
+      return;
+    }
+
     final started = await _startRealtimeForSession(
       MockLiveTranslateData.listeningSession,
+      meetingId: meetingId,
     );
     if (!mounted) {
       return;
     }
 
     if (started) {
-      await _persistMeetingFromSession(MockLiveTranslateData.listeningSession);
+      setState(() => _surface = _AppSurface.listening);
+    } else {
+      await _meetingRepository.deleteMeeting(meetingId);
+      if (_activeMeetingId == meetingId) {
+        _activeMeetingId = null;
+      }
+      await _loadStoredMeetings();
       if (!mounted) {
         return;
       }
-      setState(() => _surface = _AppSurface.listening);
-    } else {
       setState(() {});
     }
   }
 
-  Future<bool> _startRealtimeForSession(LiveSessionViewData session) async {
+  Future<bool> _startRealtimeForSession(
+    LiveSessionViewData session, {
+    String? meetingId,
+  }) async {
+    final targetLanguageCode = _languageCodeForSelector(session.toLanguage);
     final result = await _realtimeCoordinator.start(
-      config: _realtimeConfigForSession(session),
+      config: _realtimeConfigForSession(
+        session,
+        targetLanguageCode: targetLanguageCode,
+      ),
+      transcriptCommitTarget: meetingId == null
+          ? null
+          : LiveRealtimeTranscriptCommitTarget(
+              repository: _meetingRepository,
+              meetingId: meetingId,
+              sourceLanguageCode: 'auto',
+              targetLanguageCode: targetLanguageCode,
+              now: DateTime.now,
+            ),
     );
     if (!mounted) {
       return false;
@@ -433,15 +461,16 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return true;
     }
 
-    return _startRealtimeForSession(session);
+    return _startRealtimeForSession(session, meetingId: _activeMeetingId);
   }
 
   OpenAiRealtimeTranslationConfig _realtimeConfigForSession(
-    LiveSessionViewData session,
-  ) {
+    LiveSessionViewData session, {
+    required String targetLanguageCode,
+  }) {
     return OpenAiRealtimeTranslationConfig(
       sourceLanguageCode: 'auto',
-      targetLanguageCode: _languageCodeForSelector(session.toLanguage),
+      targetLanguageCode: targetLanguageCode,
       profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
     );
   }
@@ -508,16 +537,25 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   Future<void> _continueMeeting(StoredMeeting meeting) async {
     final nextSurface = _surfaceForMeeting(meeting);
     final session = _baseSessionForSurface(nextSurface);
+    _activeMeetingId = meeting.id;
     final isReady = await _ensureLiveSessionReady(
       nextSurface == _AppSurface.speakingPaused
           ? MockLiveTranslateData.listeningSession
           : session,
     );
-    if (!isReady || !mounted) {
+    if (!isReady) {
+      if (_activeMeetingId == meeting.id) {
+        _activeMeetingId = null;
+      }
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    if (!mounted) {
       return;
     }
 
-    _activeMeetingId = meeting.id;
     if (nextSurface == _AppSurface.speakingPaused) {
       _sessionController.enterSpeakingPaused();
     } else {

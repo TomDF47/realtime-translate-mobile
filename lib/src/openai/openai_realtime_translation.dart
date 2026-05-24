@@ -344,6 +344,17 @@ class OpenAiRealtimeTranscriptDelta extends OpenAiRealtimeEvent {
   final String delta;
 }
 
+class OpenAiRealtimeTranscriptCompleted extends OpenAiRealtimeEvent {
+  const OpenAiRealtimeTranscriptCompleted({
+    required super.type,
+    required this.kind,
+    required this.transcript,
+  });
+
+  final OpenAiRealtimeTranscriptKind kind;
+  final String? transcript;
+}
+
 class OpenAiRealtimeAudioDelta extends OpenAiRealtimeEvent {
   const OpenAiRealtimeAudioDelta({
     required super.type,
@@ -438,6 +449,22 @@ abstract final class OpenAiRealtimeEventParser {
       }
     }
 
+    if (_isSourceTranscriptCompleted(type)) {
+      return OpenAiRealtimeTranscriptCompleted(
+        type: type,
+        kind: OpenAiRealtimeTranscriptKind.source,
+        transcript: _optionalTranscript(event),
+      );
+    }
+
+    if (_isTranslationTranscriptCompleted(type)) {
+      return OpenAiRealtimeTranscriptCompleted(
+        type: type,
+        kind: OpenAiRealtimeTranscriptKind.translation,
+        transcript: _optionalTranscript(event),
+      );
+    }
+
     return OpenAiRealtimeUnknownEvent(type: type);
   }
 
@@ -454,6 +481,25 @@ abstract final class OpenAiRealtimeEventParser {
   static bool _isTranslationTranscriptDelta(String type) {
     return type == 'session.output_transcript.delta' ||
         type == 'response.output_audio_transcript.delta';
+  }
+
+  static bool _isSourceTranscriptCompleted(String type) {
+    return type == 'session.input_transcript.done' ||
+        type == 'conversation.item.input_audio_transcription.completed';
+  }
+
+  static bool _isTranslationTranscriptCompleted(String type) {
+    return type == 'session.output_transcript.done' ||
+        type == 'response.output_audio_transcript.done';
+  }
+
+  static String? _optionalTranscript(Map<String, dynamic> event) {
+    final transcript = event['transcript'] ?? event['text'];
+    if (transcript is String && transcript.trim().isNotEmpty) {
+      return transcript;
+    }
+
+    return null;
   }
 }
 
