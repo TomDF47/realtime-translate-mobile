@@ -1,0 +1,837 @@
+import 'package:flutter/material.dart';
+
+import '../theme/live_translate_theme.dart';
+import 'live_translate_models.dart';
+
+class LiveTranslateShell extends StatelessWidget {
+  const LiveTranslateShell({
+    super.key,
+    required this.child,
+    this.fixedBottomControls,
+    this.screenPadding = const EdgeInsets.fromLTRB(
+      AppSpacing.screen,
+      AppSpacing.xxl,
+      AppSpacing.screen,
+      AppSpacing.lg,
+    ),
+  });
+
+  final Widget child;
+  final Widget? fixedBottomControls;
+  final EdgeInsets screenPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Padding(padding: screenPadding, child: child),
+            ),
+            if (fixedBottomControls != null)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: fixedBottomControls!,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class LiveTranslateHeader extends StatelessWidget {
+  const LiveTranslateHeader({
+    super.key,
+    required this.onOpenMenu,
+    required this.onOpenAssistant,
+  });
+
+  final VoidCallback onOpenMenu;
+  final VoidCallback onOpenAssistant;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Open menu',
+          onPressed: onOpenMenu,
+          icon: const Icon(Icons.menu_rounded),
+        ),
+        Expanded(
+          child: Text(
+            'Live Translate',
+            textAlign: TextAlign.center,
+            style: AppTextStyles.title(Theme.of(context).textTheme),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Open AI chat',
+          onPressed: onOpenAssistant,
+          icon: const Icon(Icons.chat_bubble_outline_rounded),
+        ),
+      ],
+    );
+  }
+}
+
+class WaveLogo extends StatelessWidget {
+  const WaveLogo({super.key, this.size = 72, this.accent = LiveAccent.teal});
+
+  final double size;
+  final LiveAccent accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(accent);
+
+    return Semantics(
+      label: 'Live Translate audio wave logo',
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: accentColor.withValues(alpha: 0.14),
+          border: Border.all(color: accentColor.withValues(alpha: 0.55)),
+        ),
+        child: Icon(
+          Icons.graphic_eq_rounded,
+          color: accentColor,
+          size: size * 0.58,
+        ),
+      ),
+    );
+  }
+}
+
+class AudioWavePanel extends StatelessWidget {
+  const AudioWavePanel({super.key, this.accent = LiveAccent.teal});
+
+  final LiveAccent accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(accent);
+
+    return Semantics(
+      label: 'Teal audio wave illustration',
+      child: Container(
+        height: 96,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          gradient: LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              accentColor.withValues(alpha: 0.04),
+              accentColor.withValues(alpha: 0.22),
+              AppColors.blue.withValues(alpha: 0.08),
+            ],
+          ),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Center(
+          child: Icon(
+            Icons.multitrack_audio_rounded,
+            color: accentColor,
+            size: 64,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class LocalSetupActionButton extends StatelessWidget {
+  const LocalSetupActionButton({
+    super.key,
+    required this.action,
+    required this.onPressed,
+  });
+
+  final LocalSetupActionData action;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor = action.isPrimary
+        ? AppColors.teal
+        : AppColors.surface;
+    final foregroundColor = action.isPrimary
+        ? AppColors.background
+        : AppColors.textPrimary;
+
+    return Semantics(
+      button: true,
+      label: action.semanticLabel,
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: backgroundColor,
+            foregroundColor: foregroundColor,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: 18,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadii.card),
+              side: BorderSide(
+                color: action.isPrimary ? AppColors.teal : AppColors.border,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(action.icon, size: 26),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  action.label,
+                  style: AppTextStyles.title(
+                    Theme.of(context).textTheme,
+                  ).copyWith(color: foregroundColor),
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, size: 28),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class PrivacyNote extends StatelessWidget {
+  const PrivacyNote({
+    super.key,
+    required this.label,
+    this.icon = Icons.lock_outline_rounded,
+  });
+
+  final String label;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Privacy note',
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: AppColors.teal),
+          const SizedBox(width: AppSpacing.sm),
+          Flexible(
+            child: Text(
+              label,
+              style: AppTextStyles.body(Theme.of(context).textTheme),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class FooterBadgeRow extends StatelessWidget {
+  const FooterBadgeRow({super.key, required this.badges});
+
+  final List<FooterBadgeData> badges;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (var index = 0; index < badges.length; index++) ...[
+          _FooterBadge(badge: badges[index]),
+          if (index < badges.length - 1)
+            Container(
+              height: 24,
+              width: 1,
+              margin: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+              color: AppColors.divider,
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+class _FooterBadge extends StatelessWidget {
+  const _FooterBadge({required this.badge});
+
+  final FooterBadgeData badge;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(badge.icon, color: AppColors.textSecondary, size: 18),
+        const SizedBox(width: AppSpacing.xs),
+        Text(
+          badge.label,
+          style: AppTextStyles.body(Theme.of(context).textTheme),
+        ),
+      ],
+    );
+  }
+}
+
+class SessionStatusCard extends StatelessWidget {
+  const SessionStatusCard({super.key, required this.session});
+
+  final LiveSessionViewData session;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forSessionMode(session.mode);
+
+    return _Surface(
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(Icons.graphic_eq_rounded, color: accentColor),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  session.routeLabel,
+                  style: AppTextStyles.label(Theme.of(context).textTheme),
+                ),
+              ),
+              StatusPill(
+                label: session.mode.statusLabel,
+                accent: session.mode.accent,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.schedule_rounded,
+                size: 18,
+                color: AppColors.textSecondary,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                session.elapsedLabel,
+                style: AppTextStyles.body(Theme.of(context).textTheme),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class StatusPill extends StatelessWidget {
+  const StatusPill({super.key, required this.label, required this.accent});
+
+  final String label;
+  final LiveAccent accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(accent);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: accentColor.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(AppRadii.chip),
+      ),
+      child: Text(
+        label,
+        style: AppTextStyles.compact(
+          Theme.of(context).textTheme,
+        ).copyWith(color: accentColor, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+class LanguageSelectorCard extends StatelessWidget {
+  const LanguageSelectorCard({super.key, required this.data});
+
+  final LanguageSelectorData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(data.accent);
+
+    return _Surface(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  data.eyebrow,
+                  style: AppTextStyles.compact(Theme.of(context).textTheme),
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  data.primaryLabel,
+                  style: AppTextStyles.label(Theme.of(context).textTheme),
+                ),
+                Text(
+                  data.secondaryLabel,
+                  style: AppTextStyles.label(Theme.of(context).textTheme),
+                ),
+              ],
+            ),
+          ),
+          CircleAvatar(
+            backgroundColor: accentColor.withValues(alpha: 0.18),
+            foregroundColor: accentColor,
+            child: Icon(data.icon),
+          ),
+          const Icon(Icons.keyboard_arrow_down_rounded),
+        ],
+      ),
+    );
+  }
+}
+
+class DirectionSwitchButton extends StatelessWidget {
+  const DirectionSwitchButton({
+    super.key,
+    required this.onPressed,
+    this.accent = LiveAccent.teal,
+  });
+
+  final VoidCallback onPressed;
+  final LiveAccent accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(accent);
+
+    return Semantics(
+      button: true,
+      label: 'Switch translation direction',
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: accentColor,
+          side: const BorderSide(color: AppColors.border),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.card),
+          ),
+          padding: const EdgeInsets.all(AppSpacing.md),
+        ),
+        child: const Icon(Icons.swap_horiz_rounded),
+      ),
+    );
+  }
+}
+
+class FeatureChip extends StatelessWidget {
+  const FeatureChip({super.key, required this.data});
+
+  final FeatureChipData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(data.accent);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: data.isEnabled || data.isPassive
+            ? accentColor.withValues(alpha: 0.14)
+            : AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.chip),
+        border: Border.all(
+          color: data.isEnabled || data.isPassive
+              ? accentColor
+              : AppColors.border,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(data.icon, size: 16, color: accentColor),
+          const SizedBox(width: AppSpacing.xs),
+          Text(
+            data.label,
+            style: AppTextStyles.compact(Theme.of(context).textTheme).copyWith(
+              color: data.isPassive ? accentColor : AppColors.textPrimary,
+            ),
+          ),
+          if (!data.isPassive) ...[
+            const SizedBox(width: AppSpacing.xs),
+            Icon(
+              data.isEnabled
+                  ? Icons.toggle_on_rounded
+                  : Icons.toggle_off_rounded,
+              size: 28,
+              color: data.isEnabled ? accentColor : AppColors.textTertiary,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class TranscriptCard extends StatelessWidget {
+  const TranscriptCard({super.key, required this.entry});
+
+  final TranscriptEntryData entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(entry.accent);
+    final textTheme = Theme.of(context).textTheme;
+
+    return _Surface(
+      borderColor: accentColor.withValues(alpha: 0.82),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: accentColor.withValues(alpha: 0.12),
+            foregroundColor: accentColor,
+            child: Text(
+              entry.languageCode,
+              style: AppTextStyles.compact(textTheme),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    if (entry.speakerLabel != null) ...[
+                      Text(
+                        entry.speakerLabel!,
+                        style: AppTextStyles.compact(
+                          textTheme,
+                        ).copyWith(color: accentColor),
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                    ],
+                    const Spacer(),
+                    Text(
+                      entry.timestamp,
+                      style: AppTextStyles.compact(textTheme),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(entry.originalText, style: AppTextStyles.body(textTheme)),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  entry.translatedText,
+                  style: AppTextStyles.title(textTheme).copyWith(fontSize: 18),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Icon(
+            _playbackIcon(entry.playbackState),
+            color: accentColor,
+            size: 20,
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _playbackIcon(TranscriptPlaybackState state) {
+    return switch (state) {
+      TranscriptPlaybackState.none => Icons.more_horiz_rounded,
+      TranscriptPlaybackState.playable => Icons.volume_up_rounded,
+      TranscriptPlaybackState.speaking => Icons.graphic_eq_rounded,
+    };
+  }
+}
+
+class TranscriptList extends StatelessWidget {
+  const TranscriptList({
+    super.key,
+    required this.entries,
+    this.bottomPadding = AppSpacing.bottomControlsHeight,
+  });
+
+  final List<TranscriptEntryData> entries;
+  final double bottomPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: EdgeInsets.only(bottom: bottomPadding),
+      itemBuilder: (context, index) => TranscriptCard(entry: entries[index]),
+      separatorBuilder: (context, index) =>
+          const SizedBox(height: AppSpacing.sm),
+      itemCount: entries.length,
+    );
+  }
+}
+
+class QueueBanner extends StatelessWidget {
+  const QueueBanner({
+    super.key,
+    required this.data,
+    required this.onPrimaryPressed,
+    required this.onSecondaryPressed,
+  });
+
+  final QueueBannerData data;
+  final VoidCallback onPrimaryPressed;
+  final VoidCallback onSecondaryPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(data.accent);
+
+    return _Surface(
+      borderColor: accentColor,
+      child: Row(
+        children: [
+          Icon(Icons.pause_circle_outline_rounded, color: accentColor),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  data.title,
+                  style: AppTextStyles.label(Theme.of(context).textTheme),
+                ),
+                Text(
+                  data.detail,
+                  style: AppTextStyles.compact(Theme.of(context).textTheme),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onPrimaryPressed,
+            child: Text(data.primaryActionLabel),
+          ),
+          TextButton(
+            onPressed: onSecondaryPressed,
+            child: Text(data.secondaryActionLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class JumpToLiveChip extends StatelessWidget {
+  const JumpToLiveChip({
+    super.key,
+    required this.onPressed,
+    this.accent = LiveAccent.teal,
+  });
+
+  final VoidCallback onPressed;
+  final LiveAccent accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(accent);
+
+    return ActionChip(
+      avatar: Icon(Icons.arrow_downward_rounded, color: accentColor, size: 18),
+      label: const Text('Jump to Live'),
+      labelStyle: AppTextStyles.label(
+        Theme.of(context).textTheme,
+      ).copyWith(color: accentColor, fontSize: 14),
+      backgroundColor: accentColor.withValues(alpha: 0.12),
+      side: BorderSide(color: accentColor.withValues(alpha: 0.55)),
+      onPressed: onPressed,
+    );
+  }
+}
+
+class BottomControlBar extends StatelessWidget {
+  const BottomControlBar({
+    super.key,
+    required this.actions,
+    required this.onPressed,
+  });
+
+  final List<BottomControlActionData> actions;
+  final ValueChanged<BottomControlActionData> onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.xl,
+        AppSpacing.md,
+        AppSpacing.xl,
+        AppSpacing.lg,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: const Border(top: BorderSide(color: AppColors.border)),
+        boxShadow: AppElevation.raised(AppColors.background),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          for (final action in actions)
+            _BottomControlButton(
+              action: action,
+              onPressed: () => onPressed(action),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BottomControlButton extends StatelessWidget {
+  const _BottomControlButton({required this.action, required this.onPressed});
+
+  final BottomControlActionData action;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = AppColors.forAccent(action.accent);
+    final isNeutral = action.accent == LiveAccent.neutral;
+
+    return Semantics(
+      button: true,
+      label: action.semanticLabel,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton.filled(
+            onPressed: onPressed,
+            style: IconButton.styleFrom(
+              backgroundColor: isNeutral
+                  ? AppColors.surfacePressed
+                  : accentColor,
+              foregroundColor: isNeutral
+                  ? AppColors.textPrimary
+                  : AppColors.background,
+              fixedSize: const Size.square(64),
+            ),
+            icon: Icon(action.icon),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          SizedBox(
+            width: 92,
+            child: Text(
+              action.label,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.compact(Theme.of(context).textTheme),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PromptActionChip extends StatelessWidget {
+  const PromptActionChip({
+    super.key,
+    required this.prompt,
+    required this.onPressed,
+  });
+
+  final PromptChipData prompt;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ActionChip(
+      avatar: prompt.icon == null ? null : Icon(prompt.icon, size: 18),
+      label: Text(prompt.label),
+      onPressed: onPressed,
+      backgroundColor: AppColors.surface,
+      side: const BorderSide(color: AppColors.border),
+    );
+  }
+}
+
+class AiChatScopePill extends StatelessWidget {
+  const AiChatScopePill({super.key, required this.scope});
+
+  final AiChatScope scope;
+
+  @override
+  Widget build(BuildContext context) {
+    return StatusPill(label: scope.label, accent: LiveAccent.teal);
+  }
+}
+
+class ExportTypeSelector extends StatelessWidget {
+  const ExportTypeSelector({
+    super.key,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final ExportType selected;
+  final ValueChanged<ExportType> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<ExportType>(
+      segments: [
+        for (final type in ExportType.values)
+          ButtonSegment(value: type, label: Text(type.label)),
+      ],
+      selected: {selected},
+      onSelectionChanged: (selection) => onChanged(selection.single),
+    );
+  }
+}
+
+class _Surface extends StatelessWidget {
+  const _Surface({
+    required this.child,
+    this.padding = const EdgeInsets.all(AppSpacing.md),
+    this.borderColor = AppColors.border,
+  });
+
+  final Widget child;
+  final EdgeInsets padding;
+  final Color borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        border: Border.all(color: borderColor),
+      ),
+      child: child,
+    );
+  }
+}

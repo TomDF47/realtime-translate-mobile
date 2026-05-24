@@ -58,9 +58,25 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [scripts/check-docs.sh](scripts/check-docs.sh): docs link and secret-pattern sanity check.
 - [pubspec.yaml](pubspec.yaml) and [pubspec.lock](pubspec.lock): Flutter package manifest and pinned dependency lockfile.
 - [lib/main.dart](lib/main.dart): current phone-local Flutter start surface.
+- [lib/src/theme/live_translate_theme.dart](lib/src/theme/live_translate_theme.dart): shared colors, spacing, radii, text styles, elevation, and app theme.
+- [lib/src/ui/live_translate_models.dart](lib/src/ui/live_translate_models.dart): structured UI state for sessions, transcripts, AI chat scope, export type, and controls.
+- [lib/src/ui/live_translate_components.dart](lib/src/ui/live_translate_components.dart): reusable mockup-aligned Flutter components.
+- [lib/src/mock/mock_live_translate_data.dart](lib/src/mock/mock_live_translate_data.dart): local-only sample session data for UI and widget tests.
 - [test/widget_test.dart](test/widget_test.dart): current Flutter widget smoke test.
+- [test/design_system_test.dart](test/design_system_test.dart): design-system unit/widget coverage.
 - [android](android): Android Flutter project, app namespace, debug build config, and local signing placeholder.
 - [ios](ios): iOS-compatible Flutter project shell.
+
+## Design System Conventions
+
+Future UI work should use the shared Flutter foundation instead of hard-coded one-off values:
+
+- Use `LiveTranslateTheme.dark()`, `AppColors`, `AppSpacing`, `AppRadii`, `AppElevation`, and `AppTextStyles` for visual decisions.
+- Drive session labels and state accents through `LiveSessionViewData`, `LiveSessionMode`, `LiveAccent`, and related model types.
+- Keep AI chat scope explicit through `AiChatScope.thisMeeting` or `AiChatScope.allMeetings`.
+- Build mockup-derived surfaces from `live_translate_components.dart` components such as `LiveTranslateShell`, `SessionStatusCard`, `LanguageSelectorCard`, `FeatureChip`, `TranscriptCard`, `TranscriptList`, `QueueBanner`, `JumpToLiveChip`, `BottomControlBar`, `PromptActionChip`, and `ExportTypeSelector`.
+- Transcript lists that sit behind fixed bottom controls should reserve at least `AppSpacing.bottomControlsHeight` plus safe-area padding.
+- Keep sample transcript/session content local to `MockLiveTranslateData` until realtime, encrypted storage, and meeting management issues replace it with product data.
 
 ## Local Setup
 
@@ -95,6 +111,7 @@ Closed planning and implementation intake:
 - #1 Finalize product spec and mockup intake
 - #2 Scaffold Flutter mobile app
 - #11 Document Android emulator workflow for Codex
+- #18 Define Flutter design tokens and reusable mockup components
 
 Open MVP/planning work:
 
@@ -110,7 +127,6 @@ Open MVP/planning work:
 - #15 Implement privacy-safe local logging and diagnostics controls
 - #16 Add CI quality gates for docs, Flutter, and secret safety
 - #17 Add accessibility and responsive text verification
-- #18 Define Flutter design tokens and reusable mockup components
 - #19 Maintain README and agent handoff docs during implementation
 - #20 Implement local meeting management
 - #21 Add email export for transcripts and summaries

@@ -78,6 +78,9 @@ The first Flutter scaffold keeps boundaries visible:
 android/                     Android Flutter project and app namespace
 ios/                         iOS-compatible Flutter project shell
 lib/                         Flutter app code
+lib/src/theme/               Shared design tokens and app theme
+lib/src/ui/                  Structured UI state models and reusable components
+lib/src/mock/                Local mock session data for UI development
 test/                        Flutter tests
 pubspec.yaml                 Flutter package manifest
 pubspec.lock                 Pinned Dart package versions

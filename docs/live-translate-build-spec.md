@@ -233,6 +233,7 @@ Closed planning and implementation intake:
 - #1 Finalize product spec and mockup intake.
 - #2 Scaffold Flutter mobile app.
 - #11 Document Android emulator workflow for Codex.
+- #18 Define Flutter design tokens and reusable mockup components.
 
 Open MVP/planning work:
 
@@ -248,7 +249,6 @@ Open MVP/planning work:
 - #15 Implement privacy-safe local logging and diagnostics controls.
 - #16 Add CI quality gates for docs, Flutter, and secret safety.
 - #17 Add accessibility and responsive text verification.
-- #18 Define Flutter design tokens and reusable mockup components.
 - #19 Maintain README and agent handoff docs during implementation.
 - #20 Implement local meeting management.
 - #21 Add email export for transcripts and summaries.
