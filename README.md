@@ -94,6 +94,7 @@ Closed planning and implementation intake:
 
 - #1 Finalize product spec and mockup intake
 - #2 Scaffold Flutter mobile app
+- #11 Document Android emulator workflow for Codex
 
 Open MVP/planning work:
 
@@ -103,7 +104,6 @@ Open MVP/planning work:
 - #8 Add scoped AI chat over local meetings
 - #9 Implement local encrypted meeting storage
 - #10 Maintain cybersecurity threat model and report
-- #11 Document Android emulator workflow for Codex
 - #12 Create phone-only MVP test strategy
 - #13 Implement microphone permissions and live session lifecycle
 - #14 Harden direct OpenAI realtime resilience
