@@ -44,9 +44,15 @@ class OpenAiRealtimeFailure {
   }
 
   factory OpenAiRealtimeFailure.fromSocketError(Object error) {
+    final diagnosticCode = _socketDiagnosticCode(error);
+    final classified = OpenAiRealtimeFailure.classifyCode(diagnosticCode);
+    if (classified.kind != OpenAiRealtimeFailureKind.fatal) {
+      return classified;
+    }
+
     return OpenAiRealtimeFailure(
       kind: OpenAiRealtimeFailureKind.retryableNetwork,
-      diagnosticCode: error.runtimeType.toString(),
+      diagnosticCode: diagnosticCode,
     );
   }
 
@@ -324,4 +330,28 @@ String _normalizeCode(String? rawCode) {
     RegExp(r'[^a-z0-9_.:-]+'),
     '_',
   );
+}
+
+String _socketDiagnosticCode(Object error) {
+  final raw = '${error.runtimeType} $error'.toLowerCase();
+  for (final status in const ['401', '403', '429', '500', '502', '503', '504']) {
+    if (raw.contains(status)) {
+      return 'socket.http_$status';
+    }
+  }
+
+  if (_containsAny(raw, const ['unauthorized', 'authentication'])) {
+    return 'socket.unauthorized';
+  }
+  if (raw.contains('forbidden')) {
+    return 'socket.forbidden';
+  }
+  if (_containsAny(raw, const ['too many requests', 'rate limit'])) {
+    return 'socket.rate_limited';
+  }
+  if (_containsAny(raw, const ['timeout', 'connection', 'network', 'socket'])) {
+    return 'socket.connection_error';
+  }
+
+  return error.runtimeType.toString();
 }

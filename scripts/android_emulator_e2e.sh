@@ -14,10 +14,11 @@ ARTIFACT_DIR="${ARTIFACT_DIR:-$DEFAULT_ARTIFACT_DIR}"
 USE_LIVE_CREDENTIAL=0
 RUN_DEBUG_LIVE_EVENTS=0
 VERIFY_CREDENTIAL_RESET=0
+VERIFY_INVALID_CREDENTIAL_RECOVERY=0
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--debug-live-events] [--verify-credential-reset] [--apk PATH]
+Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--debug-live-events] [--verify-credential-reset] [--verify-invalid-credential-recovery] [--apk PATH]
 
 Installs the debug APK on Pixel_9_API_36_Play or an already-connected Android
 emulator, drives the phone-local setup flow with UIAutomator/adb, writes
@@ -34,6 +35,11 @@ Options:
                           Save a non-secret placeholder credential through the
                           setup UI, remove it, and verify live start returns to
                           the setup-required gate. Does not read live secrets.
+  --verify-invalid-credential-recovery
+                          Save a non-secret invalid placeholder credential,
+                          grant microphone permission, and verify a direct
+                          OpenAI auth rejection fails closed to setup-required.
+                          Does not read live secrets.
   --apk PATH              APK to install. Defaults to build/app/outputs/flutter-apk/app-debug.apk.
   --help                  Show this help.
 USAGE
@@ -51,6 +57,10 @@ while (($#)); do
       ;;
     --verify-credential-reset)
       VERIFY_CREDENTIAL_RESET=1
+      shift
+      ;;
+    --verify-invalid-credential-recovery)
+      VERIFY_INVALID_CREDENTIAL_RECOVERY=1
       shift
       ;;
     --apk)
@@ -75,6 +85,11 @@ done
 
 if ((RUN_DEBUG_LIVE_EVENTS)) && ((! USE_LIVE_CREDENTIAL)); then
   echo "--debug-live-events requires --with-live-credential" >&2
+  exit 2
+fi
+
+if ((USE_LIVE_CREDENTIAL)) && ((VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
+  echo "--verify-invalid-credential-recovery cannot be combined with --with-live-credential" >&2
   exit 2
 fi
 
@@ -343,6 +358,37 @@ if ((VERIFY_CREDENTIAL_RESET)); then
   wait_for_ui "OpenAI setup required" 30
   screencap_to "$ARTIFACT_DIR/05-credential-reset-gate.png"
   dump_ui_to "$ARTIFACT_DIR/05-credential-reset-gate.xml"
+fi
+
+if ((VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
+  log "Verifying invalid credential recovery with a non-secret placeholder"
+  tap_ui "Open OpenAI setup"
+  wait_for_ui "OpenAI setup" 20
+  tap_first_edit_text
+  enter_adb_text "invalidlocalcredential"
+  sleep 1
+  adb_cmd shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+  wait_for_ui "Save encrypted credential" 10
+  tap_ui "Save encrypted credential"
+  wait_for_ui "OpenAI credential stored on this device" 30
+  if dump_ui | grep -Fq "invalidlocalcredential"; then
+    fail "invalid placeholder credential was visible after save"
+  fi
+  screencap_to "$ARTIFACT_DIR/03-invalid-credential-saved.png"
+  dump_ui_to "$ARTIFACT_DIR/03-invalid-credential-saved.xml"
+  tap_ui "Close OpenAI setup"
+  wait_for_ui "OpenAI setup required" 10
+  tap_ui "Back to start"
+  wait_for_ui "Start new meeting" 15
+
+  log "Starting live path with invalid placeholder credential"
+  adb_cmd shell pm grant "$PACKAGE_NAME" android.permission.RECORD_AUDIO \
+    >/dev/null 2>&1 || true
+  tap_ui "Start new meeting"
+  wait_for_ui "OpenAI credential expired or was rejected" 90
+  wait_for_ui "OpenAI setup required" 5
+  screencap_to "$ARTIFACT_DIR/04-invalid-credential-recovery.png"
+  dump_ui_to "$ARTIFACT_DIR/04-invalid-credential-recovery.xml"
 fi
 
 if ((USE_LIVE_CREDENTIAL)); then

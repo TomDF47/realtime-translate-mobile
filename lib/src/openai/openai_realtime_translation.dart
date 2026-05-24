@@ -361,6 +361,30 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
       return;
     }
 
+    final closeReason = _socket.closeReason;
+    if (closeReason != null && closeReason.isNotEmpty) {
+      _events.add(
+        OpenAiRealtimeError(
+          type: 'socket.closed',
+          code: closeReason,
+          eventId: null,
+          param: null,
+        ),
+      );
+    } else {
+      final closeCode = _socket.closeCode;
+      if (closeCode != null) {
+        _events.add(
+          OpenAiRealtimeError(
+            type: 'socket.closed',
+            code: 'socket.close_$closeCode',
+            eventId: null,
+            param: null,
+          ),
+        );
+      }
+    }
+
     _events.add(const OpenAiRealtimeSessionClosed(type: 'socket.closed'));
     unawaited(_events.close());
   }

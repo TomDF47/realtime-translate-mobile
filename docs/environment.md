@@ -57,6 +57,7 @@ export PATH=/home/tom/.local/share/flutter/bin:$PATH
 flutter build apk --debug
 scripts/build_debug_apk_artifact.sh
 scripts/android_emulator_e2e.sh --apk /tmp/<debug-apk-name>.apk --verify-credential-reset
+scripts/android_emulator_e2e.sh --apk /tmp/<debug-apk-name>.apk --verify-invalid-credential-recovery
 scripts/android_emulator_e2e.sh --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
@@ -66,7 +67,7 @@ scripts/build_debug_apk_artifact.sh --release
 
 `scripts/build_debug_apk_artifact.sh` copies the requested APK to `/tmp` with a commit-and-timestamp filename and writes a `.sha256` sidecar. Debug is the default; `--debug-live-events` builds the debug-only E2E proof variant; `--release` builds a release APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback. Debug-signed release artifacts are local handoff artifacts only, not store-ready builds. The script does not read the local OpenAI secret file and is suitable for local APK handoff when live OpenAI quota is blocked.
 
-The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator when a live credential is requested, can run a non-live credential save/remove/reset gate with `--verify-credential-reset`, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
+The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator when a live credential is requested, can run a non-live credential save/remove/reset gate with `--verify-credential-reset`, can run a non-secret invalid-placeholder auth recovery gate with `--verify-invalid-credential-recovery`, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
 
 The `--debug-live-events` mode requires the debug Dart define shown above. It is an installed-app coordinator/storage/playback proof that reports only row/audio counts; it does not use a production hook, live OpenAI speech, emulator microphone input, or audible speaker validation.
 
@@ -127,6 +128,14 @@ Non-live installed credential reset validation:
 export PATH=/home/tom/.local/share/flutter/bin:$PATH
 flutter build apk --debug
 scripts/android_emulator_e2e.sh --verify-credential-reset
+```
+
+Non-live installed invalid credential recovery validation:
+
+```bash
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+flutter build apk --debug
+scripts/android_emulator_e2e.sh --verify-invalid-credential-recovery
 ```
 
 For a screenshot artifact during issue closure, write it outside the repo unless the issue explicitly asks for committed evidence:
