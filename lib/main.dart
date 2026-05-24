@@ -9,8 +9,11 @@ import 'src/openai/openai_ai_chat.dart';
 import 'src/openai/openai_configuration.dart';
 import 'src/openai/openai_credential_store.dart';
 import 'src/openai/openai_meeting_summary.dart';
+import 'src/openai/openai_realtime_translation.dart';
 import 'src/session/live_session_controller.dart';
+import 'src/session/microphone_capture.dart';
 import 'src/session/microphone_permission.dart';
+import 'src/session/realtime_translation_coordinator.dart';
 import 'src/storage/encrypted_local_store.dart';
 import 'src/storage/local_meeting_repository.dart';
 import 'src/storage/local_storage_models.dart';
@@ -31,6 +34,8 @@ class LiveTranslateApp extends StatelessWidget {
     this.nativeShareGateway,
     this.aiChatGateway,
     this.meetingSummaryGateway,
+    this.microphoneCaptureGateway,
+    this.realtimeTranslationGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
@@ -38,6 +43,8 @@ class LiveTranslateApp extends StatelessWidget {
   final NativeShareGateway? nativeShareGateway;
   final AiChatGateway? aiChatGateway;
   final MeetingSummaryGateway? meetingSummaryGateway;
+  final MicrophoneCaptureGateway? microphoneCaptureGateway;
+  final RealtimeTranslationGateway? realtimeTranslationGateway;
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +58,8 @@ class LiveTranslateApp extends StatelessWidget {
         nativeShareGateway: nativeShareGateway,
         aiChatGateway: aiChatGateway,
         meetingSummaryGateway: meetingSummaryGateway,
+        microphoneCaptureGateway: microphoneCaptureGateway,
+        realtimeTranslationGateway: realtimeTranslationGateway,
       ),
     );
   }
@@ -232,6 +241,8 @@ class LiveTranslateHome extends StatefulWidget {
     this.nativeShareGateway,
     this.aiChatGateway,
     this.meetingSummaryGateway,
+    this.microphoneCaptureGateway,
+    this.realtimeTranslationGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
@@ -239,6 +250,8 @@ class LiveTranslateHome extends StatefulWidget {
   final NativeShareGateway? nativeShareGateway;
   final AiChatGateway? aiChatGateway;
   final MeetingSummaryGateway? meetingSummaryGateway;
+  final MicrophoneCaptureGateway? microphoneCaptureGateway;
+  final RealtimeTranslationGateway? realtimeTranslationGateway;
 
   @override
   State<LiveTranslateHome> createState() => _LiveTranslateHomeState();
@@ -252,6 +265,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   late final NativeShareGateway _nativeShareGateway;
   late final AiChatGateway _aiChatGateway;
   late final MeetingSummaryGateway _meetingSummaryGateway;
+  late final LiveRealtimeTranslationCoordinator _realtimeCoordinator;
   _AppSurface _surface = _AppSurface.setup;
   List<StoredMeeting> _storedMeetings = const [];
   OpenAiCredentialStatus _openAiCredentialStatus =
@@ -278,6 +292,16 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     _aiChatGateway = widget.aiChatGateway ?? OpenAiResponsesAiChatGateway();
     _meetingSummaryGateway =
         widget.meetingSummaryGateway ?? OpenAiResponsesMeetingSummaryGateway();
+    _realtimeCoordinator = LiveRealtimeTranslationCoordinator(
+      sessionController: _sessionController,
+      credentialStore: _openAiCredentialStore,
+      captureGateway:
+          widget.microphoneCaptureGateway ??
+          MethodChannelMicrophoneCaptureGateway(),
+      realtimeGateway:
+          widget.realtimeTranslationGateway ??
+          OpenAiRealtimeTranslationGateway(),
+    );
     unawaited(_loadStoredMeetings());
     unawaited(_loadOpenAiCredentialStatus());
   }
@@ -285,13 +309,14 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _realtimeCoordinator.dispose();
     _sessionController.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _sessionController.handleAppLifecycleState(state);
+    _realtimeCoordinator.handleAppLifecycleState(state);
     if (_sessionController.state.phase == LiveSessionPhase.readAloudPaused ||
         _sessionController.state.phase == LiveSessionPhase.reconnecting) {
       setState(() => _surface = _AppSurface.speakingPaused);
@@ -315,25 +340,14 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
   Future<void> _startMeeting() async {
     _activeMeetingId = null;
-    final credentialStatus = await _openAiCredentialStore.loadStatus();
+    final started = await _startRealtimeForSession(
+      MockLiveTranslateData.listeningSession,
+    );
     if (!mounted) {
       return;
     }
 
-    _openAiCredentialStatus = credentialStatus;
-    if (!credentialStatus.isConfigured) {
-      _sessionController.markCredentialInvalid();
-      setState(() => _surface = _AppSurface.setup);
-      return;
-    }
-
-    await _sessionController.startMeeting();
-    if (!mounted) {
-      return;
-    }
-
-    final phase = _sessionController.state.phase;
-    if (phase == LiveSessionPhase.listening) {
+    if (started) {
       await _persistMeetingFromSession(MockLiveTranslateData.listeningSession);
       if (!mounted) {
         return;
@@ -342,6 +356,32 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     } else {
       setState(() {});
     }
+  }
+
+  Future<bool> _startRealtimeForSession(LiveSessionViewData session) async {
+    final result = await _realtimeCoordinator.start(
+      config: _realtimeConfigForSession(session),
+    );
+    if (!mounted) {
+      return false;
+    }
+
+    _openAiCredentialStatus = await _openAiCredentialStore.loadStatus();
+    if (!mounted) {
+      return false;
+    }
+
+    if (result == LiveRealtimeStartResult.started) {
+      return true;
+    }
+
+    if (result == LiveRealtimeStartResult.missingCredential) {
+      setState(() => _surface = _AppSurface.setup);
+      return false;
+    }
+
+    setState(() {});
+    return false;
   }
 
   Future<void> _loadStoredMeetings() async {
@@ -387,34 +427,34 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     await _loadStoredMeetings();
   }
 
-  Future<bool> _ensureMicrophoneReady() async {
-    if (_sessionController.state.microphonePermission.isGranted) {
+  Future<bool> _ensureLiveSessionReady(LiveSessionViewData session) async {
+    if (_sessionController.state.microphonePermission.isGranted &&
+        _realtimeCoordinator.isStreaming) {
       return true;
     }
 
-    final credentialStatus = await _openAiCredentialStore.loadStatus();
-    if (!mounted) {
-      return false;
+    return _startRealtimeForSession(session);
+  }
+
+  OpenAiRealtimeTranslationConfig _realtimeConfigForSession(
+    LiveSessionViewData session,
+  ) {
+    return OpenAiRealtimeTranslationConfig(
+      sourceLanguageCode: 'auto',
+      targetLanguageCode: _languageCodeForSelector(session.toLanguage),
+      profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+    );
+  }
+
+  String _languageCodeForSelector(LanguageSelectorData data) {
+    final primary = data.primaryLabel.toLowerCase();
+    for (final language in LanguageSupport.languages) {
+      if (language.name.toLowerCase() == primary) {
+        return language.code;
+      }
     }
 
-    _openAiCredentialStatus = credentialStatus;
-    if (!credentialStatus.isConfigured) {
-      _sessionController.markCredentialInvalid();
-      setState(() => _surface = _AppSurface.setup);
-      return false;
-    }
-
-    await _sessionController.startMeeting();
-    if (!mounted) {
-      return false;
-    }
-
-    if (_sessionController.state.phase == LiveSessionPhase.listening) {
-      return true;
-    }
-
-    setState(() {});
-    return false;
+    return 'en';
   }
 
   _AppSurface _surfaceForMeeting(StoredMeeting meeting) {
@@ -468,7 +508,11 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   Future<void> _continueMeeting(StoredMeeting meeting) async {
     final nextSurface = _surfaceForMeeting(meeting);
     final session = _baseSessionForSurface(nextSurface);
-    final isReady = await _ensureMicrophoneReady();
+    final isReady = await _ensureLiveSessionReady(
+      nextSurface == _AppSurface.speakingPaused
+          ? MockLiveTranslateData.listeningSession
+          : session,
+    );
     if (!isReady || !mounted) {
       return;
     }
@@ -493,8 +537,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   Future<void> _openListeningAfterPermission() async {
-    if (!_sessionController.state.microphonePermission.isGranted) {
-      await _startMeeting();
+    final isReady = await _ensureLiveSessionReady(
+      MockLiveTranslateData.listeningSession,
+    );
+    if (!isReady || !mounted) {
       return;
     }
 
@@ -507,8 +553,11 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   Future<void> _openSpeakingPausedAfterPermission() async {
-    if (!_sessionController.state.microphonePermission.isGranted) {
-      final isReady = await _ensureMicrophoneReady();
+    if (!_sessionController.state.microphonePermission.isGranted ||
+        !_realtimeCoordinator.isStreaming) {
+      final isReady = await _ensureLiveSessionReady(
+        MockLiveTranslateData.listeningSession,
+      );
       if (!isReady || !mounted) {
         return;
       }
@@ -519,7 +568,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   void _openSetup() {
-    _sessionController.stopMeeting();
+    unawaited(_realtimeCoordinator.stop());
     _activeMeetingId = null;
     setState(() => _surface = _AppSurface.setup);
   }

@@ -122,3 +122,27 @@ Implications:
 
 - Future implementation can widen the realtime target table only after current OpenAI docs, API metadata, or live API validation provides stronger evidence.
 - Unsupported target UI should make fallback state visible and should stay direct phone-to-OpenAI using the accepted encrypted local credential/session approach.
+
+## 2026-05-24 - Android PCM16 Capture Uses App-Owned Platform Code
+
+Status: Accepted
+
+Decision:
+
+- Implement the first Android microphone capture increment with app-owned native `AudioRecord` code behind a fakeable Flutter EventChannel/MethodChannel seam.
+- Emit 24 kHz mono PCM16 chunks for the OpenAI realtime WebSocket path.
+- Do not add a Flutter audio recording package for this increment.
+- Keep capture closed until both the encrypted local OpenAI credential and runtime microphone permission gates pass.
+- Route microphone streaming through the dedicated `gpt-realtime-translate` profile for now because live synthetic PCM16 append was accepted there while the current primary `gpt-realtime-2` append flow returned `missing_required_parameter`.
+
+Rationale:
+
+- The existing Android platform channel layer already owns microphone permission and keeps the supply-chain surface smaller than adding an audio dependency.
+- OpenAI's current translation client-event docs describe 24 kHz PCM16 mono little-endian raw audio and 200 ms chunks for WebSocket translation sessions.
+- A fakeable capture gateway lets tests prove credential/permission gating and chunk flow without recording microphone audio or using a live credential.
+- The primary Realtime 2 session remains configured and no-audio session creation passes, but its current audio append flow needs follow-up before it should receive live microphone chunks.
+
+Implications:
+
+- Future audio package, SDK, resampling, or playback additions must update the cybersecurity report and rerun supply-chain checks.
+- Real microphone translation smoke, decoded translated-audio playback, and transcript persistence remain open #6/#14 work.

@@ -8,6 +8,25 @@ import 'openai_configuration.dart';
 typedef RealtimeWebSocketFactory =
     Future<WebSocket> Function(Uri uri, Map<String, dynamic> headers);
 
+abstract interface class RealtimeTranslationGateway {
+  Future<RealtimeTranslationSession> connect({
+    required OpenAiRealtimeTranslationConfig config,
+    required String credential,
+  });
+}
+
+abstract interface class RealtimeTranslationSession {
+  Stream<OpenAiRealtimeEvent> get events;
+
+  void sendSessionUpdate();
+
+  void appendPcm16Audio(List<int> pcm16Audio);
+
+  Future<void> closeGracefully();
+
+  Future<void> closeImmediately();
+}
+
 enum OpenAiRealtimeTranslationProfile { primaryRealtime2, dedicatedTranslation }
 
 extension OpenAiRealtimeTranslationProfileDetails
@@ -130,7 +149,7 @@ class OpenAiRealtimeTranslationConfig {
   }
 }
 
-class OpenAiRealtimeTranslationGateway {
+class OpenAiRealtimeTranslationGateway implements RealtimeTranslationGateway {
   OpenAiRealtimeTranslationGateway({
     Uri? webSocketBaseUri,
     RealtimeWebSocketFactory? webSocketFactory,
@@ -148,6 +167,7 @@ class OpenAiRealtimeTranslationGateway {
   final PrivacySafeDiagnostics diagnostics;
   final RealtimeWebSocketFactory _webSocketFactory;
 
+  @override
   Future<OpenAiRealtimeTranslationSession> connect({
     required OpenAiRealtimeTranslationConfig config,
     required String credential,
@@ -188,7 +208,7 @@ class OpenAiRealtimeTranslationGateway {
   }
 }
 
-class OpenAiRealtimeTranslationSession {
+class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
   OpenAiRealtimeTranslationSession._({
     required this._socket,
     required this.config,
@@ -209,17 +229,22 @@ class OpenAiRealtimeTranslationSession {
   final StreamController<OpenAiRealtimeEvent> _events =
       StreamController<OpenAiRealtimeEvent>.broadcast();
   bool _closeSent = false;
+  bool _isClosed = false;
 
+  @override
   Stream<OpenAiRealtimeEvent> get events => _events.stream;
 
+  @override
   void sendSessionUpdate() {
     _send(config.initialSessionUpdate());
   }
 
+  @override
   void appendPcm16Audio(List<int> pcm16Audio) {
     _send(config.audioAppendEvent(pcm16Audio));
   }
 
+  @override
   Future<void> closeGracefully() async {
     if (_closeSent) {
       return;
@@ -229,12 +254,17 @@ class OpenAiRealtimeTranslationSession {
     final closeEvent = config.gracefulCloseEvent();
     if (closeEvent != null) {
       _send(closeEvent);
-    } else {
-      await closeImmediately();
     }
+    await closeImmediately();
   }
 
+  @override
   Future<void> closeImmediately() async {
+    if (_isClosed) {
+      return;
+    }
+
+    _isClosed = true;
     await _subscription.cancel();
     await _socket.close();
     await _events.close();

@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
+import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
@@ -21,6 +25,8 @@ void main() {
           permissionGateway: _FakePermissionGateway.granted(),
           meetingRepository: repository,
           aiChatGateway: _FakeAiChatGateway(),
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
         ),
       );
 
@@ -113,6 +119,8 @@ void main() {
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
       ),
     );
     await tester.pumpAndSettle();
@@ -195,6 +203,53 @@ class _FakePermissionGateway implements MicrophonePermissionGateway {
 
   @override
   Future<MicrophonePermissionStatus> request() async => _status;
+}
+
+class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
+  @override
+  Stream<MicrophonePcm16Chunk> get chunks => const Stream.empty();
+
+  @override
+  bool get isCapturing => _isCapturing;
+
+  bool _isCapturing = false;
+
+  @override
+  Future<void> start(MicrophoneCaptureConfig config) async {
+    _isCapturing = true;
+  }
+
+  @override
+  Future<void> stop() async {
+    _isCapturing = false;
+  }
+}
+
+class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
+  @override
+  Future<RealtimeTranslationSession> connect({
+    required OpenAiRealtimeTranslationConfig config,
+    required String credential,
+  }) async {
+    return _FakeRealtimeTranslationSession();
+  }
+}
+
+class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
+  @override
+  Stream<OpenAiRealtimeEvent> get events => const Stream.empty();
+
+  @override
+  void appendPcm16Audio(List<int> pcm16Audio) {}
+
+  @override
+  Future<void> closeGracefully() async {}
+
+  @override
+  Future<void> closeImmediately() async {}
+
+  @override
+  void sendSessionUpdate() {}
 }
 
 class _FakeAiChatGateway implements AiChatGateway {
