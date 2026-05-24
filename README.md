@@ -36,7 +36,7 @@ The app should feel premium, clean, and executive-grade. The MVP is phone-only a
 
 Planning repo created. Supplied Android mockups have been received, copied into [assets/mockups](assets/mockups), and captured in [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md). The canonical build-ready spec is [docs/live-translate-build-spec.md](docs/live-translate-build-spec.md).
 
-The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, and encrypted local meeting storage through platform-backed secure storage. The current app can render the phone-local welcome/start screen, microphone permission denied state, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with delete control, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, or server-side transcript handling.
+The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, encrypted local meeting storage, and local meeting management. The current app can render the phone-local welcome/start screen, microphone permission denied state, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with stored metadata, select-and-continue behavior that appends local transcript history, delete controls, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, or server-side transcript handling.
 
 Keep future work aligned to the GitHub issue acceptance criteria and preserve the phone-only MVP privacy boundary.
 
@@ -79,7 +79,7 @@ Future UI work should use the shared Flutter foundation instead of hard-coded on
 - Keep AI chat scope explicit through `AiChatScope.thisMeeting` or `AiChatScope.allMeetings`.
 - Build mockup-derived surfaces from `live_translate_components.dart` components such as `LiveTranslateShell`, `SessionStatusCard`, `LanguageSelectorCard`, `FeatureChip`, `TranscriptCard`, `TranscriptList`, `QueueBanner`, `JumpToLiveChip`, `BottomControlBar`, `PromptActionChip`, and `ExportTypeSelector`.
 - Transcript lists that sit behind fixed bottom controls should reserve at least `AppSpacing.bottomControlsHeight` plus safe-area padding.
-- Keep sample transcript/session content local to `MockLiveTranslateData` until realtime, encrypted storage, and meeting management issues replace it with product data.
+- Keep sample transcript/session content local to `MockLiveTranslateData` until realtime and direct OpenAI integration replace it with product data.
 
 ## Local Setup
 
@@ -118,6 +118,7 @@ Closed planning and implementation intake:
 - #11 Document Android emulator workflow for Codex
 - #13 Implement microphone permissions and live session lifecycle
 - #18 Define Flutter design tokens and reusable mockup components
+- #20 Implement local meeting management
 
 Open MVP/planning work:
 
@@ -131,7 +132,6 @@ Open MVP/planning work:
 - #16 Add CI quality gates for docs, Flutter, and secret safety
 - #17 Add accessibility and responsive text verification
 - #19 Maintain README and agent handoff docs during implementation
-- #20 Implement local meeting management
 - #21 Add email export for transcripts and summaries
 - #22 Implement dependency and supply-chain cybersecurity controls
 

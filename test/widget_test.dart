@@ -144,11 +144,49 @@ void main() {
 
     expect(find.text('Project timeline review'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Delete meeting'));
+    await tester.tap(find.byTooltip('Delete Project timeline review'));
     await tester.pumpAndSettle();
 
     expect((await repository.loadSnapshot()).meetings, isEmpty);
     expect(find.text('Start new meeting'), findsOneWidget);
+  });
+
+  testWidgets('selects an old meeting and appends local history', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+      ),
+    );
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pumpAndSettle();
+
+    final initialMeeting = (await repository.loadSnapshot()).meetings.single;
+
+    await tester.tap(find.byTooltip('Open menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Meeting history'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Project timeline review'));
+    await tester.pumpAndSettle();
+
+    final continuedMeeting = (await repository.loadSnapshot()).meetings.single;
+    expect(continuedMeeting.id, initialMeeting.id);
+    expect(
+      continuedMeeting.transcriptCount,
+      initialMeeting.transcriptCount + 1,
+    );
+    expect(continuedMeeting.createdAt, initialMeeting.createdAt);
+    expect(
+      continuedMeeting.updatedAt.isAfter(initialMeeting.updatedAt),
+      isTrue,
+    );
+    expect(find.text('Project timeline review'), findsNothing);
+    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
   });
 }
 

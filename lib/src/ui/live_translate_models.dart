@@ -197,4 +197,30 @@ class LiveSessionViewData {
   final List<BottomControlActionData> bottomControls;
   final QueueBannerData? queueBanner;
   final bool isAtLiveEdge;
+
+  LiveSessionViewData copyWith({
+    String? routeLabel,
+    String? elapsedLabel,
+    LiveSessionMode? mode,
+    LanguageSelectorData? fromLanguage,
+    LanguageSelectorData? toLanguage,
+    List<FeatureChipData>? features,
+    List<TranscriptEntryData>? transcriptEntries,
+    List<BottomControlActionData>? bottomControls,
+    QueueBannerData? queueBanner,
+    bool? isAtLiveEdge,
+  }) {
+    return LiveSessionViewData(
+      routeLabel: routeLabel ?? this.routeLabel,
+      elapsedLabel: elapsedLabel ?? this.elapsedLabel,
+      mode: mode ?? this.mode,
+      fromLanguage: fromLanguage ?? this.fromLanguage,
+      toLanguage: toLanguage ?? this.toLanguage,
+      features: features ?? this.features,
+      transcriptEntries: transcriptEntries ?? this.transcriptEntries,
+      bottomControls: bottomControls ?? this.bottomControls,
+      queueBanner: queueBanner ?? this.queueBanner,
+      isAtLiveEdge: isAtLiveEdge ?? this.isAtLiveEdge,
+    );
+  }
 }

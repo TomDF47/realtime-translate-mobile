@@ -79,6 +79,136 @@ StoredMeeting _storedMeetingFromSession({
   );
 }
 
+String _timeLabel(DateTime value) {
+  final local = value.toLocal();
+  final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour >= 12 ? 'PM' : 'AM';
+  return '$hour:$minute $period';
+}
+
+TranscriptPlaybackState _playbackStateFromName(String value) {
+  for (final state in TranscriptPlaybackState.values) {
+    if (state.name == value) {
+      return state;
+    }
+  }
+
+  return TranscriptPlaybackState.playable;
+}
+
+TranscriptEntryData _transcriptEntryFromStored(StoredTranscriptEntry entry) {
+  final accent = switch (entry.languageCode.toUpperCase()) {
+    'EN' => LiveAccent.blue,
+    'JA' => LiveAccent.amber,
+    _ => LiveAccent.teal,
+  };
+
+  return TranscriptEntryData(
+    languageCode: entry.languageCode,
+    originalText: entry.originalText,
+    translatedText: entry.translatedText,
+    timestamp: _timeLabel(entry.timestamp),
+    accent: accent,
+    speakerLabel: entry.speakerLabel,
+    playbackState: _playbackStateFromName(entry.playbackState),
+  );
+}
+
+String _routeEndpointLabel(String label) {
+  final trimmed = label.trim();
+  final qualifierIndex = trimmed.indexOf(' (');
+  if (qualifierIndex > 0 && trimmed.endsWith(')')) {
+    return trimmed.substring(0, qualifierIndex);
+  }
+
+  return trimmed;
+}
+
+LanguageSelectorData _languageSelectorFromStoredLabel({
+  required String label,
+  required LanguageSelectorData fallback,
+}) {
+  final trimmed = label.trim();
+  if (trimmed.isEmpty) {
+    return fallback;
+  }
+
+  if (trimmed.startsWith('Auto-detect ')) {
+    return LanguageSelectorData(
+      eyebrow: fallback.eyebrow,
+      primaryLabel: 'Auto-detect',
+      secondaryLabel: trimmed.replaceFirst('Auto-detect ', ''),
+      icon: fallback.icon,
+      accent: fallback.accent,
+    );
+  }
+
+  final qualifierIndex = trimmed.indexOf(' (');
+  if (qualifierIndex > 0 && trimmed.endsWith(')')) {
+    return LanguageSelectorData(
+      eyebrow: fallback.eyebrow,
+      primaryLabel: trimmed.substring(0, qualifierIndex),
+      secondaryLabel: trimmed.substring(qualifierIndex + 1),
+      icon: fallback.icon,
+      accent: fallback.accent,
+    );
+  }
+
+  return LanguageSelectorData(
+    eyebrow: fallback.eyebrow,
+    primaryLabel: trimmed,
+    secondaryLabel: '',
+    icon: fallback.icon,
+    accent: fallback.accent,
+  );
+}
+
+LiveSessionViewData _sessionFromStoredMeeting({
+  required StoredMeeting meeting,
+  required LiveSessionViewData base,
+}) {
+  return base.copyWith(
+    routeLabel:
+        '${_routeEndpointLabel(meeting.sourceLanguageLabel)} -> '
+        '${_routeEndpointLabel(meeting.targetLanguageLabel)}',
+    fromLanguage: _languageSelectorFromStoredLabel(
+      label: meeting.sourceLanguageLabel,
+      fallback: base.fromLanguage,
+    ),
+    toLanguage: _languageSelectorFromStoredLabel(
+      label: meeting.targetLanguageLabel,
+      fallback: base.toLanguage,
+    ),
+    transcriptEntries: meeting.transcriptEntries.isEmpty
+        ? base.transcriptEntries
+        : [
+            for (final entry in meeting.transcriptEntries)
+              _transcriptEntryFromStored(entry),
+          ],
+  );
+}
+
+StoredTranscriptEntry _storedTranscriptEntryFromTranscriptData({
+  required String id,
+  required String meetingId,
+  required TranscriptEntryData entry,
+  required DateTime timestamp,
+}) {
+  return StoredTranscriptEntry(
+    id: id,
+    meetingId: meetingId,
+    languageCode: entry.languageCode,
+    originalText: entry.originalText,
+    translatedText: entry.translatedText,
+    timestamp: timestamp,
+    speakerLabel: entry.speakerLabel,
+    confidence: null,
+    status: 'final',
+    playbackState: entry.playbackState.name,
+  );
+}
+
 class LiveTranslateHome extends StatefulWidget {
   const LiveTranslateHome({
     super.key,
@@ -132,7 +262,23 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
   }
 
+  StoredMeeting? get _activeMeeting {
+    final activeMeetingId = _activeMeetingId;
+    if (activeMeetingId == null) {
+      return null;
+    }
+
+    for (final meeting in _storedMeetings) {
+      if (meeting.id == activeMeetingId) {
+        return meeting;
+      }
+    }
+
+    return null;
+  }
+
   Future<void> _startMeeting() async {
+    _activeMeetingId = null;
     await _sessionController.startMeeting();
     if (!mounted) {
       return;
@@ -182,6 +328,95 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       ),
     );
     await _loadStoredMeetings();
+  }
+
+  Future<bool> _ensureMicrophoneReady() async {
+    if (_sessionController.state.microphonePermission.isGranted) {
+      return true;
+    }
+
+    await _sessionController.startMeeting();
+    if (!mounted) {
+      return false;
+    }
+
+    if (_sessionController.state.phase == LiveSessionPhase.listening) {
+      return true;
+    }
+
+    setState(() {});
+    return false;
+  }
+
+  _AppSurface _surfaceForMeeting(StoredMeeting meeting) {
+    return meeting.targetLanguageLabel.contains('Japanese')
+        ? _AppSurface.speakingPaused
+        : _AppSurface.listening;
+  }
+
+  LiveSessionViewData _baseSessionForSurface(_AppSurface surface) {
+    return switch (surface) {
+      _AppSurface.speakingPaused => MockLiveTranslateData.speakingPausedSession,
+      _ => MockLiveTranslateData.listeningSession,
+    };
+  }
+
+  LiveSessionViewData _sessionForSurface(_AppSurface surface) {
+    final meeting = _activeMeeting;
+    final base = _baseSessionForSurface(surface);
+    if (meeting == null || _surfaceForMeeting(meeting) != surface) {
+      return base;
+    }
+
+    return _sessionFromStoredMeeting(meeting: meeting, base: base);
+  }
+
+  Future<void> _appendContinuationToMeeting({
+    required StoredMeeting meeting,
+    required LiveSessionViewData session,
+  }) async {
+    final sourceEntries = session.transcriptEntries;
+    if (sourceEntries.isEmpty) {
+      return;
+    }
+
+    final now = DateTime.now().toUtc();
+    final sourceEntry =
+        sourceEntries[meeting.transcriptEntries.length % sourceEntries.length];
+    await _meetingRepository.appendTranscriptEntry(
+      meetingId: meeting.id,
+      updatedAt: now,
+      entry: _storedTranscriptEntryFromTranscriptData(
+        id: '${meeting.id}-continued-${now.microsecondsSinceEpoch}',
+        meetingId: meeting.id,
+        entry: sourceEntry,
+        timestamp: now,
+      ),
+    );
+    await _loadStoredMeetings();
+  }
+
+  Future<void> _continueMeeting(StoredMeeting meeting) async {
+    final nextSurface = _surfaceForMeeting(meeting);
+    final session = _baseSessionForSurface(nextSurface);
+    final isReady = await _ensureMicrophoneReady();
+    if (!isReady || !mounted) {
+      return;
+    }
+
+    _activeMeetingId = meeting.id;
+    if (nextSurface == _AppSurface.speakingPaused) {
+      _sessionController.enterSpeakingPaused();
+    } else {
+      _sessionController.resumeListening();
+    }
+
+    await _appendContinuationToMeeting(meeting: meeting, session: session);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _surface = nextSurface);
   }
 
   void _openListening() {
@@ -279,12 +514,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         meetings: _storedMeetings,
         onOpenMeeting: (meeting) {
           Navigator.of(context).pop();
-          _activeMeetingId = meeting.id;
-          if (meeting.targetLanguageLabel.contains('Japanese')) {
-            _openSpeakingPaused();
-          } else {
-            _openListening();
-          }
+          unawaited(_continueMeeting(meeting));
         },
         onDeleteMeeting: (meeting) async {
           Navigator.of(context).pop();
@@ -331,14 +561,14 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         onOpenMeetingHistory: _showMeetingHistory,
       ),
       _AppSurface.listening => LiveSessionScreen(
-        session: MockLiveTranslateData.listeningSession,
+        session: _sessionForSurface(_AppSurface.listening),
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
         onDirectionSwitch: _openSpeakingPaused,
         onBottomAction: _handleBottomAction,
       ),
       _AppSurface.speakingPaused => LiveSessionScreen(
-        session: MockLiveTranslateData.speakingPausedSession,
+        session: _sessionForSurface(_AppSurface.speakingPaused),
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
         onDirectionSwitch: _openListening,
@@ -978,13 +1208,27 @@ class _MeetingRow extends StatelessWidget {
         meeting.title,
         style: AppTextStyles.label(Theme.of(context).textTheme),
       ),
-      subtitle: Text(
-        '${meeting.sourceLanguageLabel} -> ${meeting.targetLanguageLabel} - '
-        '${meeting.transcriptCount} transcript lines',
-        style: AppTextStyles.compact(Theme.of(context).textTheme),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${meeting.sourceLanguageLabel} -> ${meeting.targetLanguageLabel}',
+            style: AppTextStyles.compact(Theme.of(context).textTheme),
+          ),
+          Text(
+            'Created ${_timeLabel(meeting.createdAt)} - Last activity '
+            '${_timeLabel(meeting.updatedAt)}',
+            style: AppTextStyles.compact(Theme.of(context).textTheme),
+          ),
+          Text(
+            '${meeting.transcriptCount} transcript lines - '
+            '${meeting.summaryAvailable ? 'Summary ready' : 'No summary yet'}',
+            style: AppTextStyles.compact(Theme.of(context).textTheme),
+          ),
+        ],
       ),
       trailing: IconButton(
-        tooltip: 'Delete meeting',
+        tooltip: 'Delete ${meeting.title}',
         onPressed: onDelete,
         icon: const Icon(Icons.delete_outline_rounded),
       ),
