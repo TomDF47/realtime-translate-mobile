@@ -44,6 +44,7 @@ class LiveSessionState {
     required this.realtimeRetryAttempt,
     required this.realtimeReconnectDelay,
     this.realtimeRecoveryAction,
+    this.realtimeFailureKind,
     this.notice,
   });
 
@@ -57,6 +58,7 @@ class LiveSessionState {
       realtimeRetryAttempt = 0,
       realtimeReconnectDelay = Duration.zero,
       realtimeRecoveryAction = null,
+      realtimeFailureKind = null,
       notice = null;
 
   final LiveSessionPhase phase;
@@ -68,6 +70,7 @@ class LiveSessionState {
   final int realtimeRetryAttempt;
   final Duration realtimeReconnectDelay;
   final OpenAiRealtimeRecoveryAction? realtimeRecoveryAction;
+  final OpenAiRealtimeFailureKind? realtimeFailureKind;
   final String? notice;
 
   LiveSessionState copyWith({
@@ -81,6 +84,8 @@ class LiveSessionState {
     Duration? realtimeReconnectDelay,
     OpenAiRealtimeRecoveryAction? realtimeRecoveryAction,
     bool clearRealtimeRecoveryAction = false,
+    OpenAiRealtimeFailureKind? realtimeFailureKind,
+    bool clearRealtimeFailureKind = false,
     String? notice,
     bool clearNotice = false,
   }) {
@@ -99,6 +104,9 @@ class LiveSessionState {
       realtimeRecoveryAction: clearRealtimeRecoveryAction
           ? null
           : realtimeRecoveryAction ?? this.realtimeRecoveryAction,
+      realtimeFailureKind: clearRealtimeFailureKind
+          ? null
+          : realtimeFailureKind ?? this.realtimeFailureKind,
       notice: clearNotice ? null : notice ?? this.notice,
     );
   }
@@ -128,6 +136,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
         notice: 'Microphone access is required before live translation starts.',
       ),
     );
@@ -144,6 +153,7 @@ class LiveSessionController extends ChangeNotifier {
           realtimeRetryAttempt: 0,
           realtimeReconnectDelay: Duration.zero,
           clearRealtimeRecoveryAction: true,
+          clearRealtimeFailureKind: true,
           notice:
               'No audio is captured before microphone permission is granted.',
         ),
@@ -161,6 +171,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
         notice: 'Preparing the phone-local live session.',
       ),
     );
@@ -174,6 +185,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
         clearNotice: true,
       ),
     );
@@ -187,7 +199,11 @@ class LiveSessionController extends ChangeNotifier {
     return permissionGateway.openAppSettings();
   }
 
-  void markCredentialInvalid({String? notice}) {
+  void markCredentialInvalid({
+    String? notice,
+    OpenAiRealtimeFailureKind failureKind =
+        OpenAiRealtimeFailureKind.credentialRejected,
+  }) {
     _pausedByLifecycle = false;
     _setState(
       _state.copyWith(
@@ -198,6 +214,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         realtimeRecoveryAction: OpenAiRealtimeRecoveryAction.credentialInvalid,
+        realtimeFailureKind: failureKind,
         notice:
             notice ??
             'Add an OpenAI credential stored on this device before live translation starts.',
@@ -217,6 +234,7 @@ class LiveSessionController extends ChangeNotifier {
           realtimeRetryAttempt: 0,
           realtimeReconnectDelay: Duration.zero,
           clearRealtimeRecoveryAction: true,
+          clearRealtimeFailureKind: true,
           notice:
               'Read-aloud playback is paused; transcript capture stays gated.',
         ),
@@ -239,6 +257,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
         clearNotice: true,
       ),
     );
@@ -255,6 +274,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
         clearNotice: true,
       ),
     );
@@ -276,6 +296,7 @@ class LiveSessionController extends ChangeNotifier {
               realtimeRetryAttempt: 0,
               realtimeReconnectDelay: Duration.zero,
               clearRealtimeRecoveryAction: true,
+              clearRealtimeFailureKind: true,
               notice:
                   'Session paused while the app is not foregrounded. Resume when ready.',
             ),
@@ -295,6 +316,8 @@ class LiveSessionController extends ChangeNotifier {
               realtimeReconnectDelay: Duration.zero,
               realtimeRecoveryAction:
                   OpenAiRealtimeRecoveryAction.reconnectAfterBackoff,
+              realtimeFailureKind:
+                  OpenAiRealtimeFailureKind.lifecycleInterrupted,
               notice: 'Ready to resume the direct live session.',
             ),
           );
@@ -325,6 +348,7 @@ class LiveSessionController extends ChangeNotifier {
             realtimeRetryAttempt: decision.retryAttempt,
             realtimeReconnectDelay: decision.delay,
             realtimeRecoveryAction: decision.action,
+            realtimeFailureKind: decision.failure.kind,
             notice: decision.userFacingNotice,
           ),
         );
@@ -333,7 +357,10 @@ class LiveSessionController extends ChangeNotifier {
           decision,
           severity: DiagnosticSeverity.warning,
         );
-        markCredentialInvalid(notice: decision.userFacingNotice);
+        markCredentialInvalid(
+          notice: decision.userFacingNotice,
+          failureKind: decision.failure.kind,
+        );
       case OpenAiRealtimeRecoveryAction.unsupportedLanguage:
         _recordRealtimeRecoveryDecision(
           decision,
@@ -348,6 +375,7 @@ class LiveSessionController extends ChangeNotifier {
             realtimeRetryAttempt: decision.retryAttempt,
             realtimeReconnectDelay: Duration.zero,
             realtimeRecoveryAction: decision.action,
+            realtimeFailureKind: decision.failure.kind,
             notice: decision.userFacingNotice,
           ),
         );
@@ -365,6 +393,7 @@ class LiveSessionController extends ChangeNotifier {
             realtimeRetryAttempt: decision.retryAttempt,
             realtimeReconnectDelay: Duration.zero,
             realtimeRecoveryAction: decision.action,
+            realtimeFailureKind: decision.failure.kind,
             notice: decision.userFacingNotice,
           ),
         );
@@ -382,6 +411,7 @@ class LiveSessionController extends ChangeNotifier {
             realtimeRetryAttempt: decision.retryAttempt,
             realtimeReconnectDelay: Duration.zero,
             realtimeRecoveryAction: decision.action,
+            realtimeFailureKind: decision.failure.kind,
             notice: decision.userFacingNotice,
           ),
         );
@@ -403,6 +433,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
         clearNotice: true,
       ),
     );

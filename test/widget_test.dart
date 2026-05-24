@@ -217,6 +217,40 @@ void main() {
     expect(find.text('Back to start'), findsOneWidget);
   });
 
+  testWidgets('shows rate-limit recovery without raw OpenAI error details', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _liveSessionHarness(
+        const LiveSessionState(
+          phase: LiveSessionPhase.error,
+          microphonePermission: MicrophonePermissionStatus.granted,
+          audioRoute: LiveAudioRoute.speaker,
+          isMicrophoneCaptureOpen: false,
+          isRealtimeSessionOpen: false,
+          isPlaybackQueueOpen: false,
+          realtimeRetryAttempt: 2,
+          realtimeReconnectDelay: Duration.zero,
+          realtimeRecoveryAction: OpenAiRealtimeRecoveryAction.fatalError,
+          realtimeFailureKind: OpenAiRealtimeFailureKind.rateLimited,
+          notice:
+              'OpenAI rate limits persisted after retries. Restart when quota is available.',
+        ),
+      ),
+    );
+
+    expect(find.text('OpenAI rate limit reached'), findsOneWidget);
+    expect(
+      find.text(
+        'OpenAI rate limits persisted after retries. Restart when quota is available.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('rate_limit_exceeded'), findsNothing);
+    expect(find.text('Retry live session'), findsOneWidget);
+    expect(find.text('Back to start'), findsOneWidget);
+  });
+
   testWidgets('shows unsupported language recovery without retry loop', (
     tester,
   ) async {

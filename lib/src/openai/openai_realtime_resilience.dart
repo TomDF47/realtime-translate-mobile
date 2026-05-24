@@ -192,16 +192,32 @@ class OpenAiRealtimeReconnectDecision {
 
   String get userFacingNotice {
     return switch (action) {
-      OpenAiRealtimeRecoveryAction.reconnectAfterBackoff =>
-        'Connection interrupted. Reconnecting to OpenAI shortly.',
+      OpenAiRealtimeRecoveryAction.reconnectAfterBackoff => switch (failure
+          .kind) {
+        OpenAiRealtimeFailureKind.rateLimited =>
+          'OpenAI is rate limiting this live session. Retrying shortly.',
+        OpenAiRealtimeFailureKind.transientOpenAiError =>
+          'OpenAI realtime is temporarily unavailable. Retrying shortly.',
+        OpenAiRealtimeFailureKind.lifecycleInterrupted =>
+          'Live translation was interrupted by the app lifecycle. Reconnecting shortly.',
+        _ => 'Connection interrupted. Reconnecting to OpenAI shortly.',
+      },
       OpenAiRealtimeRecoveryAction.credentialInvalid =>
         'OpenAI credential expired or was rejected. Update the credential stored on this device.',
       OpenAiRealtimeRecoveryAction.unsupportedLanguage =>
         'The selected language is not available for this realtime route.',
-      OpenAiRealtimeRecoveryAction.offline =>
-        'Network connection appears offline. Live translation is paused.',
-      OpenAiRealtimeRecoveryAction.fatalError =>
-        'OpenAI realtime session stopped. Restart the meeting when ready.',
+      OpenAiRealtimeRecoveryAction.offline => switch (failure.kind) {
+        OpenAiRealtimeFailureKind.lifecycleInterrupted =>
+          'The app could not resume the live session. Live translation is paused.',
+        _ => 'Network connection appears offline. Live translation is paused.',
+      },
+      OpenAiRealtimeRecoveryAction.fatalError => switch (failure.kind) {
+        OpenAiRealtimeFailureKind.rateLimited =>
+          'OpenAI rate limits persisted after retries. Restart when quota is available.',
+        OpenAiRealtimeFailureKind.transientOpenAiError =>
+          'OpenAI realtime remained unavailable after retries. Restart when ready.',
+        _ => 'OpenAI realtime session stopped. Restart the meeting when ready.',
+      },
     };
   }
 }

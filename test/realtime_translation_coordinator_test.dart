@@ -265,6 +265,41 @@ void main() {
   });
 
   test(
+    'credential rejection from realtime event closes live resources',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+
+      await harness.coordinator.start(config: config);
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeError(
+          type: 'error',
+          code: 'invalid_api_key',
+          eventId: null,
+          param: null,
+        ),
+      );
+      await _drainAsync();
+
+      expect(
+        harness.controller.state.phase,
+        LiveSessionPhase.credentialInvalid,
+      );
+      expect(
+        harness.controller.state.realtimeFailureKind,
+        OpenAiRealtimeFailureKind.credentialRejected,
+      );
+      expect(harness.controller.state.isMicrophoneCaptureOpen, isFalse);
+      expect(harness.controller.state.isRealtimeSessionOpen, isFalse);
+      expect(harness.controller.state.isPlaybackQueueOpen, isFalse);
+      expect(harness.captureGateway.isCapturing, isFalse);
+      expect(harness.playbackGateway.isOpen, isFalse);
+      expect(harness.realtimeGateway.session.closeImmediatelyCount, 1);
+    },
+  );
+
+  test(
     'retryable realtime failure reconnects without duplicating transcript row',
     () async {
       final reconnectDelays = <Duration>[];

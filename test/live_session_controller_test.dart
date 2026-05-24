@@ -247,6 +247,95 @@ void main() {
     expect(controller.state.isPlaybackQueueOpen, isFalse);
   });
 
+  test('credential expiry decision preserves sanitized failure kind', () async {
+    final controller = LiveSessionController(
+      permissionGateway: _FixedPermissionGateway(
+        MicrophonePermissionStatus.granted,
+      ),
+    );
+    const policy = OpenAiRealtimeReconnectPolicy(maxAttempts: 1);
+
+    await controller.startMeeting();
+    controller.applyRealtimeRecoveryDecision(
+      policy.plan(
+        failure: OpenAiRealtimeFailure.classifyCode('session_expired'),
+        retryAttempt: 1,
+      ),
+    );
+
+    expect(controller.state.phase, LiveSessionPhase.credentialInvalid);
+    expect(
+      controller.state.realtimeRecoveryAction,
+      OpenAiRealtimeRecoveryAction.credentialInvalid,
+    );
+    expect(
+      controller.state.realtimeFailureKind,
+      OpenAiRealtimeFailureKind.credentialExpired,
+    );
+    expect(
+      controller.state.notice,
+      'OpenAI credential expired or was rejected. Update the credential stored on this device.',
+    );
+    expect(controller.state.isMicrophoneCaptureOpen, isFalse);
+    expect(controller.state.isRealtimeSessionOpen, isFalse);
+    expect(controller.state.isPlaybackQueueOpen, isFalse);
+  });
+
+  test('rate-limit decisions use specific retry and exhausted notices', () async {
+    final controller = LiveSessionController(
+      permissionGateway: _FixedPermissionGateway(
+        MicrophonePermissionStatus.granted,
+      ),
+    );
+    const policy = OpenAiRealtimeReconnectPolicy(
+      maxAttempts: 1,
+      initialDelay: Duration(seconds: 1),
+      jitterRatio: 0,
+    );
+
+    await controller.startMeeting();
+    controller.applyRealtimeRecoveryDecision(
+      policy.plan(
+        failure: OpenAiRealtimeFailure.classifyCode('rate_limit_exceeded'),
+        retryAttempt: 1,
+      ),
+    );
+
+    expect(controller.state.phase, LiveSessionPhase.reconnecting);
+    expect(
+      controller.state.realtimeFailureKind,
+      OpenAiRealtimeFailureKind.rateLimited,
+    );
+    expect(
+      controller.state.notice,
+      'OpenAI is rate limiting this live session. Retrying shortly.',
+    );
+
+    controller.applyRealtimeRecoveryDecision(
+      policy.plan(
+        failure: OpenAiRealtimeFailure.classifyCode('rate_limit_exceeded'),
+        retryAttempt: 2,
+      ),
+    );
+
+    expect(controller.state.phase, LiveSessionPhase.error);
+    expect(
+      controller.state.realtimeRecoveryAction,
+      OpenAiRealtimeRecoveryAction.fatalError,
+    );
+    expect(
+      controller.state.realtimeFailureKind,
+      OpenAiRealtimeFailureKind.rateLimited,
+    );
+    expect(
+      controller.state.notice,
+      'OpenAI rate limits persisted after retries. Restart when quota is available.',
+    );
+    expect(controller.state.isMicrophoneCaptureOpen, isFalse);
+    expect(controller.state.isRealtimeSessionOpen, isFalse);
+    expect(controller.state.isPlaybackQueueOpen, isFalse);
+  });
+
   test('realtime recovery diagnostics redact unsafe error codes', () async {
     final sink = MemoryPrivacySafeDiagnosticsSink();
     final controller = LiveSessionController(

@@ -1449,6 +1449,11 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
         state.realtimeRecoveryAction ==
                 OpenAiRealtimeRecoveryAction.unsupportedLanguage
             ? 'Language not supported'
+            : state.realtimeFailureKind == OpenAiRealtimeFailureKind.rateLimited
+            ? 'OpenAI rate limit reached'
+            : state.realtimeFailureKind ==
+                  OpenAiRealtimeFailureKind.transientOpenAiError
+            ? 'OpenAI temporarily unavailable'
             : 'Live translation stopped',
       _ => 'Live translation needs attention',
     };
@@ -1464,6 +1469,11 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
         state.realtimeRecoveryAction ==
                 OpenAiRealtimeRecoveryAction.unsupportedLanguage
             ? 'This target language is not available for realtime output. Choose another target language.'
+            : state.realtimeFailureKind == OpenAiRealtimeFailureKind.rateLimited
+            ? 'OpenAI rate limits persisted after retries. Restart when quota is available.'
+            : state.realtimeFailureKind ==
+                  OpenAiRealtimeFailureKind.transientOpenAiError
+            ? 'OpenAI realtime remained unavailable after retries. Restart when ready.'
             : 'OpenAI realtime session stopped. Restart the meeting when ready.',
       _ => 'Live translation needs attention.',
     };
