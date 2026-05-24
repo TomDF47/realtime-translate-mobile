@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'src/export/local_meeting_exporter.dart';
 import 'src/language/language_support.dart';
 import 'src/mock/mock_live_translate_data.dart';
+import 'src/openai/openai_ai_chat.dart';
 import 'src/openai/openai_configuration.dart';
 import 'src/openai/openai_credential_store.dart';
 import 'src/session/live_session_controller.dart';
@@ -27,11 +28,13 @@ class LiveTranslateApp extends StatelessWidget {
     this.permissionGateway,
     this.meetingRepository,
     this.nativeShareGateway,
+    this.aiChatGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
   final LocalMeetingRepository? meetingRepository;
   final NativeShareGateway? nativeShareGateway;
+  final AiChatGateway? aiChatGateway;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +46,7 @@ class LiveTranslateApp extends StatelessWidget {
         permissionGateway: permissionGateway,
         meetingRepository: meetingRepository,
         nativeShareGateway: nativeShareGateway,
+        aiChatGateway: aiChatGateway,
       ),
     );
   }
@@ -222,11 +226,13 @@ class LiveTranslateHome extends StatefulWidget {
     this.permissionGateway,
     this.meetingRepository,
     this.nativeShareGateway,
+    this.aiChatGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
   final LocalMeetingRepository? meetingRepository;
   final NativeShareGateway? nativeShareGateway;
+  final AiChatGateway? aiChatGateway;
 
   @override
   State<LiveTranslateHome> createState() => _LiveTranslateHomeState();
@@ -238,6 +244,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   late final LocalMeetingRepository _meetingRepository;
   late final OpenAiCredentialStore _openAiCredentialStore;
   late final NativeShareGateway _nativeShareGateway;
+  late final AiChatGateway _aiChatGateway;
   _AppSurface _surface = _AppSurface.setup;
   List<StoredMeeting> _storedMeetings = const [];
   OpenAiCredentialStatus _openAiCredentialStatus =
@@ -261,6 +268,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
     _nativeShareGateway =
         widget.nativeShareGateway ?? const MethodChannelNativeShareGateway();
+    _aiChatGateway = widget.aiChatGateway ?? OpenAiResponsesAiChatGateway();
     unawaited(_loadStoredMeetings());
     unawaited(_loadOpenAiCredentialStatus());
   }
@@ -529,7 +537,13 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _AssistantSheet(scope: scope),
+      builder: (context) => _AssistantSheet(
+        scope: scope,
+        repository: _meetingRepository,
+        credentialStore: _openAiCredentialStore,
+        aiChatGateway: _aiChatGateway,
+        activeMeeting: _activeMeeting,
+      ),
     );
   }
 
@@ -560,6 +574,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       backgroundColor: Colors.transparent,
       builder: (context) => _MeetingHistorySheet(
         meetings: _storedMeetings,
+        onOpenAllMeetingsAssistant: () {
+          Navigator.of(context).pop();
+          _showAssistantSheet(AiChatScope.allMeetings);
+        },
         onOpenMeeting: (meeting) {
           Navigator.of(context).pop();
           unawaited(_continueMeeting(meeting));
@@ -1246,100 +1264,304 @@ class _LanguageOptionRow extends StatelessWidget {
   }
 }
 
-class _AssistantSheet extends StatelessWidget {
-  const _AssistantSheet({required this.scope});
+class _AssistantSheet extends StatefulWidget {
+  const _AssistantSheet({
+    required this.scope,
+    required this.repository,
+    required this.credentialStore,
+    required this.aiChatGateway,
+    required this.activeMeeting,
+  });
 
   final AiChatScope scope;
+  final LocalMeetingRepository repository;
+  final OpenAiCredentialStore credentialStore;
+  final AiChatGateway aiChatGateway;
+  final StoredMeeting? activeMeeting;
+
+  @override
+  State<_AssistantSheet> createState() => _AssistantSheetState();
+}
+
+class _AssistantSheetState extends State<_AssistantSheet> {
+  final TextEditingController _promptController = TextEditingController();
+  AiChatContext? _context;
+  bool _isLoadingContext = true;
+  bool _isSending = false;
+  String? _statusLabel;
+  String? _errorLabel;
+  final List<_ChatBubbleData> _bubbles = [];
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadContext());
+  }
+
+  @override
+  void dispose() {
+    _promptController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadContext() async {
+    final snapshot = await widget.repository.loadSnapshot();
+    final context = AiChatContextBuilder.fromSnapshot(
+      scope: widget.scope,
+      snapshot: snapshot,
+      activeMeeting: widget.activeMeeting,
+    );
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _context = context;
+      _isLoadingContext = false;
+      _statusLabel = context.hasTranscriptContext
+          ? 'Ready to answer from ${context.transcriptEntryCount} local transcript lines.'
+          : 'No local transcript lines are available for this scope yet.';
+    });
+  }
+
+  void _usePrompt(PromptChipData prompt) {
+    setState(() {
+      _promptController.text = prompt.label;
+      _promptController.selection = TextSelection.collapsed(
+        offset: prompt.label.length,
+      );
+      _errorLabel = null;
+    });
+  }
+
+  Future<void> _sendPrompt() async {
+    final prompt = _promptController.text.trim();
+    final context = _context;
+    if (prompt.isEmpty) {
+      setState(() => _errorLabel = 'Enter a question before sending.');
+      return;
+    }
+
+    if (_isLoadingContext || context == null) {
+      setState(() => _errorLabel = 'Local meeting context is still loading.');
+      return;
+    }
+
+    if (!context.hasTranscriptContext) {
+      setState(
+        () => _errorLabel =
+            'No local transcript lines are available for this scope yet.',
+      );
+      return;
+    }
+
+    final credential = await widget.credentialStore
+        .readCredentialForNetworkUse();
+    if (credential == null) {
+      setState(
+        () => _errorLabel = 'OpenAI setup is required before AI chat can run.',
+      );
+      return;
+    }
+
+    setState(() {
+      _isSending = true;
+      _errorLabel = null;
+      _statusLabel = 'Sending direct OpenAI request from this phone.';
+      _bubbles.add(
+        _ChatBubbleData(
+          label: prompt,
+          timestamp: _timeLabel(DateTime.now()),
+          isUser: true,
+        ),
+      );
+      _promptController.clear();
+    });
+
+    try {
+      final answer = await widget.aiChatGateway.ask(
+        request: AiChatRequest(prompt: prompt, context: context),
+        credential: credential,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _bubbles.add(
+          _ChatBubbleData(
+            label: answer.text,
+            timestamp: _timeLabel(answer.generatedAt),
+          ),
+        );
+        _statusLabel = 'Answer generated from ${context.scope.label}.';
+      });
+    } on AiChatCredentialException {
+      if (mounted) {
+        setState(
+          () => _errorLabel =
+              'OpenAI rejected the saved credential. Update OpenAI setup and try again.',
+        );
+      }
+    } on AiChatNetworkException {
+      if (mounted) {
+        setState(
+          () => _errorLabel =
+              'Could not reach OpenAI from this phone. Check connectivity and try again.',
+        );
+      }
+    } on AiChatException {
+      if (mounted) {
+        setState(
+          () => _errorLabel =
+              'AI chat could not complete. Try again after checking OpenAI setup.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
     return _SheetFrame(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SheetHandle(),
-          Row(
-            children: [
-              const Icon(Icons.auto_awesome_rounded, color: AppColors.teal),
-              const SizedBox(width: AppSpacing.sm),
-              Text('AI Chat', style: AppTextStyles.title(textTheme)),
-              const Spacer(),
-              IconButton(
-                tooltip: 'Close AI chat',
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          AiChatScopePill(scope: scope),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'I answer from the selected local meeting scope.',
-            style: AppTextStyles.body(textTheme),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Align(
-            alignment: Alignment.centerRight,
-            child: _ChatBubble(
-              label: 'What did they agree about the timeline?',
-              timestamp: '10:42 AM',
-              isUser: true,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _SheetHandle(),
+            Row(
+              children: [
+                const Icon(Icons.auto_awesome_rounded, color: AppColors.teal),
+                const SizedBox(width: AppSpacing.sm),
+                Text('AI Chat', style: AppTextStyles.title(textTheme)),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Close AI chat',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          const _ChatBubble(
-            label:
-                'They agreed to meet on Tuesday at 10 AM (10:37 AM) and review the deliverables and project timeline (10:38 AM).',
-            timestamp: '10:42 AM',
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              IconButton(
-                tooltip: 'Helpful',
-                onPressed: () {},
-                icon: const Icon(Icons.thumb_up_alt_outlined),
-              ),
-              IconButton(
-                tooltip: 'Not helpful',
-                onPressed: () {},
-                icon: const Icon(Icons.thumb_down_alt_outlined),
-              ),
+            const SizedBox(height: AppSpacing.xs),
+            AiChatScopePill(scope: widget.scope),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              widget.scope == AiChatScope.thisMeeting
+                  ? 'I answer from this local meeting transcript.'
+                  : 'I answer across local meeting history.',
+              style: AppTextStyles.body(textTheme),
+            ),
+            if (_statusLabel != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(_statusLabel!, style: AppTextStyles.compact(textTheme)),
             ],
-          ),
-          Wrap(
-            spacing: AppSpacing.xs,
-            runSpacing: AppSpacing.xs,
-            children: [
-              for (final prompt in MockLiveTranslateData.assistantPrompts)
-                PromptActionChip(prompt: prompt, onPressed: () {}),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          TextField(
-            decoration: InputDecoration(
-              hintText: scope.inputPlaceholder,
-              suffixIcon: IconButton.filled(
-                tooltip: 'Send AI chat prompt',
-                onPressed: () {},
-                icon: const Icon(Icons.arrow_upward_rounded),
+            const SizedBox(height: AppSpacing.md),
+            if (_bubbles.isEmpty)
+              Text(
+                'Ask a question to use only the selected local transcript context.',
+                style: AppTextStyles.compact(textTheme),
+              )
+            else
+              for (final bubble in _bubbles) ...[
+                Align(
+                  alignment: bubble.isUser
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: _ChatBubble(
+                    label: bubble.label,
+                    timestamp: bubble.timestamp,
+                    isUser: bubble.isUser,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
+            if (_bubbles.isNotEmpty && !_bubbles.last.isUser)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    tooltip: 'Helpful',
+                    onPressed: () {},
+                    icon: const Icon(Icons.thumb_up_alt_outlined),
+                  ),
+                  IconButton(
+                    tooltip: 'Not helpful',
+                    onPressed: () {},
+                    icon: const Icon(Icons.thumb_down_alt_outlined),
+                  ),
+                ],
               ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(AppRadii.card),
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final prompt in MockLiveTranslateData.assistantPrompts)
+                  PromptActionChip(
+                    prompt: prompt,
+                    onPressed: () => _usePrompt(prompt),
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _promptController,
+              enabled: !_isSending,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _sendPrompt(),
+              decoration: InputDecoration(
+                hintText: widget.scope.inputPlaceholder,
+                suffixIcon: IconButton.filled(
+                  tooltip: 'Send AI chat prompt',
+                  onPressed: _isSending ? null : _sendPrompt,
+                  icon: _isSending
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.arrow_upward_rounded),
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadii.card),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          PrivacyNote(label: scope.privacyLabel, icon: Icons.lock_outline),
-        ],
+            if (_errorLabel != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                _errorLabel!,
+                style: AppTextStyles.compact(
+                  textTheme,
+                ).copyWith(color: AppColors.red),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.sm),
+            PrivacyNote(
+              label: widget.scope.privacyLabel,
+              icon: Icons.lock_outline,
+            ),
+          ],
+        ),
       ),
     );
   }
+}
+
+class _ChatBubbleData {
+  const _ChatBubbleData({
+    required this.label,
+    required this.timestamp,
+    this.isUser = false,
+  });
+
+  final String label;
+  final String timestamp;
+  final bool isUser;
 }
 
 class _ChatBubble extends StatelessWidget {
@@ -1422,11 +1644,13 @@ class _MeetingMenuSheet extends StatelessWidget {
 class _MeetingHistorySheet extends StatelessWidget {
   const _MeetingHistorySheet({
     required this.meetings,
+    required this.onOpenAllMeetingsAssistant,
     required this.onOpenMeeting,
     required this.onDeleteMeeting,
   });
 
   final List<StoredMeeting> meetings;
+  final VoidCallback onOpenAllMeetingsAssistant;
   final ValueChanged<StoredMeeting> onOpenMeeting;
   final Future<void> Function(StoredMeeting meeting) onDeleteMeeting;
 
@@ -1441,6 +1665,12 @@ class _MeetingHistorySheet extends StatelessWidget {
           Text(
             'Meeting history',
             style: AppTextStyles.title(Theme.of(context).textTheme),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _SheetAction(
+            icon: Icons.auto_awesome_rounded,
+            label: 'Ask across meetings',
+            onTap: onOpenAllMeetingsAssistant,
           ),
           const SizedBox(height: AppSpacing.sm),
           if (meetings.isEmpty)

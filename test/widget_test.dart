@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
 import 'package:realtime_translate_mobile/src/export/local_meeting_exporter.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
@@ -71,11 +72,15 @@ void main() {
     tester,
   ) async {
     final repository = _testRepository();
+    final aiChatGateway = _FakeAiChatGateway(
+      'They agreed to meet on Tuesday at 10 AM (10:37 AM).',
+    );
     await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
+        aiChatGateway: aiChatGateway,
       ),
     );
 
@@ -106,11 +111,66 @@ void main() {
 
     expect(find.text('AI Chat'), findsOneWidget);
     expect(find.text('This meeting'), findsOneWidget);
+    expect(find.textContaining('Ready to answer from'), findsOneWidget);
+    await tester.enterText(
+      find.byType(TextField).last,
+      'What did they agree about the timeline?',
+    );
+    await tester.tap(find.byTooltip('Send AI chat prompt'));
+    await tester.pumpAndSettle();
+
     expect(
-      find.text('What did they agree about the timeline?'),
+      find.textContaining('They agreed to meet on Tuesday at 10 AM'),
       findsOneWidget,
     );
-    expect(find.textContaining('10:37 AM'), findsWidgets);
+    expect(
+      aiChatGateway.requests.single.context.scope,
+      AiChatScope.thisMeeting,
+    );
+    expect(
+      aiChatGateway.requests.single.context.transcriptEntryCount,
+      greaterThan(0),
+    );
+  });
+
+  testWidgets('opens all-meetings AI chat from meeting history', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final aiChatGateway = _FakeAiChatGateway(
+      'Across meetings, the timeline was agreed at 10:37 AM.',
+    );
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        aiChatGateway: aiChatGateway,
+      ),
+    );
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Open menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Meeting history'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ask across meetings'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AI Chat'), findsOneWidget);
+    expect(find.text('All meetings'), findsOneWidget);
+    expect(find.text('Ask across meetings...'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).last, 'Summarise timeline');
+    await tester.tap(find.byTooltip('Send AI chat prompt'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Across meetings'), findsOneWidget);
+    expect(
+      aiChatGateway.requests.single.context.scope,
+      AiChatScope.allMeetings,
+    );
   });
 
   testWidgets('opens amber paused read-aloud and export surfaces', (
@@ -309,5 +369,25 @@ class _FakeNativeShareGateway implements NativeShareGateway {
   ) async {
     documents.add(document);
     return NativeShareResult.launched;
+  }
+}
+
+class _FakeAiChatGateway implements AiChatGateway {
+  _FakeAiChatGateway(this.answer);
+
+  final String answer;
+  final List<AiChatRequest> requests = [];
+
+  @override
+  Future<AiChatAnswer> ask({
+    required AiChatRequest request,
+    required String credential,
+  }) async {
+    requests.add(request);
+    expect(credential, 'placeholder-local-openai-credential');
+    return AiChatAnswer(
+      text: answer,
+      generatedAt: DateTime(2026, 5, 24, 2, 42),
+    );
   }
 }

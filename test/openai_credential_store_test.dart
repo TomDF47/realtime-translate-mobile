@@ -11,6 +11,8 @@ void main() {
       OpenAiConfiguration.translationFallbackModel,
       'gpt-realtime-translate',
     );
+    expect(OpenAiConfiguration.aiChatModel, 'gpt-5.5');
+    expect(OpenAiConfiguration.aiChatReasoningEffort, 'medium');
     expect(OpenAiConfiguration.summaryModel, 'gpt-5.5');
     expect(OpenAiConfiguration.summaryReasoningEffort, 'xhigh');
     expect(

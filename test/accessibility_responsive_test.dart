@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
@@ -19,6 +20,7 @@ void main() {
         LiveTranslateApp(
           permissionGateway: _FakePermissionGateway.granted(),
           meetingRepository: repository,
+          aiChatGateway: _FakeAiChatGateway(),
         ),
       );
 
@@ -84,9 +86,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byTooltip('Close AI chat'), findsOneWidget);
+      expect(find.byTooltip('Send AI chat prompt'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).last, 'What changed?');
+      await tester.tap(find.byTooltip('Send AI chat prompt'));
+      await tester.pumpAndSettle();
+
       expect(find.byTooltip('Helpful'), findsOneWidget);
       expect(find.byTooltip('Not helpful'), findsOneWidget);
-      expect(find.byTooltip('Send AI chat prompt'), findsOneWidget);
       expect(
         find.text('Responses are based on this local meeting only.'),
         findsOneWidget,
@@ -189,4 +195,17 @@ class _FakePermissionGateway implements MicrophonePermissionGateway {
 
   @override
   Future<MicrophonePermissionStatus> request() async => _status;
+}
+
+class _FakeAiChatGateway implements AiChatGateway {
+  @override
+  Future<AiChatAnswer> ask({
+    required AiChatRequest request,
+    required String credential,
+  }) async {
+    return AiChatAnswer(
+      text: 'The local transcript contains a timeline update (10:37 AM).',
+      generatedAt: DateTime(2026, 5, 24, 2, 42),
+    );
+  }
 }

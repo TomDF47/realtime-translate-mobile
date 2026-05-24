@@ -164,6 +164,8 @@ Current implementation note: language support was verified on 2026-05-24 against
 - Answers should cite local transcript timestamps when possible.
 - AI chat must handle empty transcript, no selected meeting, offline, unsupported, credential-invalid, and model/API error states.
 
+Current implementation note: the Flutter app has a scoped AI chat sheet for `This meeting`, an `All meetings` entry from meeting history, local transcript context assembly, a fakeable direct OpenAI Responses gateway, and tests that verify `store: false` request construction without credential leakage. Live API-key smoke has not run yet; #8 remains open until real direct OpenAI AI chat is validated and remaining error states are complete.
+
 ## Email Export Requirements
 
 - User can choose `Transcript`, `Summary`, or `Both` from a dropdown/select before exporting.
