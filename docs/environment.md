@@ -56,6 +56,7 @@ Installed APK emulator E2E, only when `/home/tom/.openclaw/secrets/realtime-tran
 export PATH=/home/tom/.local/share/flutter/bin:$PATH
 flutter build apk --debug
 scripts/build_debug_apk_artifact.sh
+scripts/android_emulator_e2e.sh --apk /tmp/<debug-apk-name>.apk --verify-credential-reset
 scripts/android_emulator_e2e.sh --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
@@ -64,7 +65,7 @@ scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 
 `scripts/build_debug_apk_artifact.sh` copies the debug APK to `/tmp` with a commit-and-timestamp filename and writes a `.sha256` sidecar. It does not read the local OpenAI secret file and is suitable for local APK handoff when live OpenAI quota is blocked.
 
-The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
+The script starts or reuses `Pixel_9_API_36_Play` in the background, writes emulator logs to `/tmp/realtime-translate-emulator.log`, drives the start/setup/permission/live-listening/`This meeting` AI chat path through UIAutomator when a live credential is requested, can run a non-live credential save/remove/reset gate with `--verify-credential-reset`, stores screenshots and UI XML under `/tmp/realtime-translate-mobile-e2e`, and clears `com.tomdf47.realtime_translate_mobile` data on exit.
 
 The `--debug-live-events` mode requires the debug Dart define shown above. It is an installed-app coordinator/storage/playback proof that reports only row/audio counts; it does not use a production hook, live OpenAI speech, emulator microphone input, or audible speaker validation.
 
@@ -117,6 +118,14 @@ Repeatable installed-app E2E sequence:
 export PATH=/home/tom/.local/share/flutter/bin:$PATH
 flutter build apk --debug
 scripts/android_emulator_e2e.sh --with-live-credential
+```
+
+Non-live installed credential reset validation:
+
+```bash
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+flutter build apk --debug
+scripts/android_emulator_e2e.sh --verify-credential-reset
 ```
 
 For a screenshot artifact during issue closure, write it outside the repo unless the issue explicitly asks for committed evidence:

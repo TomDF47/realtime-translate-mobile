@@ -50,7 +50,7 @@ void main() {
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
 
-    expect(find.text('OpenAI setup required'), findsOneWidget);
+    expect(find.text('OpenAI setup required'), findsWidgets);
     expect(find.text('Open OpenAI setup'), findsOneWidget);
 
     await tester.tap(find.text('Open OpenAI setup'));
@@ -72,6 +72,18 @@ void main() {
         repository: repository,
       ).readCredentialForNetworkUse(),
       'placeholder-local-openai-credential',
+    );
+
+    await tester.tap(find.text('Remove credential from this device'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('OpenAI setup required'), findsWidgets);
+    expect(find.text('Remove credential from this device'), findsNothing);
+    expect(
+      await OpenAiCredentialStore(
+        repository: repository,
+      ).readCredentialForNetworkUse(),
+      isNull,
     );
   });
 

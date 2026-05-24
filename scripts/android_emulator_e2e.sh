@@ -13,10 +13,11 @@ SECRET_FILE="${OPENAI_SECRET_FILE:-$DEFAULT_SECRET_FILE}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-$DEFAULT_ARTIFACT_DIR}"
 USE_LIVE_CREDENTIAL=0
 RUN_DEBUG_LIVE_EVENTS=0
+VERIFY_CREDENTIAL_RESET=0
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--debug-live-events] [--apk PATH]
+Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--debug-live-events] [--verify-credential-reset] [--apk PATH]
 
 Installs the debug APK on Pixel_9_API_36_Play or an already-connected Android
 emulator, drives the phone-local setup flow with UIAutomator/adb, writes
@@ -29,6 +30,10 @@ Options:
   --debug-live-events     After reaching the live surface, drive the opt-in
                           debug-only generated-event proof. Build the APK with
                           --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true first.
+  --verify-credential-reset
+                          Save a non-secret placeholder credential through the
+                          setup UI, remove it, and verify live start returns to
+                          the setup-required gate. Does not read live secrets.
   --apk PATH              APK to install. Defaults to build/app/outputs/flutter-apk/app-debug.apk.
   --help                  Show this help.
 USAGE
@@ -42,6 +47,10 @@ while (($#)); do
       ;;
     --debug-live-events)
       RUN_DEBUG_LIVE_EVENTS=1
+      shift
+      ;;
+    --verify-credential-reset)
+      VERIFY_CREDENTIAL_RESET=1
       shift
       ;;
     --apk)
@@ -233,6 +242,19 @@ enter_secret_text() {
   done
 }
 
+enter_adb_text() {
+  local value="$1"
+  local chunk_size=12
+  local index=0
+  local chunk
+  while ((index < ${#value})); do
+    chunk="${value:index:chunk_size}"
+    adb_cmd shell input text "$chunk"
+    index=$((index + chunk_size))
+    sleep 0.1
+  done
+}
+
 tap_permission_allow_if_present() {
   for label in \
     "While using the app" \
@@ -289,6 +311,39 @@ tap_ui "Start new meeting"
 wait_for_ui "OpenAI setup required" 30
 screencap_to "$ARTIFACT_DIR/02-setup-required.png"
 dump_ui_to "$ARTIFACT_DIR/02-setup-required.xml"
+
+if ((VERIFY_CREDENTIAL_RESET)); then
+  log "Verifying credential reset UX with a non-secret placeholder"
+  tap_ui "Open OpenAI setup"
+  wait_for_ui "OpenAI setup" 20
+  tap_first_edit_text
+  enter_adb_text "placeholderlocalcredential"
+  sleep 1
+  adb_cmd shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+  wait_for_ui "Save encrypted credential" 10
+  tap_ui "Save encrypted credential"
+  wait_for_ui "OpenAI credential stored on this device" 30
+  if dump_ui | grep -Fq "placeholderlocalcredential"; then
+    fail "placeholder credential was visible after save"
+  fi
+  screencap_to "$ARTIFACT_DIR/03-credential-reset-saved.png"
+  dump_ui_to "$ARTIFACT_DIR/03-credential-reset-saved.xml"
+  tap_ui "Remove credential from this device"
+  wait_for_ui "OpenAI setup required" 30
+  if dump_ui | grep -Fq "Remove credential from this device"; then
+    fail "credential removal button remained visible after reset"
+  fi
+  screencap_to "$ARTIFACT_DIR/04-credential-reset-removed.png"
+  dump_ui_to "$ARTIFACT_DIR/04-credential-reset-removed.xml"
+  tap_ui "Close OpenAI setup"
+  wait_for_ui "OpenAI setup required" 10
+  tap_ui "Back to start"
+  wait_for_ui "Start new meeting" 15
+  tap_ui "Start new meeting"
+  wait_for_ui "OpenAI setup required" 30
+  screencap_to "$ARTIFACT_DIR/05-credential-reset-gate.png"
+  dump_ui_to "$ARTIFACT_DIR/05-credential-reset-gate.xml"
+fi
 
 if ((USE_LIVE_CREDENTIAL)); then
   log "Saving live credential through the app UI without printing it"
