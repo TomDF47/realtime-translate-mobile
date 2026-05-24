@@ -23,32 +23,59 @@ void main() {
     expect(document.toMethodArguments(), containsPair('type', 'transcript'));
   });
 
-  test(
-    'does not produce fake summary exports before summary generation lands',
-    () {
-      final meeting = _meeting();
+  test('requires generated summary text before summary exports', () {
+    final meeting = _meeting();
 
-      expect(
-        () => LocalMeetingExportComposer.compose(
-          meeting: meeting,
-          type: ExportType.summary,
-          recipients: const ['recipient@example.com'],
+    expect(
+      () => LocalMeetingExportComposer.compose(
+        meeting: meeting,
+        type: ExportType.summary,
+        recipients: const ['recipient@example.com'],
+      ),
+      throwsA(isA<SummaryExportUnavailableException>()),
+    );
+    expect(
+      () => LocalMeetingExportComposer.compose(
+        meeting: meeting,
+        type: ExportType.both,
+        recipients: const ['recipient@example.com'],
+      ),
+      throwsA(isA<SummaryExportUnavailableException>()),
+    );
+
+    final summaryDocument = LocalMeetingExportComposer.compose(
+      meeting: meeting,
+      type: ExportType.summary,
+      recipients: const ['recipient@example.com'],
+      summaryText:
+          'Executive Summary\nThe team agreed on the timeline.\n\nActions\n- Share the draft.',
+    );
+    expect(summaryDocument.type, ExportType.summary);
+    expect(summaryDocument.body, contains('Summary'));
+    expect(summaryDocument.body, contains('The team agreed on the timeline'));
+    expect(summaryDocument.body, isNot(contains('Transcript\n\n[')));
+
+    final bothDocument = LocalMeetingExportComposer.compose(
+      meeting: _meeting(
+        summaryMetadata: const StoredSummaryMetadata(
+          available: true,
+          updatedAt: null,
+          modelIntent: 'gpt-5.5',
+          transcriptEntryCount: 1,
+          text:
+              'Executive Summary\nThe team agreed on the timeline.\n\nActions\n- Share the draft.',
         ),
-        throwsA(isA<SummaryExportUnavailableException>()),
-      );
-      expect(
-        () => LocalMeetingExportComposer.compose(
-          meeting: meeting,
-          type: ExportType.both,
-          recipients: const ['recipient@example.com'],
-        ),
-        throwsA(isA<SummaryExportUnavailableException>()),
-      );
-    },
-  );
+      ),
+      type: ExportType.both,
+      recipients: const ['recipient@example.com'],
+    );
+    expect(bothDocument.body, contains('Summary'));
+    expect(bothDocument.body, contains('Transcript'));
+    expect(bothDocument.body, contains('Original: ¿Podemos reunirnos?'));
+  });
 }
 
-StoredMeeting _meeting() {
+StoredMeeting _meeting({StoredSummaryMetadata? summaryMetadata}) {
   final timestamp = DateTime.utc(2026, 5, 24, 2, 37);
   return StoredMeeting(
     id: 'meeting-1',
@@ -71,6 +98,6 @@ StoredMeeting _meeting() {
         playbackState: 'playable',
       ),
     ],
-    summaryMetadata: const StoredSummaryMetadata.empty(),
+    summaryMetadata: summaryMetadata ?? const StoredSummaryMetadata.empty(),
   );
 }

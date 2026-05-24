@@ -65,30 +65,91 @@ abstract final class LocalMeetingExportComposer {
     required StoredMeeting meeting,
     required ExportType type,
     required List<String> recipients,
+    String? summaryText,
   }) {
-    if (type != ExportType.transcript) {
-      throw const SummaryExportUnavailableException();
-    }
+    final storedSummary = meeting.summaryMetadata.text.trim();
+    final effectiveSummary = (summaryText ?? storedSummary).trim();
 
     return MeetingExportDocument(
       type: type,
       subject: 'Live Translate - ${meeting.title}',
-      body: _transcriptBody(meeting),
+      body: switch (type) {
+        ExportType.transcript => _transcriptBody(meeting),
+        ExportType.summary => _summaryBody(meeting, effectiveSummary),
+        ExportType.both => _summaryWithTranscriptBody(
+          meeting,
+          effectiveSummary,
+        ),
+      },
       recipients: recipients,
     );
   }
 
+  static String _summaryBody(StoredMeeting meeting, String summaryText) {
+    if (summaryText.trim().isEmpty) {
+      throw const SummaryExportUnavailableException();
+    }
+
+    final lines = <String>[
+      ..._meetingHeader(meeting),
+      '',
+      'Summary',
+      '',
+      summaryText.trim(),
+      '',
+      _localPreparationNotice,
+    ];
+    return lines.join('\n');
+  }
+
+  static String _summaryWithTranscriptBody(
+    StoredMeeting meeting,
+    String summaryText,
+  ) {
+    if (summaryText.trim().isEmpty) {
+      throw const SummaryExportUnavailableException();
+    }
+
+    final lines = <String>[
+      ..._meetingHeader(meeting),
+      '',
+      'Summary',
+      '',
+      summaryText.trim(),
+      '',
+      'Transcript',
+      '',
+      ..._transcriptLines(meeting),
+      '',
+      _localPreparationNotice,
+    ];
+    return lines.join('\n');
+  }
+
   static String _transcriptBody(StoredMeeting meeting) {
     final lines = <String>[
+      ..._meetingHeader(meeting),
+      '',
+      'Transcript',
+      '',
+      ..._transcriptLines(meeting),
+      '',
+      _localPreparationNotice,
+    ];
+    return lines.join('\n');
+  }
+
+  static List<String> _meetingHeader(StoredMeeting meeting) {
+    return [
       meeting.title,
       'Route: ${meeting.sourceLanguageLabel} -> ${meeting.targetLanguageLabel}',
       'Created: ${_timeLabel(meeting.createdAt)}',
       'Last activity: ${_timeLabel(meeting.updatedAt)}',
-      '',
-      'Transcript',
-      '',
     ];
+  }
 
+  static List<String> _transcriptLines(StoredMeeting meeting) {
+    final lines = <String>[];
     if (meeting.transcriptEntries.isEmpty) {
       lines.add('No transcript lines are stored for this meeting yet.');
     } else {
@@ -104,11 +165,11 @@ abstract final class LocalMeetingExportComposer {
       }
     }
 
-    lines.add(
-      'Prepared locally on this device. Review before sending from your chosen mail or share app.',
-    );
-    return lines.join('\n');
+    return lines;
   }
+
+  static const _localPreparationNotice =
+      'Prepared locally on this device. Review before sending from your chosen mail or share app.';
 
   static String _timeLabel(DateTime value) {
     final local = value.toLocal();

@@ -8,6 +8,7 @@ import 'src/mock/mock_live_translate_data.dart';
 import 'src/openai/openai_ai_chat.dart';
 import 'src/openai/openai_configuration.dart';
 import 'src/openai/openai_credential_store.dart';
+import 'src/openai/openai_meeting_summary.dart';
 import 'src/session/live_session_controller.dart';
 import 'src/session/microphone_permission.dart';
 import 'src/storage/encrypted_local_store.dart';
@@ -29,12 +30,14 @@ class LiveTranslateApp extends StatelessWidget {
     this.meetingRepository,
     this.nativeShareGateway,
     this.aiChatGateway,
+    this.meetingSummaryGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
   final LocalMeetingRepository? meetingRepository;
   final NativeShareGateway? nativeShareGateway;
   final AiChatGateway? aiChatGateway;
+  final MeetingSummaryGateway? meetingSummaryGateway;
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +50,7 @@ class LiveTranslateApp extends StatelessWidget {
         meetingRepository: meetingRepository,
         nativeShareGateway: nativeShareGateway,
         aiChatGateway: aiChatGateway,
+        meetingSummaryGateway: meetingSummaryGateway,
       ),
     );
   }
@@ -227,12 +231,14 @@ class LiveTranslateHome extends StatefulWidget {
     this.meetingRepository,
     this.nativeShareGateway,
     this.aiChatGateway,
+    this.meetingSummaryGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
   final LocalMeetingRepository? meetingRepository;
   final NativeShareGateway? nativeShareGateway;
   final AiChatGateway? aiChatGateway;
+  final MeetingSummaryGateway? meetingSummaryGateway;
 
   @override
   State<LiveTranslateHome> createState() => _LiveTranslateHomeState();
@@ -245,6 +251,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   late final OpenAiCredentialStore _openAiCredentialStore;
   late final NativeShareGateway _nativeShareGateway;
   late final AiChatGateway _aiChatGateway;
+  late final MeetingSummaryGateway _meetingSummaryGateway;
   _AppSurface _surface = _AppSurface.setup;
   List<StoredMeeting> _storedMeetings = const [];
   OpenAiCredentialStatus _openAiCredentialStatus =
@@ -269,6 +276,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     _nativeShareGateway =
         widget.nativeShareGateway ?? const MethodChannelNativeShareGateway();
     _aiChatGateway = widget.aiChatGateway ?? OpenAiResponsesAiChatGateway();
+    _meetingSummaryGateway =
+        widget.meetingSummaryGateway ?? OpenAiResponsesMeetingSummaryGateway();
     unawaited(_loadStoredMeetings());
     unawaited(_loadOpenAiCredentialStatus());
   }
@@ -614,8 +623,14 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       backgroundColor: Colors.transparent,
       builder: (context) => _ExportSheet(
         repository: _meetingRepository,
+        credentialStore: _openAiCredentialStore,
         nativeShareGateway: _nativeShareGateway,
+        meetingSummaryGateway: _meetingSummaryGateway,
         meeting: _activeMeeting,
+        onMeetingUpdated: (meeting) async {
+          _activeMeetingId = meeting.id;
+          await _loadStoredMeetings();
+        },
       ),
     );
   }
@@ -1920,13 +1935,19 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
 class _ExportSheet extends StatefulWidget {
   const _ExportSheet({
     required this.repository,
+    required this.credentialStore,
     required this.nativeShareGateway,
+    required this.meetingSummaryGateway,
     required this.meeting,
+    required this.onMeetingUpdated,
   });
 
   final LocalMeetingRepository repository;
+  final OpenAiCredentialStore credentialStore;
   final NativeShareGateway nativeShareGateway;
+  final MeetingSummaryGateway meetingSummaryGateway;
   final StoredMeeting? meeting;
+  final Future<void> Function(StoredMeeting meeting) onMeetingUpdated;
 
   @override
   State<_ExportSheet> createState() => _ExportSheetState();
@@ -1935,8 +1956,10 @@ class _ExportSheet extends StatefulWidget {
 class _ExportSheetState extends State<_ExportSheet> {
   ExportType _selectedType = ExportType.transcript;
   final TextEditingController _recipientController = TextEditingController();
+  StoredMeeting? _meeting;
   Map<String, bool> _recipients = const {};
   bool _isLoadingRecipients = true;
+  bool _isGeneratingSummary = false;
   bool _isSharing = false;
   String? _statusLabel;
   String? _errorLabel;
@@ -1944,6 +1967,7 @@ class _ExportSheetState extends State<_ExportSheet> {
   @override
   void initState() {
     super.initState();
+    _meeting = widget.meeting;
     unawaited(_loadRecipientPreferences());
   }
 
@@ -1960,14 +1984,15 @@ class _ExportSheetState extends State<_ExportSheet> {
     ];
   }
 
-  bool get _summaryExportPending => _selectedType != ExportType.transcript;
+  bool get _summaryRequired => _selectedType != ExportType.transcript;
+
+  bool get _isBusy => _isGeneratingSummary || _isSharing;
 
   bool get _canOpenShareSheet {
     return !_isLoadingRecipients &&
-        !_isSharing &&
-        widget.meeting != null &&
-        _selectedRecipients.isNotEmpty &&
-        !_summaryExportPending;
+        !_isBusy &&
+        _meeting != null &&
+        _selectedRecipients.isNotEmpty;
   }
 
   Future<void> _loadRecipientPreferences() async {
@@ -2034,18 +2059,10 @@ class _ExportSheetState extends State<_ExportSheet> {
   }
 
   Future<void> _openShareSheet() async {
-    final meeting = widget.meeting;
+    var meeting = _meeting;
     if (meeting == null) {
       setState(
         () => _errorLabel = 'Start or select a meeting before exporting.',
-      );
-      return;
-    }
-
-    if (_summaryExportPending) {
-      setState(
-        () => _errorLabel =
-            'Summary export will enable after direct OpenAI summary generation lands.',
       );
       return;
     }
@@ -2058,14 +2075,54 @@ class _ExportSheetState extends State<_ExportSheet> {
       return;
     }
 
+    final needsSummary = _summaryRequired && !_hasFreshSummary(meeting);
     setState(() {
-      _isSharing = true;
+      _isGeneratingSummary = needsSummary;
+      _isSharing = !_isGeneratingSummary;
       _errorLabel = null;
       _statusLabel = null;
     });
 
     try {
       await _saveRecipientPreferences();
+      if (_summaryRequired && !_hasFreshSummary(meeting)) {
+        final credential = await widget.credentialStore
+            .readCredentialForNetworkUse();
+        if (credential == null) {
+          if (mounted) {
+            setState(
+              () => _errorLabel =
+                  'OpenAI setup is required before generating a summary.',
+            );
+          }
+          return;
+        }
+
+        final summary = await widget.meetingSummaryGateway.generate(
+          request: MeetingSummaryRequest(meeting: meeting),
+          credential: credential,
+        );
+        final updatedMeeting = await widget.repository.saveMeetingSummary(
+          meetingId: meeting.id,
+          summaryMetadata: summary.toMetadata(),
+          updatedAt: summary.generatedAt,
+        );
+        if (updatedMeeting != null) {
+          meeting = updatedMeeting;
+          await widget.onMeetingUpdated(updatedMeeting);
+          if (!mounted) {
+            return;
+          }
+
+          setState(() {
+            _meeting = updatedMeeting;
+            _isGeneratingSummary = false;
+            _isSharing = true;
+            _statusLabel = 'Summary generated and stored on this device.';
+          });
+        }
+      }
+
       final document = LocalMeetingExportComposer.compose(
         meeting: meeting,
         type: _selectedType,
@@ -2090,7 +2147,35 @@ class _ExportSheetState extends State<_ExportSheet> {
       if (mounted) {
         setState(
           () => _errorLabel =
-              'Summary export will enable after direct OpenAI summary generation lands.',
+              'Generate a summary before exporting this selection.',
+        );
+      }
+    } on MeetingSummaryCredentialException {
+      if (mounted) {
+        setState(
+          () => _errorLabel =
+              'OpenAI rejected the stored credential. Update OpenAI setup and try again.',
+        );
+      }
+    } on MeetingSummaryNetworkException {
+      if (mounted) {
+        setState(
+          () => _errorLabel =
+              'Could not reach OpenAI from this device. Try again when online.',
+        );
+      }
+    } on MeetingSummaryMalformedResponseException {
+      if (mounted) {
+        setState(
+          () => _errorLabel =
+              'OpenAI returned an unreadable summary. Try again before exporting.',
+        );
+      }
+    } on MeetingSummaryRequestException {
+      if (mounted) {
+        setState(
+          () => _errorLabel =
+              'OpenAI could not generate the summary for this meeting.',
         );
       }
     } catch (_) {
@@ -2102,15 +2187,25 @@ class _ExportSheetState extends State<_ExportSheet> {
       }
     } finally {
       if (mounted) {
-        setState(() => _isSharing = false);
+        setState(() {
+          _isGeneratingSummary = false;
+          _isSharing = false;
+        });
       }
     }
+  }
+
+  bool _hasFreshSummary(StoredMeeting meeting) {
+    final summary = meeting.summaryMetadata;
+    return summary.isUsable &&
+        summary.modelIntent == OpenAiConfiguration.summaryModel &&
+        summary.transcriptEntryCount == meeting.transcriptEntries.length;
   }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final meeting = widget.meeting;
+    final meeting = _meeting;
 
     return _SheetFrame(
       child: Column(
@@ -2154,10 +2249,12 @@ class _ExportSheetState extends State<_ExportSheet> {
               });
             },
           ),
-          if (_summaryExportPending) ...[
+          if (_summaryRequired) ...[
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Summary and Both require the direct OpenAI summary path before a local export can be prepared.',
+              meeting != null && _hasFreshSummary(meeting)
+                  ? 'A GPT-5.5 summary is stored locally for this transcript.'
+                  : 'Summary is generated by a direct OpenAI request from this device, then stored locally for review.',
               style: AppTextStyles.compact(textTheme),
             ),
           ],
@@ -2260,7 +2357,11 @@ class _ExportSheetState extends State<_ExportSheet> {
               onPressed: _canOpenShareSheet ? _openShareSheet : null,
               icon: const Icon(Icons.ios_share_rounded),
               label: Text(
-                _isSharing ? 'Opening share sheet' : 'Open share sheet',
+                _isGeneratingSummary
+                    ? 'Generating summary'
+                    : _isSharing
+                    ? 'Opening share sheet'
+                    : 'Open share sheet',
               ),
             ),
           ),

@@ -96,7 +96,7 @@ class StoredMeeting {
 
   int get transcriptCount => transcriptEntries.length;
 
-  bool get summaryAvailable => summaryMetadata.available;
+  bool get summaryAvailable => summaryMetadata.isUsable;
 
   StoredMeeting copyWith({
     String? id,
@@ -215,18 +215,39 @@ class StoredSummaryMetadata {
     required this.updatedAt,
     required this.modelIntent,
     required this.transcriptEntryCount,
+    required this.text,
   });
 
   const StoredSummaryMetadata.empty()
     : available = false,
       updatedAt = null,
       modelIntent = null,
-      transcriptEntryCount = 0;
+      transcriptEntryCount = 0,
+      text = '';
 
   final bool available;
   final DateTime? updatedAt;
   final String? modelIntent;
   final int transcriptEntryCount;
+  final String text;
+
+  bool get isUsable => available && text.trim().isNotEmpty;
+
+  StoredSummaryMetadata copyWith({
+    bool? available,
+    DateTime? updatedAt,
+    String? modelIntent,
+    int? transcriptEntryCount,
+    String? text,
+  }) {
+    return StoredSummaryMetadata(
+      available: available ?? this.available,
+      updatedAt: updatedAt ?? this.updatedAt,
+      modelIntent: modelIntent ?? this.modelIntent,
+      transcriptEntryCount: transcriptEntryCount ?? this.transcriptEntryCount,
+      text: text ?? this.text,
+    );
+  }
 
   Map<String, Object?> toJson() {
     return {
@@ -234,6 +255,7 @@ class StoredSummaryMetadata {
       'updatedAt': updatedAt?.toIso8601String(),
       'modelIntent': modelIntent,
       'transcriptEntryCount': transcriptEntryCount,
+      'text': text,
     };
   }
 
@@ -244,6 +266,7 @@ class StoredSummaryMetadata {
       modelIntent: json['modelIntent'] as String?,
       transcriptEntryCount:
           (json['transcriptEntryCount'] as num?)?.toInt() ?? 0,
+      text: json['text'] as String? ?? '',
     );
   }
 }

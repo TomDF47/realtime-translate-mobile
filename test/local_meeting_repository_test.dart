@@ -51,6 +51,46 @@ void main() {
     );
   });
 
+  test('stores generated meeting summaries locally with metadata', () async {
+    final repository = LocalMeetingRepository(
+      store: MemoryEncryptedLocalStore(),
+    );
+    final now = DateTime.utc(2026, 5, 24, 3);
+    await repository.upsertMeeting(
+      StoredMeeting(
+        id: 'meeting-1',
+        title: 'Project timeline review',
+        createdAt: now,
+        updatedAt: now,
+        sourceLanguageLabel: 'Spanish',
+        targetLanguageLabel: 'English',
+        transcriptEntries: const [],
+        summaryMetadata: const StoredSummaryMetadata.empty(),
+      ),
+    );
+
+    final updated = await repository.saveMeetingSummary(
+      meetingId: 'meeting-1',
+      updatedAt: now.add(const Duration(minutes: 5)),
+      summaryMetadata: StoredSummaryMetadata(
+        available: true,
+        updatedAt: now.add(const Duration(minutes: 5)),
+        modelIntent: 'gpt-5.5',
+        transcriptEntryCount: 0,
+        text: 'Executive Summary\nNo transcript lines are stored yet.',
+      ),
+    );
+    final snapshot = await repository.loadSnapshot();
+
+    expect(updated, isNotNull);
+    expect(snapshot.meetings.single.summaryAvailable, isTrue);
+    expect(snapshot.meetings.single.summaryMetadata.modelIntent, 'gpt-5.5');
+    expect(
+      snapshot.meetings.single.summaryMetadata.text,
+      contains('Executive Summary'),
+    );
+  });
+
   test(
     'deletes meeting history without clearing recipient preferences',
     () async {

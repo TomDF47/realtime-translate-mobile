@@ -184,6 +184,8 @@ Current implementation note: the Flutter app has a scoped AI chat sheet for `Thi
   - transcript below the summary if `Both` was selected
 - Transcript, summary, recipient addresses, and export payloads must not be logged, sent to app-owned backend infrastructure, or included in analytics/crash reports.
 
+Current implementation note: Transcript exports are prepared locally and handed to the Android share sheet. Summary and Both exports now use a fakeable direct OpenAI Responses gateway from the phone with `gpt-5.5`, `reasoning.effort: xhigh`, and `store: false`; credentials stay in the Authorization header only, generated summary text/metadata is stored only in encrypted local storage, and the share sheet opens only from the user-initiated export action. Unit/widget tests cover request construction, credential non-leakage, local summary persistence, and Summary/Both export composition. Live OpenAI API-key smoke for the summary path has not run yet.
+
 ## Privacy, Security, And Logging Requirements
 
 Target users include very high-level executives. Cybersecurity is a first-class acceptance criterion.

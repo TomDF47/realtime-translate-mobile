@@ -63,6 +63,28 @@ class LocalMeetingRepository {
     await saveSnapshot(snapshot.copyWith(meetings: meetings));
   }
 
+  Future<StoredMeeting?> saveMeetingSummary({
+    required String meetingId,
+    required StoredSummaryMetadata summaryMetadata,
+    required DateTime updatedAt,
+  }) async {
+    final snapshot = await loadSnapshot();
+    StoredMeeting? updatedMeeting;
+    final meetings = [
+      for (final meeting in snapshot.meetings)
+        if (meeting.id == meetingId)
+          updatedMeeting = meeting.copyWith(
+            updatedAt: updatedAt,
+            summaryMetadata: summaryMetadata,
+          )
+        else
+          meeting,
+    ];
+    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    await saveSnapshot(snapshot.copyWith(meetings: meetings));
+    return updatedMeeting;
+  }
+
   Future<void> deleteMeeting(String meetingId) async {
     final snapshot = await loadSnapshot();
     await saveSnapshot(

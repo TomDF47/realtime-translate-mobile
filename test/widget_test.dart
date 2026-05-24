@@ -5,6 +5,7 @@ import 'package:realtime_translate_mobile/main.dart';
 import 'package:realtime_translate_mobile/src/export/local_meeting_exporter.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_meeting_summary.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
@@ -178,12 +179,14 @@ void main() {
   ) async {
     final repository = _testRepository();
     final nativeShareGateway = _FakeNativeShareGateway();
+    final meetingSummaryGateway = _FakeMeetingSummaryGateway();
     await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
         nativeShareGateway: nativeShareGateway,
+        meetingSummaryGateway: meetingSummaryGateway,
       ),
     );
 
@@ -211,10 +214,8 @@ void main() {
 
     await tester.tap(find.text('Summary'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('direct OpenAI summary path'), findsOneWidget);
-
-    await tester.tap(find.text('Transcript'));
-    await tester.pumpAndSettle();
+    expect(find.textContaining('direct OpenAI request'), findsOneWidget);
+    await tester.ensureVisible(find.text('Open share sheet'));
     await tester.tap(find.text('Open share sheet'));
     await tester.pumpAndSettle();
 
@@ -222,14 +223,20 @@ void main() {
     expect(snapshot.recipientPreferences.lastSelectedRecipients, [
       'recipient@example.com',
     ]);
+    expect(snapshot.meetings.single.summaryAvailable, isTrue);
+    expect(meetingSummaryGateway.requests, hasLength(1));
     expect(nativeShareGateway.documents, hasLength(1));
-    expect(nativeShareGateway.documents.single.type, ExportType.transcript);
+    expect(nativeShareGateway.documents.single.type, ExportType.summary);
     expect(nativeShareGateway.documents.single.recipients, [
       'recipient@example.com',
     ]);
     expect(
       nativeShareGateway.documents.single.body,
-      contains('Prepared locally on this device.'),
+      contains('Executive Summary'),
+    );
+    expect(
+      nativeShareGateway.documents.single.body,
+      isNot(contains('Transcript\n\n[')),
     );
     expect(
       find.text('Share sheet opened. Review the export before sending.'),
@@ -388,6 +395,28 @@ class _FakeAiChatGateway implements AiChatGateway {
     return AiChatAnswer(
       text: answer,
       generatedAt: DateTime(2026, 5, 24, 2, 42),
+    );
+  }
+}
+
+class _FakeMeetingSummaryGateway implements MeetingSummaryGateway {
+  final List<MeetingSummaryRequest> requests = [];
+
+  @override
+  Future<MeetingSummaryResult> generate({
+    required MeetingSummaryRequest request,
+    required String credential,
+  }) async {
+    requests.add(request);
+    expect(credential, 'placeholder-local-openai-credential');
+    return MeetingSummaryResult(
+      text:
+          'Executive Summary\nThe meeting aligned on the project timeline.\n\n'
+          'Critical Talking Points And Outcomes\n- Review the deliverables.\n\n'
+          'Actions\n- Share the draft plan.',
+      generatedAt: DateTime(2026, 5, 24, 2, 45),
+      modelIntent: request.model,
+      transcriptEntryCount: request.transcriptEntryCount,
     );
   }
 }
