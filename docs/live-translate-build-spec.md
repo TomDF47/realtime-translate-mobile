@@ -232,12 +232,12 @@ Closed planning and implementation intake:
 
 - #1 Finalize product spec and mockup intake.
 - #2 Scaffold Flutter mobile app.
+- #3 Implement Flutter UI from supplied mockups for phone-only MVP.
 - #11 Document Android emulator workflow for Codex.
 - #18 Define Flutter design tokens and reusable mockup components.
 
 Open MVP/planning work:
 
-- #3 Implement Flutter UI from supplied mockups for phone-only MVP.
 - #6 Integrate direct OpenAI Realtime Translation.
 - #7 Implement language support and fallback routing.
 - #8 Add scoped AI chat over local meetings.

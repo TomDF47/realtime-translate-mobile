@@ -376,34 +376,34 @@ class LanguageSelectorCard extends StatelessWidget {
 
     return _Surface(
       padding: const EdgeInsets.all(AppSpacing.md),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
+          Row(
+            children: [
+              Expanded(
+                child: Text(
                   data.eyebrow,
                   style: AppTextStyles.compact(Theme.of(context).textTheme),
                 ),
-                const SizedBox(height: AppSpacing.xxs),
-                Text(
-                  data.primaryLabel,
-                  style: AppTextStyles.label(Theme.of(context).textTheme),
-                ),
-                Text(
-                  data.secondaryLabel,
-                  style: AppTextStyles.label(Theme.of(context).textTheme),
-                ),
-              ],
-            ),
+              ),
+              CircleAvatar(
+                backgroundColor: accentColor.withValues(alpha: 0.18),
+                foregroundColor: accentColor,
+                child: Icon(data.icon),
+              ),
+              const Icon(Icons.keyboard_arrow_down_rounded),
+            ],
           ),
-          CircleAvatar(
-            backgroundColor: accentColor.withValues(alpha: 0.18),
-            foregroundColor: accentColor,
-            child: Icon(data.icon),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            data.primaryLabel,
+            style: AppTextStyles.label(Theme.of(context).textTheme),
           ),
-          const Icon(Icons.keyboard_arrow_down_rounded),
+          Text(
+            data.secondaryLabel,
+            style: AppTextStyles.label(Theme.of(context).textTheme),
+          ),
         ],
       ),
     );
@@ -435,9 +435,19 @@ class DirectionSwitchButton extends StatelessWidget {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadii.card),
           ),
-          padding: const EdgeInsets.all(AppSpacing.md),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.md,
+          ),
         ),
-        child: const Icon(Icons.swap_horiz_rounded),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.swap_horiz_rounded),
+            SizedBox(height: AppSpacing.xxs),
+            Text('Switch'),
+          ],
+        ),
       ),
     );
   }
@@ -724,32 +734,40 @@ class _BottomControlButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: action.semanticLabel,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton.filled(
-            onPressed: onPressed,
-            style: IconButton.styleFrom(
-              backgroundColor: isNeutral
-                  ? AppColors.surfacePressed
-                  : accentColor,
-              foregroundColor: isNeutral
-                  ? AppColors.textPrimary
-                  : AppColors.background,
-              fixedSize: const Size.square(64),
+      child: SizedBox(
+        width: 104,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: isNeutral ? AppColors.surfacePressed : accentColor,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    action.icon,
+                    color: isNeutral
+                        ? AppColors.textPrimary
+                        : AppColors.background,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  action.label,
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.compact(Theme.of(context).textTheme),
+                ),
+              ],
             ),
-            icon: Icon(action.icon),
           ),
-          const SizedBox(height: AppSpacing.xs),
-          SizedBox(
-            width: 92,
-            child: Text(
-              action.label,
-              textAlign: TextAlign.center,
-              style: AppTextStyles.compact(Theme.of(context).textTheme),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

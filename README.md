@@ -36,7 +36,7 @@ The app should feel premium, clean, and executive-grade. The MVP is phone-only a
 
 Planning repo created. Supplied Android mockups have been received, copied into [assets/mockups](assets/mockups), and captured in [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md). The canonical build-ready spec is [docs/live-translate-build-spec.md](docs/live-translate-build-spec.md).
 
-The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, a phone-local welcome/start screen, widget smoke test, and Android signing placeholders. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, or server-side transcript handling.
+The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, and a mockup-derived UI shell. The current app can render the phone-local welcome/start screen, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, meeting history sheet, and local email export sheet. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, microphone capture, or server-side transcript handling.
 
 Keep future work aligned to the GitHub issue acceptance criteria and preserve the phone-only MVP privacy boundary.
 
@@ -110,12 +110,12 @@ Closed planning and implementation intake:
 
 - #1 Finalize product spec and mockup intake
 - #2 Scaffold Flutter mobile app
+- #3 Implement Flutter UI from supplied mockups for phone-only MVP
 - #11 Document Android emulator workflow for Codex
 - #18 Define Flutter design tokens and reusable mockup components
 
 Open MVP/planning work:
 
-- #3 Implement Flutter UI from supplied mockups for phone-only MVP
 - #6 Integrate direct OpenAI Realtime Translation
 - #7 Implement language support and fallback routing
 - #8 Add scoped AI chat over local meetings

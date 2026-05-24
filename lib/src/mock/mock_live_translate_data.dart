@@ -117,7 +117,7 @@ abstract final class MockLiveTranslateData {
   static const speakingPausedSession = LiveSessionViewData(
     routeLabel: 'English -> Japanese',
     elapsedLabel: '00:06:12',
-    mode: LiveSessionMode.readAloudPaused,
+    mode: LiveSessionMode.speaking,
     fromLanguage: LanguageSelectorData(
       eyebrow: 'From',
       primaryLabel: 'English',
