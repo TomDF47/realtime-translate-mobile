@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:realtime_translate_mobile/src/openai/openai_configuration.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
@@ -80,6 +81,18 @@ Future<void> main(List<String> args) async {
         config: const OpenAiRealtimeTranslationConfig(
           targetLanguageCode: 'es',
           profile: OpenAiRealtimeTranslationProfile.primaryRealtime2,
+        ),
+      ),
+    );
+  }
+  if (selection.realtimeGeneratedSpeech) {
+    results.add(
+      await _runRealtimeGeneratedSpeechSmoke(
+        credential: credential,
+        name: 'realtime-translation-generated-speech',
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'en',
+          profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
         ),
       ),
     );
@@ -418,6 +431,122 @@ Future<_SmokeResult> _runRealtimePrimarySyntheticAudioSmoke({
   }
 }
 
+Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
+  required String credential,
+  required String name,
+  required OpenAiRealtimeTranslationConfig config,
+}) async {
+  final speech = await _generateSpeechPcm16(config);
+  if (speech.failureNote != null) {
+    return _SmokeResult.failed(name, speech.failureNote!);
+  }
+
+  OpenAiRealtimeTranslationSession? session;
+  try {
+    session = await OpenAiRealtimeTranslationGateway().connect(
+      config: config,
+      credential: credential,
+    );
+
+    final readyEvent = await _waitForRealtimeReady(
+      session.events,
+      const Duration(seconds: 10),
+      requireSessionUpdated: true,
+    );
+
+    if (readyEvent == null) {
+      return _SmokeResult.failed(
+        name,
+        'websocket sessionUpdateTimeout model=${config.profile.model} '
+        'path=${config.profile.path}',
+      );
+    }
+
+    if (readyEvent is OpenAiRealtimeError) {
+      return _SmokeResult.failed(
+        name,
+        'websocket event=${readyEvent.type} '
+        'code=${readyEvent.code ?? 'unknown'} '
+        '${_safeRealtimeErrorParam(readyEvent)}'
+        'model=${config.profile.model} '
+        'path=${config.profile.path}',
+      );
+    }
+
+    if (readyEvent is OpenAiRealtimeSessionClosed) {
+      return _SmokeResult.failed(
+        name,
+        'websocket closedBeforeReady model=${config.profile.model} '
+        'path=${config.profile.path}',
+      );
+    }
+
+    final evidenceFuture = _waitForGeneratedSpeechEvidence(
+      session.events,
+      const Duration(seconds: 18),
+    );
+
+    for (final chunk in _pcm16Chunks(
+      speech.pcm16!,
+      sampleRate: config.inputAudioRate,
+      chunkDuration: const Duration(milliseconds: 200),
+    )) {
+      session.appendPcm16Audio(chunk);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    session.appendPcm16Audio(_silencePcm16(config.inputAudioRate, 500));
+
+    final evidence = await evidenceFuture;
+    if (evidence.error != null) {
+      final error = evidence.error!;
+      return _SmokeResult.failed(
+        name,
+        'websocket generatedSpeechError code=${error.code ?? 'unknown'} '
+        '${_safeRealtimeErrorParam(error)}'
+        'model=${config.profile.model} path=${config.profile.path}',
+      );
+    }
+
+    if (!evidence.hasTranscript || !evidence.hasTranslatedAudio) {
+      return _SmokeResult.failed(
+        name,
+        'websocket generatedSpeechMissingEvidence '
+        'transcriptEvents=${evidence.transcriptEvents} '
+        'translatedAudioEvents=${evidence.audioEvents} '
+        'model=${config.profile.model} path=${config.profile.path}',
+      );
+    }
+
+    return _SmokeResult.passed(
+      name,
+      'websocket generatedSpeech=local-espeak-ng '
+      'transcriptEvents=${evidence.transcriptEvents} '
+      'translatedAudioEvents=${evidence.audioEvents} '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } on WebSocketException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket handshakeFailed status=${error.httpStatusCode ?? 'unknown'} '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } on TimeoutException {
+    return _SmokeResult.failed(
+      name,
+      'websocket timeout model=${config.profile.model} '
+      'path=${config.profile.path}',
+    );
+  } on SocketException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket socketError=${error.osError?.errorCode ?? 'unknown'} '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } finally {
+    await session?.closeImmediately();
+  }
+}
+
 List<int> _syntheticTonePcm16(OpenAiRealtimeTranslationConfig config) {
   const chunkDuration = Duration(milliseconds: 200);
   const frequencyHz = 440;
@@ -439,6 +568,71 @@ List<int> _syntheticTonePcm16(OpenAiRealtimeTranslationConfig config) {
   return bytes;
 }
 
+List<int> _silencePcm16(int sampleRate, int milliseconds) {
+  final sampleCount =
+      sampleRate * milliseconds ~/ Duration.millisecondsPerSecond;
+  return List<int>.filled(sampleCount * 2, 0);
+}
+
+Iterable<List<int>> _pcm16Chunks(
+  List<int> pcm16, {
+  required int sampleRate,
+  required Duration chunkDuration,
+}) sync* {
+  final chunkSize =
+      sampleRate *
+      chunkDuration.inMilliseconds ~/
+      Duration.millisecondsPerSecond *
+      2;
+  for (var offset = 0; offset < pcm16.length; offset += chunkSize) {
+    yield pcm16.sublist(offset, math.min(offset + chunkSize, pcm16.length));
+  }
+}
+
+Future<_GeneratedSpeech> _generateSpeechPcm16(
+  OpenAiRealtimeTranslationConfig config,
+) async {
+  final executable = await _findExecutable('espeak-ng');
+  if (executable == null) {
+    return const _GeneratedSpeech.failure(
+      'generatedSpeech dependencyUnavailable executable=espeak-ng',
+    );
+  }
+
+  final result = await Process.run(executable, const [
+    '-v',
+    'es',
+    '--stdout',
+    'Revisaremos el cronograma.',
+  ], stdoutEncoding: null);
+  if (result.exitCode != 0 || result.stdout is! List<int>) {
+    return _GeneratedSpeech.failure(
+      'generatedSpeech synthesisFailed exit=${result.exitCode}',
+    );
+  }
+
+  try {
+    final wav = _Pcm16Wav.parse(Uint8List.fromList(result.stdout as List<int>));
+    return _GeneratedSpeech.success(
+      wav.resampleMonoPcm16(config.inputAudioRate),
+    );
+  } on FormatException catch (error) {
+    return _GeneratedSpeech.failure(
+      'generatedSpeech malformedWav reason=${error.message}',
+    );
+  }
+}
+
+Future<String?> _findExecutable(String name) async {
+  final result = await Process.run('which', [name]);
+  if (result.exitCode != 0) {
+    return null;
+  }
+
+  final path = result.stdout.toString().trim();
+  return path.isEmpty ? null : path;
+}
+
 Future<OpenAiRealtimeError?> _waitForRealtimeError(
   Stream<OpenAiRealtimeEvent> events,
   Duration timeout,
@@ -456,6 +650,53 @@ Future<OpenAiRealtimeError?> _waitForRealtimeError(
       completer.complete(null);
     }
   });
+
+  return completer.future.whenComplete(() async {
+    timer?.cancel();
+    await subscription.cancel();
+  });
+}
+
+Future<_GeneratedSpeechEvidence> _waitForGeneratedSpeechEvidence(
+  Stream<OpenAiRealtimeEvent> events,
+  Duration timeout,
+) async {
+  final completer = Completer<_GeneratedSpeechEvidence>();
+  late final StreamSubscription<OpenAiRealtimeEvent> subscription;
+  Timer? timer;
+  var transcriptEvents = 0;
+  var audioEvents = 0;
+
+  void complete({OpenAiRealtimeError? error}) {
+    if (completer.isCompleted) {
+      return;
+    }
+    completer.complete(
+      _GeneratedSpeechEvidence(
+        transcriptEvents: transcriptEvents,
+        audioEvents: audioEvents,
+        error: error,
+      ),
+    );
+  }
+
+  subscription = events.listen((event) {
+    if (event is OpenAiRealtimeError) {
+      complete(error: event);
+      return;
+    }
+    if (event is OpenAiRealtimeTranscriptDelta ||
+        event is OpenAiRealtimeTranscriptCompleted) {
+      transcriptEvents += 1;
+    }
+    if (event is OpenAiRealtimeAudioDelta) {
+      audioEvents += 1;
+    }
+    if (transcriptEvents > 0 && audioEvents > 0) {
+      complete();
+    }
+  });
+  timer = Timer(timeout, complete);
 
   return completer.future.whenComplete(() async {
     timer?.cancel();
@@ -681,6 +922,10 @@ void _printUsage() {
     '  --realtime-primary-synthetic-audio'
     ' Append 200 ms non-speech synthetic PCM16 tone to gpt-realtime-2.',
   );
+  print(
+    '  --realtime-generated-speech'
+    ' Stream local generated Spanish speech to the translation profile.',
+  );
 }
 
 class _SmokeSelection {
@@ -692,6 +937,7 @@ class _SmokeSelection {
     required this.realtimeTranslationFallback,
     required this.realtimeSyntheticAudio,
     required this.realtimePrimarySyntheticAudio,
+    required this.realtimeGeneratedSpeech,
   });
 
   final bool summary;
@@ -701,6 +947,7 @@ class _SmokeSelection {
   final bool realtimeTranslationFallback;
   final bool realtimeSyntheticAudio;
   final bool realtimePrimarySyntheticAudio;
+  final bool realtimeGeneratedSpeech;
 
   static _SmokeSelection? fromArgs(List<String> args) {
     if (args.isEmpty || args.contains('--all')) {
@@ -712,6 +959,7 @@ class _SmokeSelection {
         realtimeTranslationFallback: true,
         realtimeSyntheticAudio: true,
         realtimePrimarySyntheticAudio: true,
+        realtimeGeneratedSpeech: true,
       );
     }
 
@@ -728,6 +976,7 @@ class _SmokeSelection {
       '--realtime-translation',
       '--realtime-synthetic-audio',
       '--realtime-primary-synthetic-audio',
+      '--realtime-generated-speech',
     };
     if (args.any((arg) => !knownArgs.contains(arg))) {
       return null;
@@ -746,7 +995,143 @@ class _SmokeSelection {
       realtimePrimarySyntheticAudio: args.contains(
         '--realtime-primary-synthetic-audio',
       ),
+      realtimeGeneratedSpeech: args.contains('--realtime-generated-speech'),
     );
+  }
+}
+
+class _GeneratedSpeech {
+  const _GeneratedSpeech._({required this.pcm16, required this.failureNote});
+
+  const _GeneratedSpeech.success(List<int> pcm16)
+    : this._(pcm16: pcm16, failureNote: null);
+
+  const _GeneratedSpeech.failure(String note)
+    : this._(pcm16: null, failureNote: note);
+
+  final List<int>? pcm16;
+  final String? failureNote;
+}
+
+class _GeneratedSpeechEvidence {
+  const _GeneratedSpeechEvidence({
+    required this.transcriptEvents,
+    required this.audioEvents,
+    required this.error,
+  });
+
+  final int transcriptEvents;
+  final int audioEvents;
+  final OpenAiRealtimeError? error;
+
+  bool get hasTranscript => transcriptEvents > 0;
+
+  bool get hasTranslatedAudio => audioEvents > 0;
+}
+
+class _Pcm16Wav {
+  const _Pcm16Wav({
+    required this.sampleRate,
+    required this.channelCount,
+    required this.samples,
+  });
+
+  final int sampleRate;
+  final int channelCount;
+  final Int16List samples;
+
+  static _Pcm16Wav parse(Uint8List bytes) {
+    final data = ByteData.sublistView(bytes);
+    if (bytes.length < 44 ||
+        _fourCc(bytes, 0) != 'RIFF' ||
+        _fourCc(bytes, 8) != 'WAVE') {
+      throw const FormatException('notRiffWave');
+    }
+
+    int? sampleRate;
+    int? channelCount;
+    int? bitsPerSample;
+    int? audioFormat;
+    Uint8List? pcmData;
+    var offset = 12;
+    while (offset + 8 <= bytes.length) {
+      final id = _fourCc(bytes, offset);
+      var size = data.getUint32(offset + 4, Endian.little);
+      final payloadOffset = offset + 8;
+      if (payloadOffset + size > bytes.length) {
+        if (id != 'data') {
+          throw const FormatException('truncatedChunk');
+        }
+        size = bytes.length - payloadOffset;
+      }
+      final nextOffset = payloadOffset + size + (size.isOdd ? 1 : 0);
+
+      if (id == 'fmt ') {
+        audioFormat = data.getUint16(payloadOffset, Endian.little);
+        channelCount = data.getUint16(payloadOffset + 2, Endian.little);
+        sampleRate = data.getUint32(payloadOffset + 4, Endian.little);
+        bitsPerSample = data.getUint16(payloadOffset + 14, Endian.little);
+      } else if (id == 'data') {
+        pcmData = Uint8List.sublistView(
+          bytes,
+          payloadOffset,
+          payloadOffset + size,
+        );
+      }
+      offset = nextOffset;
+    }
+
+    if (audioFormat != 1 ||
+        sampleRate == null ||
+        channelCount == null ||
+        bitsPerSample != 16 ||
+        pcmData == null) {
+      throw const FormatException('unsupportedWav');
+    }
+
+    final pcmBytes = ByteData.sublistView(pcmData);
+    final samples = Int16List(pcmData.length ~/ 2);
+    for (var i = 0; i < samples.length; i += 1) {
+      samples[i] = pcmBytes.getInt16(i * 2, Endian.little);
+    }
+
+    return _Pcm16Wav(
+      sampleRate: sampleRate,
+      channelCount: channelCount,
+      samples: samples,
+    );
+  }
+
+  List<int> resampleMonoPcm16(int targetRate) {
+    final monoSampleCount = samples.length ~/ channelCount;
+    final mono = Int16List(monoSampleCount);
+    for (var frame = 0; frame < monoSampleCount; frame += 1) {
+      var sum = 0;
+      for (var channel = 0; channel < channelCount; channel += 1) {
+        sum += samples[frame * channelCount + channel];
+      }
+      mono[frame] = sum ~/ channelCount;
+    }
+
+    final targetSampleCount = (monoSampleCount * targetRate / sampleRate)
+        .round();
+    final output = List<int>.filled(targetSampleCount * 2, 0);
+    for (var i = 0; i < targetSampleCount; i += 1) {
+      final sourcePosition = i * sampleRate / targetRate;
+      final left = sourcePosition.floor().clamp(0, monoSampleCount - 1);
+      final right = math.min(left + 1, monoSampleCount - 1);
+      final fraction = sourcePosition - left;
+      final sample = (mono[left] * (1 - fraction) + mono[right] * fraction)
+          .round()
+          .clamp(-32768, 32767);
+      output[i * 2] = sample & 0xff;
+      output[i * 2 + 1] = (sample >> 8) & 0xff;
+    }
+    return output;
+  }
+
+  static String _fourCc(Uint8List bytes, int offset) {
+    return String.fromCharCodes(bytes.sublist(offset, offset + 4));
   }
 }
 

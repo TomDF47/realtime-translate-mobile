@@ -147,6 +147,30 @@ Implications:
 - Future audio package, SDK, resampling, or playback additions must update the cybersecurity report and rerun supply-chain checks.
 - At this capture slice, real microphone translation smoke, native translated-audio speaker output, and live transcript validation remained open #6/#14 work; Android speaker output is now covered by the later `AudioTrack` decision below.
 
+## 2026-05-24 - Generated Speech Smoke Validates Endpoint Events Only
+
+Status: Accepted
+
+Decision:
+
+- Extend the redacted live OpenAI smoke harness with a local generated-spoken-audio check for the dedicated `gpt-realtime-translate` profile.
+- Generate a short Spanish phrase locally with `espeak-ng`, convert the stdout WAV to 24 kHz mono PCM16 in process memory, and stream it directly to `/v1/realtime/translations` in 200 ms chunks.
+- Treat the smoke as passing only when transcript and translated-audio events arrive.
+- Report only event counts, model, and endpoint path. Do not print transcript text, audio bytes, generated audio payloads, credential material, or response bodies.
+- Do not treat this as proof of Android physical microphone capture, Android speaker audibility, live reconnect recovery, or primary `gpt-realtime-2` spoken translation behavior.
+
+Rationale:
+
+- The emulator workflow still lacks a reliable microphone injection command, so local generated speech is the safest repeatable way to validate actual spoken PCM16 behavior against the dedicated translation endpoint without storing a live key in the emulator.
+- Keeping audio generation local avoids adding an OpenAI TTS dependency or committing audio fixtures.
+- The harness exercises the same PCM16 WebSocket append path used by the app while preserving the phone-only privacy and secret-handling boundary.
+
+Implications:
+
+- #6 is advanced because the dedicated translation endpoint has now returned transcript and translated-audio events from spoken input, not just accepted append schema.
+- #6 remains open for physical microphone translation smoke and audible Android speaker validation.
+- #14 remains open for live reconnect, credential-expiry, and transcript de-duplication behavior under real streaming.
+
 ## 2026-05-24 - Translated Audio Playback Starts As A Fakeable Local Queue
 
 Status: Accepted as first slice; Android production output added by `2026-05-24 - Android Translated Audio Output Uses App-Owned AudioTrack`
