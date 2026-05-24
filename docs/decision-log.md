@@ -133,14 +133,14 @@ Decision:
 - Emit 24 kHz mono PCM16 chunks for the OpenAI realtime WebSocket path.
 - Do not add a Flutter audio recording package for this increment.
 - Keep capture closed until both the encrypted local OpenAI credential and runtime microphone permission gates pass.
-- Route microphone streaming through the dedicated `gpt-realtime-translate` profile for now because live synthetic PCM16 append was accepted there while the current primary `gpt-realtime-2` append flow returned `missing_required_parameter`.
+- Route microphone streaming through the dedicated `gpt-realtime-translate` profile for now because official OpenAI docs identify it as the live human-speech translation endpoint; the primary `gpt-realtime-2` profile remains available for follow-up spoken-translation validation.
 
 Rationale:
 
 - The existing Android platform channel layer already owns microphone permission and keeps the supply-chain surface smaller than adding an audio dependency.
 - OpenAI's current translation client-event docs describe 24 kHz PCM16 mono little-endian raw audio and 200 ms chunks for WebSocket translation sessions.
 - A fakeable capture gateway lets tests prove credential/permission gating and chunk flow without recording microphone audio or using a live credential.
-- The primary Realtime 2 session remains configured and no-audio session creation passes, but its current audio append flow needs follow-up before it should receive live microphone chunks.
+- The primary Realtime 2 session remains configured, no-audio session creation passes, and a redacted live smoke accepts a 200 ms non-speech PCM16 append after the session output audio format includes an explicit 24 kHz rate, but this does not prove live spoken translation.
 
 Implications:
 

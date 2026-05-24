@@ -617,6 +617,12 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   }
 
   @override
+  void commitInputAudioBuffer() {}
+
+  @override
+  void createResponse() {}
+
+  @override
   Future<void> closeGracefully() async {
     closeGracefullyCount += 1;
   }

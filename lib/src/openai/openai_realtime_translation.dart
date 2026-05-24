@@ -22,6 +22,10 @@ abstract interface class RealtimeTranslationSession {
 
   void appendPcm16Audio(List<int> pcm16Audio);
 
+  void commitInputAudioBuffer();
+
+  void createResponse();
+
   Future<void> closeGracefully();
 
   Future<void> closeImmediately();
@@ -60,6 +64,10 @@ extension OpenAiRealtimeTranslationProfileDetails
 
   bool get supportsGracefulClose {
     return this == OpenAiRealtimeTranslationProfile.dedicatedTranslation;
+  }
+
+  bool get usesStandardConversationLifecycle {
+    return this == OpenAiRealtimeTranslationProfile.primaryRealtime2;
   }
 }
 
@@ -101,6 +109,22 @@ class OpenAiRealtimeTranslationConfig {
     };
   }
 
+  Map<String, Object?>? inputAudioCommitEvent() {
+    if (!profile.usesStandardConversationLifecycle) {
+      return null;
+    }
+
+    return {'type': 'input_audio_buffer.commit'};
+  }
+
+  Map<String, Object?>? responseCreateEvent() {
+    if (!profile.usesStandardConversationLifecycle) {
+      return null;
+    }
+
+    return {'type': 'response.create'};
+  }
+
   Map<String, Object?>? gracefulCloseEvent() {
     if (!profile.supportsGracefulClose) {
       return null;
@@ -125,7 +149,7 @@ class OpenAiRealtimeTranslationConfig {
             'turn_detection': {'type': 'semantic_vad'},
           },
           'output': {
-            'format': {'type': 'audio/pcm'},
+            'format': {'type': 'audio/pcm', 'rate': inputAudioRate},
             'voice': outputVoice,
           },
         },
@@ -245,6 +269,26 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
   }
 
   @override
+  void commitInputAudioBuffer() {
+    final event = config.inputAudioCommitEvent();
+    if (event == null) {
+      return;
+    }
+
+    _send(event);
+  }
+
+  @override
+  void createResponse() {
+    final event = config.responseCreateEvent();
+    if (event == null) {
+      return;
+    }
+
+    _send(event);
+  }
+
+  @override
   Future<void> closeGracefully() async {
     if (_closeSent) {
       return;
@@ -307,6 +351,7 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
         type: 'socket.error',
         code: error.runtimeType.toString(),
         eventId: null,
+        param: null,
       ),
     );
   }
@@ -369,10 +414,12 @@ class OpenAiRealtimeError extends OpenAiRealtimeEvent {
     required super.type,
     required this.code,
     required this.eventId,
+    required this.param,
   });
 
   final String? code;
   final String? eventId;
+  final String? param;
 }
 
 class OpenAiRealtimeSessionClosed extends OpenAiRealtimeEvent {
@@ -419,10 +466,14 @@ abstract final class OpenAiRealtimeEventParser {
       final eventId = error is Map<String, dynamic>
           ? error['event_id']
           : event['event_id'];
+      final param = error is Map<String, dynamic>
+          ? error['param']
+          : event['param'];
       return OpenAiRealtimeError(
         type: type,
         code: code is String ? code : null,
         eventId: eventId is String ? eventId : null,
+        param: param is String ? param : null,
       );
     }
 

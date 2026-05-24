@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:realtime_translate_mobile/src/openai/openai_configuration.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
@@ -67,6 +68,18 @@ Future<void> main(List<String> args) async {
         config: const OpenAiRealtimeTranslationConfig(
           targetLanguageCode: 'fr',
           profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+        ),
+      ),
+    );
+  }
+  if (selection.realtimePrimarySyntheticAudio) {
+    results.add(
+      await _runRealtimePrimarySyntheticAudioSmoke(
+        credential: credential,
+        name: 'realtime-primary-synthetic-audio',
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'es',
+          profile: OpenAiRealtimeTranslationProfile.primaryRealtime2,
         ),
       ),
     );
@@ -188,6 +201,7 @@ Future<_SmokeResult> _runRealtimeSmoke({
       return _SmokeResult.failed(
         name,
         'websocket event=${event.type} code=${event.code ?? 'unknown'} '
+        '${_safeRealtimeErrorParam(event)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
     }
@@ -240,20 +254,27 @@ Future<_SmokeResult> _runRealtimeSyntheticAudioSmoke({
       credential: credential,
     );
 
-    final readyEvent = await session.events
-        .firstWhere(
-          (event) =>
-              event is OpenAiRealtimeSessionLifecycleEvent ||
-              event is OpenAiRealtimeError ||
-              event is OpenAiRealtimeSessionClosed,
-        )
-        .timeout(const Duration(seconds: 10));
+    final readyEvent = await _waitForRealtimeReady(
+      session.events,
+      const Duration(seconds: 10),
+      requireSessionUpdated: true,
+    );
+
+    if (readyEvent == null) {
+      return _SmokeResult.failed(
+        name,
+        'websocket sessionUpdateTimeout model=${config.profile.model} '
+        'path=${config.profile.path}',
+      );
+    }
 
     if (readyEvent is OpenAiRealtimeError) {
       return _SmokeResult.failed(
         name,
         'websocket event=${readyEvent.type} '
-        'code=${readyEvent.code ?? 'unknown'} model=${config.profile.model} '
+        'code=${readyEvent.code ?? 'unknown'} '
+        '${_safeRealtimeErrorParam(readyEvent)}'
+        'model=${config.profile.model} '
         'path=${config.profile.path}',
       );
     }
@@ -266,7 +287,7 @@ Future<_SmokeResult> _runRealtimeSyntheticAudioSmoke({
       );
     }
 
-    session.appendPcm16Audio(_syntheticSilencePcm16(config));
+    session.appendPcm16Audio(_syntheticTonePcm16(config));
     final error = await _waitForRealtimeError(
       session.events,
       const Duration(seconds: 2),
@@ -275,13 +296,15 @@ Future<_SmokeResult> _runRealtimeSyntheticAudioSmoke({
       return _SmokeResult.failed(
         name,
         'websocket syntheticPcm16AppendError code=${error.code ?? 'unknown'} '
+        '${_safeRealtimeErrorParam(error)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
     }
 
     return _SmokeResult.passed(
       name,
-      'websocket syntheticPcm16=200ms model=${config.profile.model} '
+      'websocket syntheticPcm16ToneAppend=200ms nonSpeech '
+      'model=${config.profile.model} '
       'path=${config.profile.path}',
     );
   } on WebSocketException catch (error) {
@@ -307,14 +330,113 @@ Future<_SmokeResult> _runRealtimeSyntheticAudioSmoke({
   }
 }
 
-List<int> _syntheticSilencePcm16(OpenAiRealtimeTranslationConfig config) {
+Future<_SmokeResult> _runRealtimePrimarySyntheticAudioSmoke({
+  required String credential,
+  required String name,
+  required OpenAiRealtimeTranslationConfig config,
+}) async {
+  OpenAiRealtimeTranslationSession? session;
+  try {
+    session = await OpenAiRealtimeTranslationGateway().connect(
+      config: config,
+      credential: credential,
+    );
+
+    final readyEvent = await _waitForRealtimeReady(
+      session.events,
+      const Duration(seconds: 10),
+      requireSessionUpdated: true,
+    );
+
+    if (readyEvent == null) {
+      return _SmokeResult.failed(
+        name,
+        'websocket sessionUpdateTimeout model=${config.profile.model} '
+        'path=${config.profile.path}',
+      );
+    }
+
+    if (readyEvent is OpenAiRealtimeError) {
+      return _SmokeResult.failed(
+        name,
+        'websocket event=${readyEvent.type} '
+        'code=${readyEvent.code ?? 'unknown'} '
+        '${_safeRealtimeErrorParam(readyEvent)}'
+        'model=${config.profile.model} '
+        'path=${config.profile.path}',
+      );
+    }
+
+    if (readyEvent is OpenAiRealtimeSessionClosed) {
+      return _SmokeResult.failed(
+        name,
+        'websocket closedBeforeReady model=${config.profile.model} '
+        'path=${config.profile.path}',
+      );
+    }
+
+    session.appendPcm16Audio(_syntheticTonePcm16(config));
+
+    final error = await _waitForRealtimeError(
+      session.events,
+      const Duration(seconds: 3),
+    );
+    if (error != null) {
+      return _SmokeResult.failed(
+        name,
+        'websocket syntheticPcm16AppendError code=${error.code ?? 'unknown'} '
+        '${_safeRealtimeErrorParam(error)}'
+        'model=${config.profile.model} path=${config.profile.path}',
+      );
+    }
+
+    return _SmokeResult.passed(
+      name,
+      'websocket syntheticPcm16ToneAppend=200ms nonSpeech '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } on WebSocketException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket handshakeFailed status=${error.httpStatusCode ?? 'unknown'} '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } on TimeoutException {
+    return _SmokeResult.failed(
+      name,
+      'websocket timeout model=${config.profile.model} '
+      'path=${config.profile.path}',
+    );
+  } on SocketException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket socketError=${error.osError?.errorCode ?? 'unknown'} '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } finally {
+    await session?.closeImmediately();
+  }
+}
+
+List<int> _syntheticTonePcm16(OpenAiRealtimeTranslationConfig config) {
   const chunkDuration = Duration(milliseconds: 200);
-  final byteCount =
+  const frequencyHz = 440;
+  final sampleCount =
       config.inputAudioRate *
-      2 *
       chunkDuration.inMilliseconds ~/
       Duration.millisecondsPerSecond;
-  return List<int>.filled(byteCount, 0);
+  final bytes = List<int>.filled(sampleCount * 2, 0);
+
+  for (var i = 0; i < sampleCount; i += 1) {
+    final sample =
+        (math.sin(2 * math.pi * frequencyHz * i / config.inputAudioRate) *
+                0x2000)
+            .round();
+    bytes[i * 2] = sample & 0xff;
+    bytes[i * 2 + 1] = (sample >> 8) & 0xff;
+  }
+
+  return bytes;
 }
 
 Future<OpenAiRealtimeError?> _waitForRealtimeError(
@@ -329,6 +451,44 @@ Future<OpenAiRealtimeError?> _waitForRealtimeError(
       completer.complete(event);
     }
   });
+  timer = Timer(timeout, () {
+    if (!completer.isCompleted) {
+      completer.complete(null);
+    }
+  });
+
+  return completer.future.whenComplete(() async {
+    timer?.cancel();
+    await subscription.cancel();
+  });
+}
+
+Future<OpenAiRealtimeEvent?> _waitForRealtimeReady(
+  Stream<OpenAiRealtimeEvent> events,
+  Duration timeout, {
+  required bool requireSessionUpdated,
+}) async {
+  final completer = Completer<OpenAiRealtimeEvent?>();
+  late final StreamSubscription<OpenAiRealtimeEvent> subscription;
+  Timer? timer;
+
+  subscription = events.listen((event) {
+    if (completer.isCompleted) {
+      return;
+    }
+
+    if (event is OpenAiRealtimeError || event is OpenAiRealtimeSessionClosed) {
+      completer.complete(event);
+      return;
+    }
+
+    if (event is OpenAiRealtimeSessionLifecycleEvent) {
+      if (!requireSessionUpdated || event.type == 'session.updated') {
+        completer.complete(event);
+      }
+    }
+  });
+
   timer = Timer(timeout, () {
     if (!completer.isCompleted) {
       completer.complete(null);
@@ -487,6 +647,15 @@ String? _safeErrorCode(String responseBody) {
   return null;
 }
 
+String _safeRealtimeErrorParam(OpenAiRealtimeError error) {
+  final param = error.param;
+  if (param == null || !RegExp(r'^[a-zA-Z0-9_.\[\]-]+$').hasMatch(param)) {
+    return '';
+  }
+
+  return 'param=$param ';
+}
+
 void _printUsage() {
   print('Usage: dart run scripts/live_openai_smoke.dart [options]');
   print('');
@@ -506,7 +675,11 @@ void _printUsage() {
     '  --realtime-translation         Run gpt-realtime-translate WebSocket smoke.',
   );
   print(
-    '  --realtime-synthetic-audio     Append 200 ms synthetic PCM16 silence to the translation profile.',
+    '  --realtime-synthetic-audio     Append 200 ms non-speech synthetic PCM16 tone to the translation profile.',
+  );
+  print(
+    '  --realtime-primary-synthetic-audio'
+    ' Append 200 ms non-speech synthetic PCM16 tone to gpt-realtime-2.',
   );
 }
 
@@ -518,6 +691,7 @@ class _SmokeSelection {
     required this.realtimePrimary,
     required this.realtimeTranslationFallback,
     required this.realtimeSyntheticAudio,
+    required this.realtimePrimarySyntheticAudio,
   });
 
   final bool summary;
@@ -526,6 +700,7 @@ class _SmokeSelection {
   final bool realtimePrimary;
   final bool realtimeTranslationFallback;
   final bool realtimeSyntheticAudio;
+  final bool realtimePrimarySyntheticAudio;
 
   static _SmokeSelection? fromArgs(List<String> args) {
     if (args.isEmpty || args.contains('--all')) {
@@ -536,6 +711,7 @@ class _SmokeSelection {
         realtimePrimary: true,
         realtimeTranslationFallback: true,
         realtimeSyntheticAudio: true,
+        realtimePrimarySyntheticAudio: true,
       );
     }
 
@@ -551,6 +727,7 @@ class _SmokeSelection {
       '--realtime-primary',
       '--realtime-translation',
       '--realtime-synthetic-audio',
+      '--realtime-primary-synthetic-audio',
     };
     if (args.any((arg) => !knownArgs.contains(arg))) {
       return null;
@@ -566,6 +743,9 @@ class _SmokeSelection {
       realtimePrimary: args.contains('--realtime-primary'),
       realtimeTranslationFallback: args.contains('--realtime-translation'),
       realtimeSyntheticAudio: args.contains('--realtime-synthetic-audio'),
+      realtimePrimarySyntheticAudio: args.contains(
+        '--realtime-primary-synthetic-audio',
+      ),
     );
   }
 }

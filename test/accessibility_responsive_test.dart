@@ -246,6 +246,12 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   void appendPcm16Audio(List<int> pcm16Audio) {}
 
   @override
+  void commitInputAudioBuffer() {}
+
+  @override
+  void createResponse() {}
+
+  @override
   Future<void> closeGracefully() async {}
 
   @override

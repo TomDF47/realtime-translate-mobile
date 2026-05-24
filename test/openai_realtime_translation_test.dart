@@ -21,12 +21,20 @@ void main() {
     expect(sessionUpdate['type'], 'session.update');
     expect(serialized, contains('"model":"gpt-realtime-2"'));
     expect(serialized, contains('"output_modalities":["audio"]'));
+    expect(
+      serialized,
+      contains('"output":{"format":{"type":"audio/pcm","rate":24000}'),
+    );
     expect(serialized, contains('Translate incoming speech'));
     expect(serialized, isNot(contains('placeholder-local-openai-credential')));
     expect(
       config.audioAppendEvent([1, 2, 3])['type'],
       'input_audio_buffer.append',
     );
+    expect(config.inputAudioCommitEvent(), {
+      'type': 'input_audio_buffer.commit',
+    });
+    expect(config.responseCreateEvent(), {'type': 'response.create'});
   });
 
   test('builds dedicated translation fallback websocket session config', () {
@@ -49,6 +57,8 @@ void main() {
       config.audioAppendEvent([1, 2, 3])['type'],
       'session.input_audio_buffer.append',
     );
+    expect(config.inputAudioCommitEvent(), isNull);
+    expect(config.responseCreateEvent(), isNull);
     expect(config.gracefulCloseEvent(), {'type': 'session.close'});
   });
 
@@ -96,12 +106,17 @@ void main() {
 
     final error = OpenAiRealtimeEventParser.parse({
       'type': 'error',
-      'error': {'code': 'invalid_api_key', 'event_id': 'event-1'},
+      'error': {
+        'code': 'invalid_api_key',
+        'event_id': 'event-1',
+        'param': 'session.audio.output.format.rate',
+      },
     });
     expect(error, isA<OpenAiRealtimeError>());
     final parsedError = error! as OpenAiRealtimeError;
     expect(parsedError.code, 'invalid_api_key');
     expect(parsedError.eventId, 'event-1');
+    expect(parsedError.param, 'session.audio.output.format.rate');
   });
 
   test(
@@ -150,6 +165,8 @@ void main() {
         const Duration(seconds: 3),
       );
       session.appendPcm16Audio([1, 2, 3, 4]);
+      session.commitInputAudioBuffer();
+      session.createResponse();
       await session.closeGracefully();
 
       await serverDone.future.timeout(const Duration(seconds: 3));
@@ -171,4 +188,56 @@ void main() {
       );
     },
   );
+
+  test('sends primary realtime2 append, commit, and response events', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final receivedMessages = <String>[];
+    final serverDone = Completer<void>();
+
+    unawaited(
+      server.first.then((request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        await for (final message in socket) {
+          final text = message as String;
+          receivedMessages.add(text);
+          if (text.contains('session.update')) {
+            socket.add(jsonEncode({'type': 'session.updated'}));
+          }
+          if (text.contains('response.create')) {
+            await socket.close();
+            break;
+          }
+        }
+        serverDone.complete();
+      }),
+    );
+
+    final gateway = OpenAiRealtimeTranslationGateway(
+      webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}/v1'),
+    );
+    final session = await gateway.connect(
+      config: const OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es'),
+      credential: 'placeholder-local-openai-credential',
+    );
+
+    await session.events.first.timeout(const Duration(seconds: 3));
+    session.appendPcm16Audio([1, 2, 3, 4]);
+    session.commitInputAudioBuffer();
+    session.createResponse();
+
+    await serverDone.future.timeout(const Duration(seconds: 3));
+    await session.closeImmediately();
+    await server.close(force: true);
+
+    expect(receivedMessages, hasLength(4));
+    expect(receivedMessages[0], contains('session.update'));
+    expect(receivedMessages[1], contains('"type":"input_audio_buffer.append"'));
+    expect(receivedMessages[1], contains('AQIDBA=='));
+    expect(receivedMessages[2], contains('"type":"input_audio_buffer.commit"'));
+    expect(receivedMessages[3], contains('"type":"response.create"'));
+    expect(
+      receivedMessages.join('\n'),
+      isNot(contains('placeholder-local-openai-credential')),
+    );
+  });
 }
