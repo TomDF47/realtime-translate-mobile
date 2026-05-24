@@ -101,6 +101,11 @@ adb exec-out screencap -p > /tmp/live-translate-mobile-smoke.png
 
 The current app can verify the phone-local start surface, Android microphone runtime permission dialog/denied state, teal listening screen, scoped AI chat bottom sheet, amber paused read-aloud screen, encrypted meeting history sheet with continue/delete controls, appended local meeting history after reopening a saved meeting, and email export sheet with remembered recipient preferences. Real microphone capture, direct OpenAI streaming, native share handoff, production-volume storage behavior, and privacy routing assertions become required as their implementation issues land.
 
-## CI Direction
+## CI Gates
 
-The first committed CI gate should run docs validation without requiring Flutter. After implementation lands, expand CI to include Flutter analysis/tests, `scripts/check-supply-chain.sh`, secret-safety checks, dependency/advisory checks, and privacy/logging assertions.
+Current GitHub Actions run on pull requests and pushes to `main`:
+
+- `Docs`: `bash scripts/check-docs.sh`.
+- `Flutter`: `flutter pub get`, `flutter analyze`, `flutter test`, and `bash scripts/check-supply-chain.sh`.
+
+Android emulator smoke is intentionally local/manual because the project uses Tom's `android-pixel9-headless` machine workflow.

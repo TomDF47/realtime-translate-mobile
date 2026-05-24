@@ -57,6 +57,8 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [docs/decision-log.md](docs/decision-log.md): durable decisions future agents should preserve.
 - [docs/codex-starter-prompt.md](docs/codex-starter-prompt.md): starter prompt for the first Flutter implementation pass.
 - [.env.example](.env.example): placeholder-only environment contract.
+- [.github/workflows/docs.yml](.github/workflows/docs.yml): CI docs link and secret-pattern gate.
+- [.github/workflows/flutter.yml](.github/workflows/flutter.yml): CI Flutter analysis, tests, and supply-chain gate.
 - [scripts/check-docs.sh](scripts/check-docs.sh): docs link and secret-pattern sanity check.
 - [scripts/check-supply-chain.sh](scripts/check-supply-chain.sh): local dependency advisory, secret-pattern, and Android permission gate.
 - [pubspec.yaml](pubspec.yaml) and [pubspec.lock](pubspec.lock): Flutter package manifest and pinned dependency lockfile.
@@ -121,6 +123,7 @@ Closed planning and implementation intake:
 - #9 Implement local encrypted meeting storage
 - #11 Document Android emulator workflow for Codex
 - #13 Implement microphone permissions and live session lifecycle
+- #16 Add CI quality gates for docs, Flutter, and secret safety
 - #18 Define Flutter design tokens and reusable mockup components
 - #20 Implement local meeting management
 - #22 Implement dependency and supply-chain cybersecurity controls
@@ -134,7 +137,6 @@ Open MVP/planning work:
 - #12 Create phone-only MVP test strategy
 - #14 Harden direct OpenAI realtime resilience
 - #15 Implement privacy-safe local logging and diagnostics controls
-- #16 Add CI quality gates for docs, Flutter, and secret safety
 - #17 Add accessibility and responsive text verification
 - #19 Maintain README and agent handoff docs during implementation
 - #21 Add email export for transcripts and summaries
@@ -180,6 +182,11 @@ flutter test
 bash scripts/check-docs.sh
 bash scripts/check-supply-chain.sh
 ```
+
+CI gates run on pull requests and pushes to `main`:
+
+- `Docs`: `bash scripts/check-docs.sh`
+- `Flutter`: `flutter pub get`, `flutter analyze`, `flutter test`, and `bash scripts/check-supply-chain.sh`
 
 Additional checks for app changes:
 

@@ -1,0 +1,54 @@
+name: Flutter
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.44.0"
+          cache: true
+
+      - name: Write local Android properties
+        run: |
+          android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$android_sdk" ]; then
+            echo "ANDROID_HOME or ANDROID_SDK_ROOT must be set" >&2
+            exit 1
+          fi
+          {
+            echo "sdk.dir=$android_sdk"
+            echo "flutter.sdk=$(dirname "$(dirname "$(command -v flutter)")")"
+          } > android/local.properties
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze Flutter
+        run: flutter analyze
+
+      - name: Test Flutter
+        run: flutter test
+
+      - name: Run supply-chain gate
+        run: bash scripts/check-supply-chain.sh
