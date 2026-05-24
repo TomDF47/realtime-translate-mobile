@@ -126,7 +126,7 @@ The MVP must not include an app backend.
 - Ask Tom for an OpenAI API key only at the first real OpenAI network smoke/integration test.
 - Store credential/session material only in encrypted local storage, redact it from logs/screenshots/test output, and provide a clear removal/reset path.
 
-Current implementation note: the Flutter app now has a fakeable direct OpenAI realtime WebSocket seam for #6 and local resilience scaffolding for #14. It builds a primary `gpt-realtime-2` profile, keeps a dedicated `gpt-realtime-translate` profile for endpoint testing/fallback, sends PCM16 append events with credentials only in the Authorization header, parses both Realtime 2 and dedicated translation audio/transcript delta event names, classifies credential expiry/rejection, unsupported-language, retryable network/socket, rate-limit, transient OpenAI, lifecycle-interruption, and fatal failure categories, and plans bounded exponential reconnect backoff with jitter. Retryable failures enter a user-visible `reconnecting` state with microphone capture, realtime, and playback resources closed until recovery; credential failures enter `credentialInvalid`; exhausted network/lifecycle retries enter `offline`; unsupported-language and fatal failures enter `error`. Diagnostics log only sanitized state/configuration fields such as retry attempt and backoff milliseconds. It still has no real microphone capture, decoded translated-audio playback, live reconnect validation, transcript de-duplication under real streaming, or live API-key OpenAI smoke result.
+Current implementation note: the Flutter app now has a fakeable direct OpenAI realtime WebSocket seam for #6 and local resilience scaffolding for #14. It builds a primary `gpt-realtime-2` profile, keeps a dedicated `gpt-realtime-translate` profile for endpoint testing/fallback, sends PCM16 append events with credentials only in the Authorization header, parses both Realtime 2 and dedicated translation audio/transcript delta event names, classifies credential expiry/rejection, unsupported-language, retryable network/socket, rate-limit, transient OpenAI, lifecycle-interruption, and fatal failure categories, and plans bounded exponential reconnect backoff with jitter. Retryable failures enter a user-visible `reconnecting` state with microphone capture, realtime, and playback resources closed until recovery; credential failures enter `credentialInvalid`; exhausted network/lifecycle retries enter `offline`; unsupported-language and fatal failures enter `error`. Diagnostics log only sanitized state/configuration fields such as retry attempt and backoff milliseconds. Live endpoint smoke on 2026-05-24 accepted `gpt-realtime-2` on `/v1/realtime` and `gpt-realtime-translate` on `/v1/realtime/translations`, both returning `session.created` without recording or sending microphone audio. It still has no real microphone capture, decoded translated-audio playback, live reconnect validation, or transcript de-duplication under real streaming.
 
 ## Language Support And Fallback
 
@@ -166,7 +166,7 @@ Current implementation note: language support was verified on 2026-05-24 against
 - Answers should cite local transcript timestamps when possible.
 - AI chat must handle empty transcript, no selected meeting, offline, unsupported, credential-invalid, and model/API error states.
 
-Current implementation note: the Flutter app has a scoped AI chat sheet for `This meeting`, an `All meetings` entry from meeting history, local transcript context assembly, a fakeable direct OpenAI Responses gateway, and tests that verify `store: false` request construction without credential leakage. Live API-key smoke has not run yet; #8 remains open until real direct OpenAI AI chat is validated and remaining error states are complete.
+Current implementation note: the Flutter app has a scoped AI chat sheet for `This meeting`, an `All meetings` entry from meeting history, local transcript context assembly, a fakeable direct OpenAI Responses gateway, and tests that verify `store: false` request construction without credential leakage. Live Responses smoke on 2026-05-24 passed for both `This meeting` and `All meetings` using `gpt-5.5`, `reasoning.effort: medium`, and `store: false` without printing generated answer text.
 
 ## Email Export Requirements
 
@@ -184,7 +184,7 @@ Current implementation note: the Flutter app has a scoped AI chat sheet for `Thi
   - transcript below the summary if `Both` was selected
 - Transcript, summary, recipient addresses, and export payloads must not be logged, sent to app-owned backend infrastructure, or included in analytics/crash reports.
 
-Current implementation note: Transcript exports are prepared locally and handed to the Android share sheet. Summary and Both exports now use a fakeable direct OpenAI Responses gateway from the phone with `gpt-5.5`, `reasoning.effort: xhigh`, and `store: false`; credentials stay in the Authorization header only, generated summary text/metadata is stored only in encrypted local storage, and the share sheet opens only from the user-initiated export action. Unit/widget tests cover request construction, credential non-leakage, local summary persistence, and Summary/Both export composition. Live OpenAI API-key smoke for the summary path has not run yet.
+Current implementation note: Transcript exports are prepared locally and handed to the Android share sheet. Summary and Both exports now use a fakeable direct OpenAI Responses gateway from the phone with `gpt-5.5`, `reasoning.effort: xhigh`, and `store: false`; credentials stay in the Authorization header only, generated summary text/metadata is stored only in encrypted local storage, and the share sheet opens only from the user-initiated export action. Unit/widget tests cover request construction, credential non-leakage, local summary persistence, and Summary/Both export composition. Live Responses smoke on 2026-05-24 passed for the summary path with `gpt-5.5`, `reasoning.effort: xhigh`, `store: false`, and expected summary headings validated without printing generated summary text.
 
 ## Privacy, Security, And Logging Requirements
 
@@ -245,6 +245,7 @@ Closed planning and implementation intake:
 - #2 Scaffold Flutter mobile app.
 - #3 Implement Flutter UI from supplied mockups for phone-only MVP.
 - #7 Implement language support and fallback routing.
+- #8 Add scoped AI chat over local meetings.
 - #9 Implement local encrypted meeting storage.
 - #10 Maintain cybersecurity threat model and report.
 - #11 Document Android emulator workflow for Codex.
@@ -255,16 +256,15 @@ Closed planning and implementation intake:
 - #17 Add accessibility and responsive text verification.
 - #18 Define Flutter design tokens and reusable mockup components.
 - #20 Implement local meeting management.
+- #21 Add email export for transcripts and summaries.
 - #22 Implement dependency and supply-chain cybersecurity controls.
 - #23 Decide safe direct OpenAI mobile credential approach.
 
 Open MVP/planning work:
 
 - #6 Integrate direct OpenAI Realtime Translation.
-- #8 Add scoped AI chat over local meetings.
 - #14 Harden direct OpenAI realtime resilience.
 - #19 Maintain README and agent handoff docs during implementation.
-- #21 Add email export for transcripts and summaries.
 
 Deferred V2/future issues:
 
@@ -290,5 +290,5 @@ Deferred V2/future issues:
 - Final Android package name and signing certificate details.
 - The accepted credential/session implementation details for user-provided OpenAI credential material, including UX, encrypted storage reset/removal, and credential-invalid recovery.
 - Current OpenAI Realtime Translation docs do not expose an authoritative target output language enum. The MVP currently uses the conservative English/Spanish/French realtime table and direct-OpenAI fallback-pending handling described above.
-- Live endpoint/API behavior for `gpt-realtime-2` versus the dedicated `gpt-realtime-translate` fallback/profile.
+- Real microphone/audio behavior for `gpt-realtime-2` versus the dedicated `gpt-realtime-translate` fallback/profile under live streaming.
 - Whether diagnostics/crash reporting is included in MVP or deferred.

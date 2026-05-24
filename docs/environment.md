@@ -40,6 +40,13 @@ bash scripts/check-docs.sh
 bash scripts/check-supply-chain.sh
 ```
 
+Optional live OpenAI smoke, only when a credential is supplied through the process environment from an uncommitted local source:
+
+```bash
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+OPENAI_API_KEY="<redacted local value>" dart run scripts/live_openai_smoke.dart --all
+```
+
 Android emulator available on Tom's Fedora machine:
 
 ```bash
@@ -87,9 +94,9 @@ For a screenshot artifact during issue closure, write it outside the repo unless
 adb exec-out screencap -p > /tmp/live-translate-mobile-smoke.png
 ```
 
-Expected current smoke result: the `Live Translate` phone-local start surface renders with `Start new meeting`, `Open meeting history`, `OpenAI setup`, the on-device privacy note, and the `Secure & Private` / `Android MVP` footer badges. Starting a meeting without a saved credential shows `OpenAI setup required` before microphone permission or live resources open. The OpenAI setup sheet accepts a user-provided credential, stores it through encrypted local storage, does not redisplay the saved value, and supports removal. After a local credential is configured, starting a meeting requests Android microphone permission before showing the mock live session; denied permission shows the `Microphone access needed` state and no live session opens. After permission is granted, the mock meeting is written through the encrypted local repository, appears in meeting history with stored metadata, can be reopened to append local history, can be deleted locally, can open AI chat for `This meeting` or `All meetings`, can prepare a Transcript export for Android native share handoff, and can generate Summary/Both export payloads through the direct OpenAI Responses summary path when a valid local credential is present. Live summary smoke against OpenAI still requires Tom to provide an API key.
+Expected current smoke result: the `Live Translate` phone-local start surface renders with `Start new meeting`, `Open meeting history`, `OpenAI setup`, the on-device privacy note, and the `Secure & Private` / `Android MVP` footer badges. Starting a meeting without a saved credential shows `OpenAI setup required` before microphone permission or live resources open. The OpenAI setup sheet accepts a user-provided credential, stores it through encrypted local storage, does not redisplay the saved value, and supports removal. After a local credential is configured, starting a meeting requests Android microphone permission before showing the mock live session; denied permission shows the `Microphone access needed` state and no live session opens. After permission is granted, the mock meeting is written through the encrypted local repository, appears in meeting history with stored metadata, can be reopened to append local history, can be deleted locally, can open AI chat for `This meeting` or `All meetings`, can prepare a Transcript export for Android native share handoff, and can generate Summary/Both export payloads through the direct OpenAI Responses summary path when a valid local credential is present. The repo-local live smoke harness passed on 2026-05-24 for Summary export, both AI chat scopes, and realtime endpoint availability.
 
-UI smoke checks should additionally cover the teal listening screen after local credential setup, scoped AI chat sheet for both scopes, amber read-aloud-paused screen, meeting history continue/delete controls, email export recipient preference surface, summary export state, and transcript/summary share intent launch when safe to do without capturing export payload screenshots. Direct realtime WebSocket profile/event behavior and direct summary Responses request behavior are currently tested with local fake gateways and have no distinct visible emulator surface beyond the existing live-session/export shell. Real microphone capture, direct OpenAI realtime streaming against OpenAI, decoded translated-audio playback, live OpenAI API-key smoke, production-volume storage behavior, and iOS share handoff remain future implementation checks.
+UI smoke checks should additionally cover the teal listening screen after local credential setup, scoped AI chat sheet for both scopes, amber read-aloud-paused screen, meeting history continue/delete controls, email export recipient preference surface, summary export state, and transcript/summary share intent launch when safe to do without capturing export payload screenshots. Direct realtime WebSocket profile/event behavior and direct summary Responses request behavior are covered by local fake gateways and the redacted live smoke harness; they have no distinct visible emulator surface beyond the existing live-session/export shell. Real microphone capture, direct OpenAI realtime audio streaming against OpenAI, decoded translated-audio playback, live reconnect behavior, production-volume storage behavior, and iOS share handoff remain future implementation checks.
 
 ## Environment Placeholders
 
