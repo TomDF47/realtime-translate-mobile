@@ -48,6 +48,7 @@ There is no MVP AWS, Lambda, token broker, app backend, cloud sync, cloud identi
 - Runtime microphone permissions and explicit session state transitions.
 - Direct OpenAI realtime session connection, credential-invalid handling, reconnect, teardown, and error handling.
 - Local encrypted storage for preferences, recent languages, meetings, transcript/history, summary metadata, recipient preferences, and any credential/session material.
+- Privacy-safe local diagnostics through a no-op-by-default allowlist/redaction helper.
 - Meeting management for starting a new meeting, selecting an old meeting, and continuing from it.
 - UI surfaces from [docs/mockup-ux-spec.md](mockup-ux-spec.md) and [assets/mockups](../assets/mockups), adapted for the phone-only MVP.
 - Scoped AI chat UI and direct OpenAI request path for `This meeting` and `All meetings`.
@@ -80,6 +81,7 @@ The first Flutter scaffold keeps boundaries visible:
 android/                     Android Flutter project and app namespace
 ios/                         iOS-compatible Flutter project shell
 lib/                         Flutter app code
+lib/src/diagnostics/         Privacy-safe diagnostics allowlist and redaction helper
 lib/src/openai/              OpenAI model defaults and encrypted credential helpers
 lib/src/session/             Phone-local permission and live-session lifecycle state
 lib/src/storage/             Encrypted local store, meeting repository, and storage models
@@ -93,7 +95,7 @@ docs/                        Product, architecture, setup, testing, decisions
 assets/mockups/              Supplied Android mockups
 ```
 
-The current app shell renders the phone-local welcome/start surface, OpenAI setup-required state, encrypted OpenAI setup sheet, Android microphone permission gate, mockup-derived live translation surfaces, scoped AI chat sheet, encrypted local meeting history sheet, and local email export sheet. The lifecycle controller models permission, credential-invalid, listening, read-aloud-paused, reconnecting, stop, app background/foreground, and audio-route state transitions. The storage layer persists meetings, transcript/history entries, summary metadata, recent language routes, recipient preferences, sensitive preferences, and credential/session material through `flutter_secure_storage`, with Android backup disabled for app data. Meeting management can start a new local meeting after a credential is configured, select a stored meeting, reopen it as the active encrypted local context, append continuation transcript history, and delete stored meeting metadata. Real microphone capture, direct OpenAI streaming, AI chat request execution, summary generation, native share handoff, and logging implementations remain scoped to their GitHub issues.
+The current app shell renders the phone-local welcome/start surface, OpenAI setup-required state, encrypted OpenAI setup sheet, Android microphone permission gate, mockup-derived live translation surfaces, scoped AI chat sheet, encrypted local meeting history sheet, and local email export sheet. The lifecycle controller models permission, credential-invalid, listening, read-aloud-paused, reconnecting, stop, app background/foreground, and audio-route state transitions. The storage layer persists meetings, transcript/history entries, summary metadata, recent language routes, recipient preferences, sensitive preferences, and credential/session material through `flutter_secure_storage`, with Android backup disabled for app data. Privacy-safe diagnostics are no-op by default and can record only allowlisted state/configuration fields after redaction/omission. Meeting management can start a new local meeting after a credential is configured, select a stored meeting, reopen it as the active encrypted local context, append continuation transcript history, and delete stored meeting metadata. Real microphone capture, direct OpenAI streaming, AI chat request execution, summary generation, native share handoff, and any analytics/crash-reporting sink remain scoped to their GitHub issues.
 
 Language support is centralized in `lib/src/language/language_support.dart`. The current table is conservative because official OpenAI Realtime Translation docs confirm the target-language parameter but do not publish a target-language enum. Default target options expose only English, Spanish, and French for realtime output; broader targets such as Japanese are represented as direct-OpenAI fallback-pending and stay inside the same phone-only privacy boundary.
 

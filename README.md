@@ -12,6 +12,7 @@ Android-first Flutter app for live speech translation, designed to stay iOS-comp
 - Architecture handoff: [docs/architecture.md](docs/architecture.md)
 - V2/future scope: [docs/v2-future-scope.md](docs/v2-future-scope.md)
 - Cybersecurity report: [docs/cybersecurity-report.md](docs/cybersecurity-report.md)
+- Privacy-safe diagnostics: [docs/privacy-safe-diagnostics.md](docs/privacy-safe-diagnostics.md)
 - Environment setup: [docs/environment.md](docs/environment.md)
 - Testing strategy: [docs/testing-strategy.md](docs/testing-strategy.md)
 - Decision log: [docs/decision-log.md](docs/decision-log.md)
@@ -36,7 +37,7 @@ The app should feel premium, clean, and executive-grade. The MVP is phone-only a
 
 Planning repo created. Supplied Android mockups have been received, copied into [assets/mockups](assets/mockups), and captured in [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md). The canonical build-ready spec is [docs/live-translate-build-spec.md](docs/live-translate-build-spec.md).
 
-The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, encrypted local meeting storage, local meeting management, a centralized language support/fallback table, phone-local OpenAI setup with encrypted credential storage/reset, accessibility/responsive text coverage, and a repeatable local supply-chain/security gate. The current app can render the phone-local welcome/start screen, OpenAI setup-required state, encrypted OpenAI setup sheet, microphone permission denied state, teal listening live translation surface after a local credential is configured, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with stored metadata, select-and-continue behavior that appends local transcript history, delete controls, local language target options, a fallback credential-required state for unsupported realtime targets, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, real OpenAI network call, real microphone capture, or server-side transcript handling.
+The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, a deterministic local session lifecycle controller, encrypted local meeting storage, local meeting management, a centralized language support/fallback table, phone-local OpenAI setup with encrypted credential storage/reset, privacy-safe local diagnostics/redaction controls, accessibility/responsive text coverage, and a repeatable local supply-chain/security gate. The current app can render the phone-local welcome/start screen, OpenAI setup-required state, encrypted OpenAI setup sheet, microphone permission denied state, teal listening live translation surface after a local credential is configured, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, encrypted meeting history sheet with stored metadata, select-and-continue behavior that appends local transcript history, delete controls, local language target options, a fallback credential-required state for unsupported realtime targets, and local email export sheet with encrypted recipient preferences. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, real OpenAI network call, real microphone capture, analytics/crash reporting sink, or server-side transcript handling.
 
 OpenAI Realtime verification for #6 found that `gpt-realtime-2` is documented as the most capable realtime voice model and `gpt-realtime-translate` is documented as a dedicated streaming speech-to-speech translation model. Official client-safe Realtime client secrets are still minted by a developer-controlled server using a standard API key, so #23 closed with Tom's MVP decision: proceed phone-to-OpenAI directly with user-provided OpenAI credential/session material stored only in encrypted local device storage, do not commit or bundle any key, and ask Tom for an API key only at the first real OpenAI network smoke/integration test.
 
@@ -53,6 +54,7 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [docs/architecture.md](docs/architecture.md): mobile, OpenAI, storage, email export, and prohibited data-flow boundaries.
 - [docs/v2-future-scope.md](docs/v2-future-scope.md): deferred cloud/backend/auth scope.
 - [docs/cybersecurity-report.md](docs/cybersecurity-report.md): cybersecurity baseline and dependency-advisory methodology.
+- [docs/privacy-safe-diagnostics.md](docs/privacy-safe-diagnostics.md): local diagnostics allowlist, redaction rules, and forbidden payload categories.
 - [docs/development-workflow.md](docs/development-workflow.md): issue workflow, doc update matrix, and handoff checklist.
 - [docs/environment.md](docs/environment.md): local setup, emulator notes, env placeholders, and secret handling.
 - [docs/testing-strategy.md](docs/testing-strategy.md): docs, Flutter, privacy, cybersecurity, and emulator verification plan.
@@ -65,6 +67,7 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [scripts/check-supply-chain.sh](scripts/check-supply-chain.sh): local dependency advisory, secret-pattern, and Android permission gate.
 - [pubspec.yaml](pubspec.yaml) and [pubspec.lock](pubspec.lock): Flutter package manifest and pinned dependency lockfile.
 - [lib/main.dart](lib/main.dart): current phone-local Flutter start surface.
+- [lib/src/diagnostics](lib/src/diagnostics): no-op-by-default privacy-safe diagnostics helper with allowlisted fields, redaction, omission, and in-memory test sink.
 - [lib/src/language/language_support.dart](lib/src/language/language_support.dart): typed language support table and realtime/fallback route planner.
 - [lib/src/openai](lib/src/openai): OpenAI model/endpoint defaults plus encrypted local credential status/read/reset helpers.
 - [lib/src/theme/live_translate_theme.dart](lib/src/theme/live_translate_theme.dart): shared colors, spacing, radii, text styles, elevation, and app theme.
@@ -78,6 +81,7 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [test/design_system_test.dart](test/design_system_test.dart): design-system unit/widget coverage.
 - [test/language_support_test.dart](test/language_support_test.dart): language support table and fallback route coverage.
 - [test/accessibility_responsive_test.dart](test/accessibility_responsive_test.dart): semantic-label and compact large-text coverage.
+- [test/privacy_safe_diagnostics_test.dart](test/privacy_safe_diagnostics_test.dart): diagnostics redaction and payload-exclusion coverage.
 - [android](android): Android Flutter project, app namespace, debug build config, and local signing placeholder.
 - [ios](ios): iOS-compatible Flutter project shell.
 
@@ -130,6 +134,7 @@ Closed planning and implementation intake:
 - #9 Implement local encrypted meeting storage
 - #11 Document Android emulator workflow for Codex
 - #13 Implement microphone permissions and live session lifecycle
+- #15 Implement privacy-safe local logging and diagnostics controls
 - #16 Add CI quality gates for docs, Flutter, and secret safety
 - #17 Add accessibility and responsive text verification
 - #18 Define Flutter design tokens and reusable mockup components
@@ -144,7 +149,6 @@ Open MVP/planning work:
 - #10 Maintain cybersecurity threat model and report
 - #12 Create phone-only MVP test strategy
 - #14 Harden direct OpenAI realtime resilience
-- #15 Implement privacy-safe local logging and diagnostics controls
 - #19 Maintain README and agent handoff docs during implementation
 - #21 Add email export for transcripts and summaries
 
@@ -174,6 +178,7 @@ The mockups remain the visual source of truth. MVP behavior has changed to phone
 - Store meeting history, transcripts, summaries, recipient preferences, and sensitive local data only in encrypted device storage for the MVP.
 - Use device-native mail/share composer semantics where practical for export; do not add an outbound mail backend.
 - Keep logs, crash reports, analytics, diagnostics, screenshots, and test output free of speech, transcript payloads, prompts, translations, summaries, recipient lists, OpenAI credentials/session material, and API keys.
+- Route app diagnostics through `PrivacySafeDiagnostics`; add only allowlisted state/configuration labels and never raw payloads or credential material.
 - Verify current OpenAI Realtime model/endpoint behavior, Realtime Translation target language support, and summary model/reasoning support during implementation.
 - Treat cybersecurity as a first-class acceptance criterion: dependency hygiene, supply-chain checks, mobile permission minimization, secret scanning, and no transcript leakage are required.
 
@@ -203,6 +208,7 @@ Additional checks for app changes:
 - UI smoke coverage for supplied mockup-derived surfaces, meeting management, scoped AI chat, and email export
 - Privacy routing test showing transcript/audio/prompt/summary/export content does not call an app backend
 - Logging/diagnostics test showing sensitive payloads and credentials are absent or redacted
+- `flutter test test/privacy_safe_diagnostics_test.dart` for the focused local diagnostics redaction gate
 
 ## Documentation Maintenance
 

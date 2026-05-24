@@ -31,6 +31,7 @@ Build an Android-first, iOS-compatible Flutter app for continuous live speech tr
 - Architecture handoff: [docs/architecture.md](architecture.md)
 - V2/future scope: [docs/v2-future-scope.md](v2-future-scope.md)
 - Cybersecurity report: [docs/cybersecurity-report.md](cybersecurity-report.md)
+- Privacy-safe diagnostics: [docs/privacy-safe-diagnostics.md](privacy-safe-diagnostics.md)
 - Development workflow: [docs/development-workflow.md](development-workflow.md)
 - Environment setup: [docs/environment.md](environment.md)
 - Testing strategy: [docs/testing-strategy.md](testing-strategy.md)
@@ -241,6 +242,7 @@ Closed planning and implementation intake:
 - #9 Implement local encrypted meeting storage.
 - #11 Document Android emulator workflow for Codex.
 - #13 Implement microphone permissions and live session lifecycle.
+- #15 Implement privacy-safe local logging and diagnostics controls.
 - #16 Add CI quality gates for docs, Flutter, and secret safety.
 - #17 Add accessibility and responsive text verification.
 - #18 Define Flutter design tokens and reusable mockup components.
@@ -255,7 +257,6 @@ Open MVP/planning work:
 - #10 Maintain cybersecurity threat model and report.
 - #12 Create phone-only MVP test strategy.
 - #14 Harden direct OpenAI realtime resilience.
-- #15 Implement privacy-safe local logging and diagnostics controls.
 - #19 Maintain README and agent handoff docs during implementation.
 - #21 Add email export for transcripts and summaries.
 

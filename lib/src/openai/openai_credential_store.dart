@@ -1,3 +1,4 @@
+import '../diagnostics/privacy_safe_diagnostics.dart';
 import '../storage/local_meeting_repository.dart';
 
 enum OpenAiCredentialAvailability { missing, configured }
@@ -28,25 +29,32 @@ class OpenAiCredentialStatus {
 }
 
 class OpenAiCredentialStore {
-  OpenAiCredentialStore({required this.repository});
+  OpenAiCredentialStore({
+    required this.repository,
+    this.diagnostics = const PrivacySafeDiagnostics(),
+  });
 
   static const apiKeyStorageKey = 'openai_user_provided_api_key';
   static const configuredAtStorageKey =
       'openai_user_provided_api_key_configured_at';
 
   final LocalMeetingRepository repository;
+  final PrivacySafeDiagnostics diagnostics;
 
   Future<OpenAiCredentialStatus> loadStatus() async {
     final material = await repository.loadCredentialSessionMaterial();
     final credential = material[apiKeyStorageKey]?.trim();
     if (credential == null || credential.isEmpty) {
+      _recordStatus(const OpenAiCredentialStatus.missing());
       return const OpenAiCredentialStatus.missing();
     }
 
-    return OpenAiCredentialStatus(
+    final status = OpenAiCredentialStatus(
       availability: OpenAiCredentialAvailability.configured,
       configuredAt: DateTime.tryParse(material[configuredAtStorageKey] ?? ''),
     );
+    _recordStatus(status);
+    return status;
   }
 
   Future<void> saveUserProvidedCredential(
@@ -71,22 +79,65 @@ class OpenAiCredentialStore {
       key: configuredAtStorageKey,
       value: savedAt.toIso8601String(),
     );
+    diagnostics.info(
+      'openai.credential_saved',
+      fields: {
+        'credentialStatus': OpenAiCredentialAvailability.configured.name,
+        'storageArea': 'credentialSessionMaterial',
+        'result': 'success',
+      },
+    );
   }
 
   Future<String?> readCredentialForNetworkUse() async {
     final material = await repository.loadCredentialSessionMaterial();
     final credential = material[apiKeyStorageKey]?.trim();
     if (credential == null || credential.isEmpty) {
+      diagnostics.info(
+        'openai.credential_read',
+        fields: {
+          'credentialStatus': OpenAiCredentialAvailability.missing.name,
+          'operation': 'networkCredentialRead',
+          'result': 'missing',
+        },
+      );
       return null;
     }
 
+    diagnostics.info(
+      'openai.credential_read',
+      fields: {
+        'credentialStatus': OpenAiCredentialAvailability.configured.name,
+        'operation': 'networkCredentialRead',
+        'result': 'configured',
+      },
+    );
     return credential;
   }
 
-  Future<void> clearCredential() {
-    return repository.deleteCredentialSessionMaterialKeys({
+  Future<void> clearCredential() async {
+    await repository.deleteCredentialSessionMaterialKeys({
       apiKeyStorageKey,
       configuredAtStorageKey,
     });
+    diagnostics.info(
+      'openai.credential_removed',
+      fields: {
+        'credentialStatus': OpenAiCredentialAvailability.missing.name,
+        'storageArea': 'credentialSessionMaterial',
+        'result': 'success',
+      },
+    );
+  }
+
+  void _recordStatus(OpenAiCredentialStatus status) {
+    diagnostics.info(
+      'openai.credential_status',
+      fields: {
+        'credentialStatus': status.availability.name,
+        'configured': status.isConfigured,
+        'storageArea': 'credentialSessionMaterial',
+      },
+    );
   }
 }

@@ -13,7 +13,7 @@ bash scripts/check-docs.sh
 bash scripts/check-supply-chain.sh
 ```
 
-`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. `scripts/check-supply-chain.sh` checks for obvious credential leaks, verifies Android permission additions against the current allowlist, and queries OSV for pinned hosted Pub and Gradle/Maven runtime package versions. Current Flutter tests cover the phone-local start surface, OpenAI setup-required UI, encrypted OpenAI credential save/read/reset behavior without displaying the saved value, mockup-derived listening/AI chat/amber/export surfaces, microphone permission denied UI, deterministic session lifecycle transitions that keep capture/realtime/playback resources closed until permission and local credential gates pass, encrypted local repository behavior for meetings, transcript/history entries, summary metadata, language routes, recipient preferences, sensitive preferences, credential/session material, meeting management for deleting or continuing a saved meeting with appended local history, the conservative realtime language support table, direct-OpenAI fallback credential routing for unsupported targets, semantic labels for core controls, and compact large-text rendering across setup, live, assistant, amber, and export surfaces.
+`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. `scripts/check-supply-chain.sh` checks for obvious credential leaks, verifies Android permission additions against the current allowlist, and queries OSV for pinned hosted Pub and Gradle/Maven runtime package versions. Current Flutter tests cover the phone-local start surface, OpenAI setup-required UI, encrypted OpenAI credential save/read/reset behavior without displaying the saved value, privacy-safe diagnostics redaction and payload omission, mockup-derived listening/AI chat/amber/export surfaces, microphone permission denied UI, deterministic session lifecycle transitions that keep capture/realtime/playback resources closed until permission and local credential gates pass, encrypted local repository behavior for meetings, transcript/history entries, summary metadata, language routes, recipient preferences, sensitive preferences, credential/session material, meeting management for deleting or continuing a saved meeting with appended local history, the conservative realtime language support table, direct-OpenAI fallback credential routing for unsupported targets, semantic labels for core controls, and compact large-text rendering across setup, live, assistant, amber, and export surfaces.
 
 ## Flutter App Gates
 
@@ -34,6 +34,7 @@ Expected coverage areas:
 - Meeting management: start new meeting, select old meeting, continue from meeting, delete meeting.
 - Scoped AI chat: `This meeting`, `All meetings`, empty transcript, no selected meeting, offline, credential-invalid, unsupported, and model/API error states.
 - Email export: Transcript/Summary/Both selector, recipient checklist, add/remove recipients, remembered last selections, native mail/share handoff, and no outbound mail backend.
+- Privacy-safe diagnostics: allowlisted state/config fields only, redaction of credentials/session tokens, and omission/redaction of transcript, prompt, summary, recipient, export, and audio payloads.
 - Widget tests for the supplied mockup-derived surfaces and revised phone-only setup/meeting/export surfaces.
 - Accessibility checks for icon-only controls, local setup actions, meeting selectors, language selectors, playback controls, AI chat controls, export controls, recipient checklist, and transcript actions.
 
@@ -45,6 +46,7 @@ Every implementation change touching OpenAI, logging, storage, permissions, depe
 - No transcript/audio/prompt/summary/export payload routed through app-owned backend infrastructure.
 - No app backend, AWS, Lambda, token broker, cloud sync, or server mailer added to MVP code.
 - No transcript/audio/prompt/summary/recipient payload in logs, analytics, diagnostics, crash reports, screenshots, or test output.
+- Diagnostics use `PrivacySafeDiagnostics` or an equivalent allowlist/redaction path before reaching any sink.
 - AI chat uses the explicit `This meeting` or `All meetings` scope and direct OpenAI path.
 - Email export uses local preparation and user-initiated device-native mail/share composer semantics where practical.
 - Mobile permissions are limited to what the feature requires and are documented.

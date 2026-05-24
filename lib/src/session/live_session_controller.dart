@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../diagnostics/privacy_safe_diagnostics.dart';
 import 'microphone_permission.dart';
 
 enum LiveSessionPhase {
@@ -84,9 +85,13 @@ class LiveSessionState {
 }
 
 class LiveSessionController extends ChangeNotifier {
-  LiveSessionController({required this.permissionGateway});
+  LiveSessionController({
+    required this.permissionGateway,
+    this.diagnostics = const PrivacySafeDiagnostics(),
+  });
 
   final MicrophonePermissionGateway permissionGateway;
+  final PrivacySafeDiagnostics diagnostics;
 
   LiveSessionState _state = const LiveSessionState.initial();
   bool _pausedByLifecycle = false;
@@ -264,7 +269,20 @@ class LiveSessionController extends ChangeNotifier {
   }
 
   void _setState(LiveSessionState value) {
+    final previous = _state;
     _state = value;
+    diagnostics.info(
+      'live_session.state_change',
+      fields: {
+        'previousPhase': previous.phase.name,
+        'nextPhase': value.phase.name,
+        'permissionStatus': value.microphonePermission.name,
+        'audioRoute': value.audioRoute.name,
+        'isMicrophoneCaptureOpen': value.isMicrophoneCaptureOpen,
+        'isRealtimeSessionOpen': value.isRealtimeSessionOpen,
+        'isPlaybackQueueOpen': value.isPlaybackQueueOpen,
+      },
+    );
     notifyListeners();
   }
 }
