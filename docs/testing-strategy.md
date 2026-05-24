@@ -12,7 +12,7 @@ flutter test
 bash scripts/check-docs.sh
 ```
 
-`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. The current Flutter widget test verifies that the scaffold renders a phone-local start surface and does not show cloud sign-in or Flutter demo copy.
+`scripts/check-docs.sh` checks local Markdown links and scans for likely committed OpenAI secret patterns. Current Flutter tests cover the phone-local start surface, mockup-derived listening/AI chat/amber/export surfaces, microphone permission denied UI, and deterministic session lifecycle transitions that keep capture/realtime/playback resources closed until permission is granted.
 
 ## Flutter App Gates
 
@@ -97,7 +97,7 @@ Optional screenshot capture should write outside the repo by default:
 adb exec-out screencap -p > /tmp/live-translate-mobile-smoke.png
 ```
 
-The current scaffold can only verify the phone-local start surface. The teal listening, scoped AI chat, amber paused read-aloud, meeting management, and email export smoke paths become required as their implementation issues land.
+The current app can verify the phone-local start surface, Android microphone runtime permission dialog/denied state, teal listening screen, scoped AI chat bottom sheet, amber paused read-aloud screen, meeting management entry point, and email export sheet. Real microphone capture, direct OpenAI streaming, encrypted storage persistence, native share handoff, and privacy routing assertions become required as their implementation issues land.
 
 ## CI Direction
 

@@ -36,7 +36,7 @@ The app should feel premium, clean, and executive-grade. The MVP is phone-only a
 
 Planning repo created. Supplied Android mockups have been received, copied into [assets/mockups](assets/mockups), and captured in [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md). The canonical build-ready spec is [docs/live-translate-build-spec.md](docs/live-translate-build-spec.md).
 
-The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, and a mockup-derived UI shell. The current app can render the phone-local welcome/start screen, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, meeting history sheet, and local email export sheet. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, microphone capture, or server-side transcript handling.
+The Flutter scaffold now exists with Android and iOS project structure, app ID `com.tomdf47.realtime_translate_mobile`, Android signing placeholders, a mockup-derived UI shell, Android runtime microphone permission handling, and a deterministic local session lifecycle controller. The current app can render the phone-local welcome/start screen, microphone permission denied state, teal listening live translation surface, scoped AI chat bottom sheet, amber speaking/read-aloud-paused surface, meeting history sheet, and local email export sheet. The repo still contains no backend implementation, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, or server-side transcript handling.
 
 Keep future work aligned to the GitHub issue acceptance criteria and preserve the phone-only MVP privacy boundary.
 
@@ -59,6 +59,8 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [pubspec.yaml](pubspec.yaml) and [pubspec.lock](pubspec.lock): Flutter package manifest and pinned dependency lockfile.
 - [lib/main.dart](lib/main.dart): current phone-local Flutter start surface.
 - [lib/src/theme/live_translate_theme.dart](lib/src/theme/live_translate_theme.dart): shared colors, spacing, radii, text styles, elevation, and app theme.
+- [lib/src/session/live_session_controller.dart](lib/src/session/live_session_controller.dart): deterministic phone-local live-session lifecycle and resource state model.
+- [lib/src/session/microphone_permission.dart](lib/src/session/microphone_permission.dart): Flutter microphone permission abstraction backed by the Android MethodChannel implementation.
 - [lib/src/ui/live_translate_models.dart](lib/src/ui/live_translate_models.dart): structured UI state for sessions, transcripts, AI chat scope, export type, and controls.
 - [lib/src/ui/live_translate_components.dart](lib/src/ui/live_translate_components.dart): reusable mockup-aligned Flutter components.
 - [lib/src/mock/mock_live_translate_data.dart](lib/src/mock/mock_live_translate_data.dart): local-only sample session data for UI and widget tests.
@@ -112,6 +114,7 @@ Closed planning and implementation intake:
 - #2 Scaffold Flutter mobile app
 - #3 Implement Flutter UI from supplied mockups for phone-only MVP
 - #11 Document Android emulator workflow for Codex
+- #13 Implement microphone permissions and live session lifecycle
 - #18 Define Flutter design tokens and reusable mockup components
 
 Open MVP/planning work:
@@ -122,7 +125,6 @@ Open MVP/planning work:
 - #9 Implement local encrypted meeting storage
 - #10 Maintain cybersecurity threat model and report
 - #12 Create phone-only MVP test strategy
-- #13 Implement microphone permissions and live session lifecycle
 - #14 Harden direct OpenAI realtime resilience
 - #15 Implement privacy-safe local logging and diagnostics controls
 - #16 Add CI quality gates for docs, Flutter, and secret safety

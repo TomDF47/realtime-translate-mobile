@@ -1,12 +1,12 @@
 # Cybersecurity Report
 
-Report date/time: 2026-05-24 08:15:01 AWST (Australia/Perth, UTC+08:00)
+Report date/time: 2026-05-24 09:10:44 AWST (Australia/Perth, UTC+08:00)
 
-Scope: first Flutter scaffold dependency baseline for the phone-only MVP. The repo now contains Flutter Android/iOS scaffold files, package manifests, a lockfile, Android Gradle build files, placeholder-only environment config, and local signing placeholders.
+Scope: first Flutter scaffold dependency baseline and Android microphone-permission lifecycle update for the phone-only MVP. The repo now contains Flutter Android/iOS scaffold files, package manifests, a lockfile, Android Gradle build files, placeholder-only environment config, local signing placeholders, and a native Android MethodChannel for runtime microphone permission.
 
 ## Executive Summary
 
-The Flutter scaffold introduces pinned Dart package versions in `pubspec.lock`, Android Gradle build tooling, and a local signing placeholder. No app backend, AWS/Lambda token broker, cloud identity, cloud sync, server mailer, OpenAI integration, microphone permission, transcript storage, analytics, or crash reporting code has been added.
+The Flutter scaffold introduces pinned Dart package versions in `pubspec.lock`, Android Gradle build tooling, and a local signing placeholder. The app now declares Android `RECORD_AUDIO` permission and requests it at runtime through app-owned native Android code before opening the mock live-session surface. No new permission package, app backend, AWS/Lambda token broker, cloud identity, cloud sync, server mailer, OpenAI integration, real microphone capture, transcript storage, analytics, or crash reporting code has been added.
 
 Current result: no known vulnerabilities or GitHub advisory hits were found for the introduced Pub packages or checked Maven build-tool packages during this pass. The repo still must rerun this report whenever package versions or build tooling change.
 
@@ -14,6 +14,7 @@ Current result: no known vulnerabilities or GitHub advisory hits were found for 
 
 - Phone-only MVP aside from future direct OpenAI API calls.
 - No AWS, Lambda, token broker, app backend, cloud sync, server mailer, or server-side transcript handling.
+- Android runtime microphone permission is gated before live translation surfaces; no real microphone capture implementation exists yet.
 - Local encrypted storage is required for meetings, transcripts, summaries, recipient preferences, sensitive preferences, and credential/session material once implementation exists.
 - Direct OpenAI API calls are the only routine product network path.
 - Email export is user initiated and should use device-native mail/share composer semantics where practical.
@@ -60,6 +61,7 @@ Primary versions introduced:
 | 2026-05-24 AWST | OSV query batch API | Maven build tooling: `com.android.tools.build:gradle` 9.0.1, Kotlin Gradle plugin 2.3.20 | `vulnerable_count: 0`. |
 | 2026-05-24 AWST | GitHub Advisory Database REST API | Maven build tooling: Android Gradle Plugin and Kotlin Gradle plugin | 0 advisory hits. |
 | 2026-05-24 AWST | NVD | Dart/Flutter package graph | Not mapped because Pub package advisories are better covered by OSV/GitHub Advisory Database and no credible CPE mapping exists for the locked Pub packages. |
+| 2026-05-24 AWST | Manual review | Microphone permission lifecycle change | No third-party package added. Android `RECORD_AUDIO` is the only new mobile permission, requested at runtime through `MainActivity` before live-session UI opens. |
 
 ## Dependency And Supply-Chain Notes
 
@@ -67,6 +69,7 @@ Primary versions introduced:
 - `android/key.properties` is ignored and must remain local/uncommitted.
 - No standard OpenAI API key, client secret, token broker URL, AWS config, Google/Microsoft sign-in config, keystore, or certificate has been added.
 - The Flutter scaffold includes Android and iOS platform code only; there is no app-owned network endpoint.
+- Microphone permission handling uses platform code and does not add a supply-chain dependency. Real audio capture remains unimplemented and should be reviewed again when capture code or audio packages are introduced.
 - Future dependency additions must include lockfile updates, advisory checks, and this report update before issue closure.
 
 ## Required Rerun Trigger

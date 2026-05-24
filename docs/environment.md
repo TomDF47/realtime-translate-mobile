@@ -86,9 +86,9 @@ For a screenshot artifact during issue closure, write it outside the repo unless
 adb exec-out screencap -p > /tmp/live-translate-mobile-smoke.png
 ```
 
-Expected current smoke result: the `Live Translate` phone-local start surface renders with `Start new meeting`, `Open meeting history`, the on-device privacy note, and the `Secure & Private` / `Android MVP` footer badges.
+Expected current smoke result: the `Live Translate` phone-local start surface renders with `Start new meeting`, `Open meeting history`, the on-device privacy note, and the `Secure & Private` / `Android MVP` footer badges. Starting a meeting requests Android microphone permission before showing the mock live session; denied permission shows the `Microphone access needed` state and no live session opens.
 
-Future UI smoke checks should additionally cover the teal listening screen, scoped AI chat sheet, amber read-aloud-paused screen, meeting management, and email export surfaces as those issues land.
+UI smoke checks should additionally cover the teal listening screen, scoped AI chat sheet, amber read-aloud-paused screen, meeting management, and email export surfaces. Real microphone capture, direct OpenAI streaming, encrypted persistence, and native share handoff remain future implementation checks.
 
 ## Environment Placeholders
 

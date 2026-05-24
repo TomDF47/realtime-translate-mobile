@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'src/mock/mock_live_translate_data.dart';
+import 'src/session/live_session_controller.dart';
+import 'src/session/microphone_permission.dart';
 import 'src/theme/live_translate_theme.dart';
 import 'src/ui/live_translate_components.dart';
 import 'src/ui/live_translate_models.dart';
@@ -10,7 +14,9 @@ void main() {
 }
 
 class LiveTranslateApp extends StatelessWidget {
-  const LiveTranslateApp({super.key});
+  const LiveTranslateApp({super.key, this.permissionGateway});
+
+  final MicrophonePermissionGateway? permissionGateway;
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +24,7 @@ class LiveTranslateApp extends StatelessWidget {
       title: 'Live Translate',
       debugShowCheckedModeBanner: false,
       theme: LiveTranslateTheme.dark(),
-      home: const LiveTranslateHome(),
+      home: LiveTranslateHome(permissionGateway: permissionGateway),
     );
   }
 }
@@ -26,24 +32,96 @@ class LiveTranslateApp extends StatelessWidget {
 enum _AppSurface { setup, listening, speakingPaused }
 
 class LiveTranslateHome extends StatefulWidget {
-  const LiveTranslateHome({super.key});
+  const LiveTranslateHome({super.key, this.permissionGateway});
+
+  final MicrophonePermissionGateway? permissionGateway;
 
   @override
   State<LiveTranslateHome> createState() => _LiveTranslateHomeState();
 }
 
-class _LiveTranslateHomeState extends State<LiveTranslateHome> {
+class _LiveTranslateHomeState extends State<LiveTranslateHome>
+    with WidgetsBindingObserver {
+  late final LiveSessionController _sessionController;
   _AppSurface _surface = _AppSurface.setup;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _sessionController = LiveSessionController(
+      permissionGateway:
+          widget.permissionGateway ??
+          MethodChannelMicrophonePermissionGateway(),
+    );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _sessionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _sessionController.handleAppLifecycleState(state);
+    if (_sessionController.state.phase == LiveSessionPhase.readAloudPaused ||
+        _sessionController.state.phase == LiveSessionPhase.reconnecting) {
+      setState(() => _surface = _AppSurface.speakingPaused);
+    }
+  }
+
+  Future<void> _startMeeting() async {
+    await _sessionController.startMeeting();
+    if (!mounted) {
+      return;
+    }
+
+    final phase = _sessionController.state.phase;
+    if (phase == LiveSessionPhase.listening) {
+      setState(() => _surface = _AppSurface.listening);
+    } else {
+      setState(() {});
+    }
+  }
+
   void _openListening() {
+    unawaited(_openListeningAfterPermission());
+  }
+
+  Future<void> _openListeningAfterPermission() async {
+    if (!_sessionController.state.microphonePermission.isGranted) {
+      await _startMeeting();
+      return;
+    }
+
+    _sessionController.resumeListening();
     setState(() => _surface = _AppSurface.listening);
   }
 
   void _openSpeakingPaused() {
+    unawaited(_openSpeakingPausedAfterPermission());
+  }
+
+  Future<void> _openSpeakingPausedAfterPermission() async {
+    if (!_sessionController.state.microphonePermission.isGranted) {
+      await _sessionController.startMeeting();
+      if (!mounted) {
+        return;
+      }
+      if (_sessionController.state.phase != LiveSessionPhase.listening) {
+        setState(() {});
+        return;
+      }
+    }
+
+    _sessionController.enterSpeakingPaused();
     setState(() => _surface = _AppSurface.speakingPaused);
   }
 
   void _openSetup() {
+    _sessionController.stopMeeting();
     setState(() => _surface = _AppSurface.setup);
   }
 
@@ -122,9 +200,25 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome> {
 
   @override
   Widget build(BuildContext context) {
+    final sessionState = _sessionController.state;
+    if (sessionState.phase == LiveSessionPhase.requestingMicrophonePermission ||
+        sessionState.phase == LiveSessionPhase.connecting) {
+      return _LifecycleProgressScreen(state: sessionState);
+    }
+
+    if (sessionState.phase == LiveSessionPhase.microphoneDenied ||
+        sessionState.phase == LiveSessionPhase.microphonePermanentlyDenied) {
+      return _MicrophonePermissionScreen(
+        state: sessionState,
+        onRetry: _startMeeting,
+        onBack: _openSetup,
+        onOpenSettings: _sessionController.openPermissionSettings,
+      );
+    }
+
     return switch (_surface) {
       _AppSurface.setup => LocalSetupScreen(
-        onStartMeeting: _openListening,
+        onStartMeeting: _startMeeting,
         onOpenMeetingHistory: _showMeetingHistory,
       ),
       _AppSurface.listening => LiveSessionScreen(
@@ -245,6 +339,176 @@ class _LocalSetupActions extends StatelessWidget {
         const SizedBox(height: AppSpacing.xl),
         const PrivacyNote(label: LocalSetupScreen._privacyLabel),
       ],
+    );
+  }
+}
+
+class _LifecycleProgressScreen extends StatelessWidget {
+  const _LifecycleProgressScreen({required this.state});
+
+  final LiveSessionState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final title = state.phase == LiveSessionPhase.requestingMicrophonePermission
+        ? 'Requesting microphone access'
+        : 'Preparing live session';
+
+    return LiveTranslateShell(
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const WaveLogo(),
+            const SizedBox(height: AppSpacing.xxl),
+            const CircularProgressIndicator(),
+            const SizedBox(height: AppSpacing.xl),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.title(textTheme),
+            ),
+            if (state.notice != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                state.notice!,
+                textAlign: TextAlign.center,
+                style: AppTextStyles.body(textTheme),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MicrophonePermissionScreen extends StatelessWidget {
+  const _MicrophonePermissionScreen({
+    required this.state,
+    required this.onRetry,
+    required this.onBack,
+    required this.onOpenSettings,
+  });
+
+  final LiveSessionState state;
+  final VoidCallback onRetry;
+  final VoidCallback onBack;
+  final VoidCallback onOpenSettings;
+
+  bool get _requiresSettings {
+    return state.phase == LiveSessionPhase.microphonePermanentlyDenied;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return LiveTranslateShell(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  WaveLogo(
+                    accent: _requiresSettings
+                        ? LiveAccent.amber
+                        : LiveAccent.red,
+                  ),
+                  const SizedBox(height: AppSpacing.xxl),
+                  Text(
+                    'Microphone access needed',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.display(
+                      textTheme,
+                    ).copyWith(fontSize: 36),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    _requiresSettings
+                        ? 'Enable microphone access in Android settings before starting live translation.'
+                        : 'Live translation starts only after Android grants microphone access.',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.body(textTheme).copyWith(fontSize: 18),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  _PermissionActionButton(
+                    label: _requiresSettings
+                        ? 'Open app settings'
+                        : 'Try microphone permission again',
+                    icon: _requiresSettings
+                        ? Icons.settings_rounded
+                        : Icons.mic_rounded,
+                    onPressed: _requiresSettings ? onOpenSettings : onRetry,
+                    isPrimary: true,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _PermissionActionButton(
+                    label: 'Back to start',
+                    icon: Icons.arrow_back_rounded,
+                    onPressed: onBack,
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  const PrivacyNote(
+                    label:
+                        'No audio is captured before microphone permission is granted.',
+                    icon: Icons.lock_outline_rounded,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PermissionActionButton extends StatelessWidget {
+  const _PermissionActionButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.isPrimary = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool isPrimary;
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor = isPrimary ? AppColors.teal : AppColors.surface;
+    final foregroundColor = isPrimary
+        ? AppColors.background
+        : AppColors.textPrimary;
+
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon),
+        label: Text(label),
+        style: FilledButton.styleFrom(
+          backgroundColor: backgroundColor,
+          foregroundColor: foregroundColor,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: 18,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            side: BorderSide(
+              color: isPrimary ? AppColors.teal : AppColors.border,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
+import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 
 void main() {
   testWidgets('shows phone-local start surface', (tester) async {
@@ -27,7 +28,9 @@ void main() {
   testWidgets('opens teal listening and scoped AI chat surfaces', (
     tester,
   ) async {
-    await tester.pumpWidget(const LiveTranslateApp());
+    await tester.pumpWidget(
+      LiveTranslateApp(permissionGateway: _FakePermissionGateway.granted()),
+    );
 
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
@@ -52,7 +55,9 @@ void main() {
   testWidgets('opens amber paused read-aloud and export surfaces', (
     tester,
   ) async {
-    await tester.pumpWidget(const LiveTranslateApp());
+    await tester.pumpWidget(
+      LiveTranslateApp(permissionGateway: _FakePermissionGateway.granted()),
+    );
 
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
@@ -75,4 +80,44 @@ void main() {
     expect(find.text('Both'), findsOneWidget);
     expect(find.text('recipient@example.com'), findsOneWidget);
   });
+
+  testWidgets('blocks live session when microphone permission is denied', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      LiveTranslateApp(permissionGateway: _FakePermissionGateway.denied()),
+    );
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Microphone access needed'), findsOneWidget);
+    expect(find.text('Try microphone permission again'), findsOneWidget);
+    expect(
+      find.text(
+        'No audio is captured before microphone permission is granted.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
+  });
+}
+
+class _FakePermissionGateway implements MicrophonePermissionGateway {
+  _FakePermissionGateway(this._status);
+
+  _FakePermissionGateway.granted() : this(MicrophonePermissionStatus.granted);
+
+  _FakePermissionGateway.denied() : this(MicrophonePermissionStatus.denied);
+
+  final MicrophonePermissionStatus _status;
+
+  @override
+  Future<MicrophonePermissionStatus> checkStatus() async => _status;
+
+  @override
+  Future<void> openAppSettings() async {}
+
+  @override
+  Future<MicrophonePermissionStatus> request() async => _status;
 }
