@@ -7,6 +7,9 @@ abstract final class OpenAiConfiguration {
   static const summaryModel = 'gpt-5.5';
   static const summaryReasoningEffort = 'xhigh';
 
+  static const realtimeWebSocketBaseUrl = 'wss://api.openai.com/v1';
+  static const realtimeWebSocketPath = '/realtime';
+  static const translationWebSocketPath = '/realtime/translations';
   static const realtimeCallsEndpoint = '$apiBaseUrl/realtime/calls';
   static const translationClientSecretsEndpoint =
       '$apiBaseUrl/realtime/translations/client_secrets';

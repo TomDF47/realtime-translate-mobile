@@ -126,6 +126,8 @@ The MVP must not include an app backend.
 - Ask Tom for an OpenAI API key only at the first real OpenAI network smoke/integration test.
 - Store credential/session material only in encrypted local storage, redact it from logs/screenshots/test output, and provide a clear removal/reset path.
 
+Current implementation note: the Flutter app now has a fakeable direct OpenAI realtime WebSocket seam for #6. It builds a primary `gpt-realtime-2` profile, keeps a dedicated `gpt-realtime-translate` profile for endpoint testing/fallback, sends PCM16 append events with credentials only in the Authorization header, and parses both Realtime 2 and dedicated translation audio/transcript delta event names. It still has no real microphone capture, decoded translated-audio playback, or live API-key OpenAI smoke result.
+
 ## Language Support And Fallback
 
 OpenAI Realtime Translation is expected to have broad input language coverage and narrower target output language coverage. The app must plan for unsupported target output languages.

@@ -16,6 +16,15 @@ void main() {
     expect(OpenAiConfiguration.summaryModel, 'gpt-5.5');
     expect(OpenAiConfiguration.summaryReasoningEffort, 'xhigh');
     expect(
+      OpenAiConfiguration.realtimeWebSocketBaseUrl,
+      'wss://api.openai.com/v1',
+    );
+    expect(OpenAiConfiguration.realtimeWebSocketPath, '/realtime');
+    expect(
+      OpenAiConfiguration.translationWebSocketPath,
+      '/realtime/translations',
+    );
+    expect(
       OpenAiConfiguration.realtimeCallsEndpoint,
       'https://api.openai.com/v1/realtime/calls',
     );

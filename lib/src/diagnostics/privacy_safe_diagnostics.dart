@@ -53,12 +53,14 @@ class PrivacySafeDiagnostics {
     'permissionStatus',
     'previousPhase',
     'reasoningEffort',
+    'realtimeProfile',
     'resource',
     'result',
     'retryAttempt',
     'scope',
     'storageArea',
     'summaryModel',
+    'targetLanguage',
   };
 
   static const _forbiddenKeyFragments = {
