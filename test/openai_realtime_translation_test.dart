@@ -64,7 +64,7 @@ void main() {
 
   test('parses realtime audio, transcript, lifecycle, and error events', () {
     final audio = OpenAiRealtimeEventParser.parse({
-      'type': 'session.output_audio.delta',
+      'type': 'response.audio.delta',
       'delta': 'base64-audio',
     });
     expect(audio, isA<OpenAiRealtimeAudioDelta>());
@@ -81,7 +81,7 @@ void main() {
     );
 
     final translation = OpenAiRealtimeEventParser.parse({
-      'type': 'response.output_audio_transcript.delta',
+      'type': 'response.output_text.delta',
       'delta': 'hello',
     });
     expect(translation, isA<OpenAiRealtimeTranscriptDelta>());
@@ -91,8 +91,8 @@ void main() {
     );
 
     final completed = OpenAiRealtimeEventParser.parse({
-      'type': 'session.output_transcript.done',
-      'transcript': 'Hello.',
+      'type': 'response.output_text.done',
+      'text': 'Hello.',
     });
     expect(completed, isA<OpenAiRealtimeTranscriptCompleted>());
     final parsedCompleted = completed! as OpenAiRealtimeTranscriptCompleted;

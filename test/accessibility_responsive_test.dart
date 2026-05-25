@@ -149,10 +149,11 @@ void main() {
     await tester.tap(find.byTooltip('Close AI chat'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Switch').first);
+    await tester.tap(find.text('Pause Read Aloud'));
     await tester.pumpAndSettle();
     _expectNoFlutterOverflow(tester);
-    expect(find.text('English -> Japanese'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Read aloud is paused'), findsOneWidget);
     expect(find.text('Resume Read Aloud'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Open menu'));

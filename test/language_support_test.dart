@@ -10,6 +10,10 @@ void main() {
 
     expect(targetCodes, containsAll(['en', 'es', 'fr']));
     expect(targetCodes, isNot(contains('ja')));
+    expect(
+      [for (final language in LanguageSupport.targetLanguages) language.code],
+      containsAll(['en', 'es', 'fr', 'ja', 'de', 'pt', 'zh', 'ko', 'ar', 'hi']),
+    );
     expect(LanguageSupport.verifiedDate, '2026-05-24');
     expect(LanguageSupport.realtimeDocsUrl, startsWith('https://'));
   });

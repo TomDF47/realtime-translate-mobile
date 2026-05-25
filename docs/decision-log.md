@@ -86,6 +86,28 @@ Implications:
 - Tests and diagnostics must avoid real generated export payloads and must not log export bodies.
 - Future recipient or outbound delivery work remains deferred unless source-of-truth docs and issue scope are updated.
 
+## 2026-05-25 - Target Picker Shows All App Languages
+
+Status: Accepted
+
+Decision:
+
+- Keep the conservative realtime target table of English, Spanish, and French until current OpenAI documentation or live validation provides an authoritative broader realtime target enum.
+- Show all app target languages in the target picker, including Japanese, German, Portuguese, Chinese, Korean, Arabic, and Hindi.
+- Label realtime-supported targets separately from broader direct-OpenAI fallback targets.
+- Keep fallback behavior phone-only and do not add AWS, an app backend, cloud sync, server-side transcript handling, or server mailer behavior.
+
+Rationale:
+
+- Users expect the target picker to expose the app's full language set, not only the currently conservative realtime subset.
+- Explicit per-language labels avoid silently implying unsupported realtime output while keeping broader target choices discoverable.
+
+Implications:
+
+- `2026-05-24 - Conservative Realtime Language Table` still governs the realtime target table, but no longer means the target picker hides fallback-capable app languages.
+- UI, tests, and regression checklists must verify both realtime labels and fallback labels.
+- Selecting a fallback target must continue to surface the direct OpenAI fallback state instead of routing through app-owned backend infrastructure.
+
 ## 2026-05-24 - Initial MVP Architecture
 
 Status: Superseded by `2026-05-24 - Phone-Only MVP Architecture`

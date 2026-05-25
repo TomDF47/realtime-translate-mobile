@@ -14,6 +14,7 @@ import 'realtime_transcript_committer.dart';
 import 'translated_audio_playback.dart';
 
 typedef LiveRealtimeReconnectDelay = Future<void> Function(Duration delay);
+typedef LiveRealtimeTranscriptCommitted = void Function();
 
 enum LiveRealtimeStartResult {
   started,
@@ -44,6 +45,7 @@ class LiveRealtimeTranslationCoordinator {
     this.reconnectPolicy = const OpenAiRealtimeReconnectPolicy(),
     this.reconnectDelay = Future.delayed,
     this.diagnostics = const PrivacySafeDiagnostics(),
+    this.onTranscriptCommitted,
   }) : playbackGateway =
            playbackGateway ?? NoopTranslatedAudioPlaybackGateway();
 
@@ -55,6 +57,7 @@ class LiveRealtimeTranslationCoordinator {
   final OpenAiRealtimeReconnectPolicy reconnectPolicy;
   final LiveRealtimeReconnectDelay reconnectDelay;
   final PrivacySafeDiagnostics diagnostics;
+  final LiveRealtimeTranscriptCommitted? onTranscriptCommitted;
 
   RealtimeTranslationSession? _realtimeSession;
   StreamSubscription<MicrophonePcm16Chunk>? _captureSubscription;
@@ -374,16 +377,20 @@ class LiveRealtimeTranslationCoordinator {
     }
 
     unawaited(
-      commit.catchError((Object error, StackTrace stackTrace) {
-        diagnostics.warning(
-          'live_realtime.transcript_commit_failed',
-          fields: {
-            'operation': 'realtime.transcript.commit',
-            'result': 'failed',
-            'errorCode': error.runtimeType.toString(),
-          },
-        );
-      }),
+      commit
+          .then((_) {
+            onTranscriptCommitted?.call();
+          })
+          .catchError((Object error, StackTrace stackTrace) {
+            diagnostics.warning(
+              'live_realtime.transcript_commit_failed',
+              fields: {
+                'operation': 'realtime.transcript.commit',
+                'result': 'failed',
+                'errorCode': error.runtimeType.toString(),
+              },
+            );
+          }),
     );
   }
 

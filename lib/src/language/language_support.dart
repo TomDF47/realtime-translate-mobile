@@ -165,6 +165,16 @@ abstract final class LanguageSupport {
     ];
   }
 
+  static List<TranslationLanguage> get targetLanguages {
+    return [
+      for (final language in languages)
+        if (language.code != 'auto' &&
+            (language.supportsRealtimeTarget ||
+                language.supportsDirectFallback))
+          language,
+    ];
+  }
+
   static List<TranslationLanguage> get fallbackTargetLanguages {
     return [
       for (final language in languages)

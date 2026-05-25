@@ -625,15 +625,38 @@ class TranscriptCard extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.xxs),
                   Text(
-                    entry.originalText,
-                    style: AppTextStyles.body(textTheme),
+                    'Original',
+                    style: AppTextStyles.compact(
+                      textTheme,
+                    ).copyWith(color: AppColors.textSecondary),
+                  ),
+                  Text(
+                    entry.originalText.isEmpty
+                        ? 'Original speech pending'
+                        : entry.originalText,
+                    style: AppTextStyles.body(textTheme).copyWith(
+                      color: entry.originalText.isEmpty
+                          ? AppColors.textTertiary
+                          : AppColors.textPrimary,
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.xxs),
                   Text(
-                    entry.translatedText,
-                    style: AppTextStyles.title(
+                    'Translation',
+                    style: AppTextStyles.compact(
                       textTheme,
-                    ).copyWith(fontSize: 16),
+                    ).copyWith(color: AppColors.textSecondary),
+                  ),
+                  Text(
+                    entry.translatedText.isEmpty
+                        ? 'Translation pending'
+                        : entry.translatedText,
+                    style: AppTextStyles.title(textTheme).copyWith(
+                      fontSize: 16,
+                      color: entry.translatedText.isEmpty
+                          ? AppColors.textTertiary
+                          : AppColors.textPrimary,
+                    ),
                   ),
                 ],
               ),

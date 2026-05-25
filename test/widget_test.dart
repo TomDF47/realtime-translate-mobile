@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -128,15 +130,15 @@ void main() {
     await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Realtime target languages'), findsOneWidget);
+    expect(find.text('Target languages'), findsOneWidget);
     expect(find.text('English (US)'), findsOneWidget);
     expect(find.text('Spanish (ES)'), findsOneWidget);
     expect(find.text('French (FR)'), findsOneWidget);
-    expect(find.text('Japanese (JP)'), findsNothing);
+    expect(find.text('Japanese (JP)'), findsOneWidget);
     expect(find.text('Fallback route'), findsOneWidget);
-    expect(find.textContaining('direct OpenAI fallback'), findsOneWidget);
+    expect(find.textContaining('fallback targets'), findsOneWidget);
 
-    Navigator.of(tester.element(find.text('Realtime target languages'))).pop();
+    Navigator.of(tester.element(find.text('Target languages'))).pop();
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Open AI chat'));
@@ -203,6 +205,91 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.bySemanticsLabel('Read Aloud off'), findsOneWidget);
     expect(find.text('Read aloud is paused'), findsOneWidget);
+  });
+
+  testWidgets('switches direction repeatedly without corrupting languages', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+      ),
+    );
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pumpAndSettle();
+    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+
+    await tester.tap(find.text('Switch'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('English -> Spanish'), findsOneWidget);
+    var snapshot = await repository.loadSnapshot();
+    expect(snapshot.meetings.single.sourceLanguageLabel, 'English (US)');
+    expect(snapshot.meetings.single.targetLanguageLabel, 'Spanish (ES)');
+
+    await tester.tap(find.text('Switch'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Spanish -> English'), findsOneWidget);
+    snapshot = await repository.loadSnapshot();
+    expect(snapshot.meetings.single.sourceLanguageLabel, 'Spanish (ES)');
+    expect(snapshot.meetings.single.targetLanguageLabel, 'English (US)');
+  });
+
+  testWidgets('renders live transcript commits on the active screen', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+      ),
+    );
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pumpAndSettle();
+    expect(find.text('Waiting for speech'), findsOneWidget);
+
+    realtimeGateway.sessions.last
+      ..addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'conversation.item.input_audio_transcription.delta',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          delta: 'Hola equipo.',
+        ),
+      )
+      ..addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'response.output_text.delta',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          delta: 'Hello team.',
+        ),
+      );
+
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Waiting for speech'), findsNothing);
+    expect(find.text('Original'), findsOneWidget);
+    expect(find.text('Hola equipo.'), findsOneWidget);
+    expect(find.text('Translation'), findsOneWidget);
+    expect(find.text('Hello team.'), findsOneWidget);
   });
 
   testWidgets('shows reconnecting realtime recovery state on live surface', (
@@ -398,10 +485,10 @@ void main() {
 
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Switch Direction'));
+    await tester.tap(find.text('Pause Read Aloud'));
     await tester.pumpAndSettle();
 
-    expect(find.text('English -> Japanese'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
     expect(find.text('Speaking'), findsOneWidget);
     expect(find.text('Speaker Active'), findsOneWidget);
     expect(find.text('Read aloud is paused'), findsOneWidget);
@@ -626,6 +713,8 @@ Widget _liveSessionHarness(LiveSessionState state) {
       onRetryLiveSession: () {},
       onBottomAction: (_) {},
       onFeatureToggle: (_) {},
+      onQueuePrimaryAction: () {},
+      onQueueSecondaryAction: () {},
       onJumpToLive: () {},
     ),
   );
@@ -651,8 +740,10 @@ class _FakePermissionGateway implements MicrophonePermissionGateway {
 }
 
 class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
+  final _chunks = StreamController<MicrophonePcm16Chunk>.broadcast(sync: true);
+
   @override
-  Stream<MicrophonePcm16Chunk> get chunks => const Stream.empty();
+  Stream<MicrophonePcm16Chunk> get chunks => _chunks.stream;
 
   @override
   bool get isCapturing => _isCapturing;
@@ -672,6 +763,7 @@ class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
 
 class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
   final List<OpenAiRealtimeTranslationConfig> configs = [];
+  final List<_FakeRealtimeTranslationSession> sessions = [];
 
   @override
   Future<RealtimeTranslationSession> connect({
@@ -679,13 +771,21 @@ class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
     required String credential,
   }) async {
     configs.add(config);
-    return _FakeRealtimeTranslationSession();
+    final session = _FakeRealtimeTranslationSession();
+    sessions.add(session);
+    return session;
   }
 }
 
 class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
+  final _events = StreamController<OpenAiRealtimeEvent>.broadcast(sync: true);
+
   @override
-  Stream<OpenAiRealtimeEvent> get events => const Stream.empty();
+  Stream<OpenAiRealtimeEvent> get events => _events.stream;
+
+  void addEvent(OpenAiRealtimeEvent event) {
+    _events.add(event);
+  }
 
   @override
   void appendPcm16Audio(List<int> pcm16Audio) {}
@@ -697,10 +797,14 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   void createResponse() {}
 
   @override
-  Future<void> closeGracefully() async {}
+  Future<void> closeGracefully() async {
+    unawaited(_events.close());
+  }
 
   @override
-  Future<void> closeImmediately() async {}
+  Future<void> closeImmediately() async {
+    unawaited(_events.close());
+  }
 
   @override
   void sendSessionUpdate() {}

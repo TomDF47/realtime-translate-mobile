@@ -555,7 +555,8 @@ abstract final class OpenAiRealtimeEventParser {
 
   static bool _isAudioDelta(String type) {
     return type == 'session.output_audio.delta' ||
-        type == 'response.output_audio.delta';
+        type == 'response.output_audio.delta' ||
+        type == 'response.audio.delta';
   }
 
   static bool _isSourceTranscriptDelta(String type) {
@@ -565,7 +566,8 @@ abstract final class OpenAiRealtimeEventParser {
 
   static bool _isTranslationTranscriptDelta(String type) {
     return type == 'session.output_transcript.delta' ||
-        type == 'response.output_audio_transcript.delta';
+        type == 'response.output_audio_transcript.delta' ||
+        type == 'response.output_text.delta';
   }
 
   static bool _isSourceTranscriptCompleted(String type) {
@@ -575,7 +577,8 @@ abstract final class OpenAiRealtimeEventParser {
 
   static bool _isTranslationTranscriptCompleted(String type) {
     return type == 'session.output_transcript.done' ||
-        type == 'response.output_audio_transcript.done';
+        type == 'response.output_audio_transcript.done' ||
+        type == 'response.output_text.done';
   }
 
   static String? _optionalTranscript(Map<String, dynamic> event) {

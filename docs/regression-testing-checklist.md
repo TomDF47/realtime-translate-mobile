@@ -30,8 +30,9 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Open the `From` language bottom sheet.
 - Select `Auto-detect`, English, Spanish, and French in separate passes and verify the route label updates immediately.
 - Open the `To` language bottom sheet.
-- Select English, Spanish, and French and verify the route label updates immediately.
-- Verify Japanese is not shown in the realtime target list and remains documented as fallback-pending.
+- Select English, Spanish, French, Japanese, German, Portuguese, Chinese, Korean, Arabic, and Hindi in separate passes and verify the route label updates immediately.
+- Verify English, Spanish, and French are labeled as realtime output targets.
+- Verify Japanese and other broader app targets are visible and labeled as direct OpenAI fallback targets rather than realtime output targets.
 - While a fake realtime session is active, verify the next realtime start config uses the selected target language code.
 
 ## Buttons And Toggles
@@ -42,7 +43,8 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - With `Read Aloud` off, verify translated audio chunks are not enqueued for playback.
 - Tap `Pause Read Aloud`; verify the read-aloud paused banner appears and playback is stopped/cleared.
 - Tap `Resume Read Aloud`; verify listening resumes and playback output is allowed again.
-- Tap `Switch Direction`; verify the amber English -> Japanese paused/read-aloud surface appears.
+- Tap `Switch Direction` repeatedly; verify the selected source and target swap each time, the route label updates immediately, and the next fake realtime config uses the swapped source and target codes.
+- Starting from `Auto-detect Spanish -> English`, verify the first switch becomes `English -> Spanish` and the second switch becomes `Spanish -> English`; it must not become stuck after one switch or restore `Auto-detect` as a target.
 - Tap queue banner `Resume` and `Skip to Live`; verify both move out of the paused read-aloud queue state.
 - Tap `Stop Listening`; verify capture/realtime/playback resources close and the setup screen returns.
 - If `Jump to Live` is visible, tap it and verify the list returns to the latest transcript entry or shows the latest-state confirmation.
@@ -64,6 +66,8 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Verify the timer pauses during stopped/offline/reconnecting/backgrounded states.
 - Verify the timer resumes after listening resumes and resets when returning to setup or starting a new meeting.
 - Feed streaming transcript deltas with three or more spoken sentences.
+- Verify partial live rows appear before final completion and refresh on screen without leaving the live surface.
+- Verify each visible transcript card shows both an `Original` section for spoken source text and a `Translation` section for translated text; pending halves should show a pending placeholder, not a blank card.
 - Verify roughly every two completed spoken sentences rolls into a separate transcript block.
 - Verify partial text updates the current visible block before final completion.
 - Verify transcript rows are not duplicated across fake reconnect.

@@ -135,13 +135,14 @@ OpenAI Realtime Translation is expected to have broad input language coverage an
 Implementation requirements:
 
 - Keep a centralized, easy-to-update language support table.
-- Show only valid realtime target languages by default.
+- Show all app target languages in the target picker.
+- Clearly label which target languages are valid realtime output targets and which require the direct OpenAI fallback route.
 - Detect when a requested target language is unsupported by realtime output.
 - Provide a clear direct-OpenAI fallback path for broader target language support when product-approved.
 - Make fallback behavior explicit in the UI rather than failing silently.
 - Keep fallback AI chat and translation routes phone-only except for direct OpenAI calls.
 
-Current implementation note: language support was verified on 2026-05-24 against the official OpenAI Realtime Translation guide, `gpt-realtime-translate` model page, and translation client-secret API reference. The official docs confirm the dedicated `/v1/realtime/translations` endpoint, streaming translated audio plus transcript deltas, one session per output language, and the `audio.output.language` target parameter, but they do not publish an authoritative target-language enum. The official docs list `gpt-realtime-2` as the standard voice-agent Realtime model and `gpt-realtime-translate` as the model to use when the app should translate what a human says. The app keeps `gpt-realtime-2` configured as the preferred primary profile for future voice-agent validation, but microphone streaming for the MVP live-interpretation surface currently uses `gpt-realtime-translate`. The app uses a conservative realtime target list of English, Spanish, and French, and shows broader targets such as Japanese as direct-OpenAI fallback-pending. Fallback must not use AWS, an app backend, cloud sync, or server-side transcript handling.
+Current implementation note: language support was verified on 2026-05-24 against the official OpenAI Realtime Translation guide, `gpt-realtime-translate` model page, and translation client-secret API reference. The official docs confirm the dedicated `/v1/realtime/translations` endpoint, streaming translated audio plus transcript deltas, one session per output language, and the `audio.output.language` target parameter, but they do not publish an authoritative target-language enum. The official docs list `gpt-realtime-2` as the standard voice-agent Realtime model and `gpt-realtime-translate` as the model to use when the app should translate what a human says. The app keeps `gpt-realtime-2` configured as the preferred primary profile for future voice-agent validation, but microphone streaming for the MVP live-interpretation surface currently uses `gpt-realtime-translate`. The app uses a conservative realtime target table of English, Spanish, and French, while the target picker shows all app target languages and labels broader targets such as Japanese as direct-OpenAI fallback targets. Fallback must not use AWS, an app backend, cloud sync, or server-side transcript handling.
 
 ## Meeting Management Requirements
 
@@ -292,6 +293,6 @@ Deferred V2/future issues:
 
 - Final Android signing certificate details; tracked in #24 for store-ready release handoff.
 - The accepted credential/session implementation details for user-provided OpenAI credential material, including UX, encrypted storage reset/removal, and credential-invalid recovery.
-- Current OpenAI Realtime Translation docs do not expose an authoritative target output language enum. The MVP currently uses the conservative English/Spanish/French realtime table and direct-OpenAI fallback-pending handling described above.
+- Current OpenAI Realtime Translation docs do not expose an authoritative target output language enum. The MVP currently uses the conservative English/Spanish/French realtime table while still showing all app target languages with direct-OpenAI fallback labels for broader targets.
 - Real microphone/audio behavior for `gpt-realtime-2` versus the dedicated `gpt-realtime-translate` fallback/profile under live streaming.
 - Whether diagnostics/crash reporting is included in MVP or deferred.
