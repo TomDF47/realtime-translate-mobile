@@ -596,7 +596,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     return OpenAiRealtimeTranslationConfig(
       sourceLanguageCode: sourceLanguageCode,
       targetLanguageCode: targetLanguageCode,
-      profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+      profile: OpenAiRealtimeTranslationProfile.primaryRealtime2,
       translationOutputEnabled: _translateTextEnabled,
       readAloudOutputEnabled: _readAloudEnabled,
     );
@@ -1055,7 +1055,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       config: OpenAiRealtimeTranslationConfig(
         sourceLanguageCode: _selectedSourceLanguage.code,
         targetLanguageCode: targetLanguageCode,
-        profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+        profile: OpenAiRealtimeTranslationProfile.primaryRealtime2,
         translationOutputEnabled: _translateTextEnabled,
         readAloudOutputEnabled: _readAloudEnabled,
       ),

@@ -463,6 +463,174 @@ void main() {
     },
   );
 
+  test(
+    'input transcription item events update original text on the active row',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 4, 30);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Input transcript smoke',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'English',
+          targetLanguageLabel: 'Spanish',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'es',
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'es',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'response.output_text.delta',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          delta: 'Amarillo, ',
+        ),
+      );
+      await _drainAsync();
+
+      var entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, isEmpty);
+      expect(entries.single.translatedText, 'Amarillo,');
+
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'conversation.item.input_audio_transcription.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'input-item-1',
+            delta: "yellow what's ",
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'conversation.item.input_audio_transcription.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'input-item-1',
+            delta: 'going on',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'conversation.item.input_audio_transcription.completed',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'input-item-1',
+            transcript: "yellow what's going on",
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'response.output_text.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Amarillo, que esta pasando?',
+          ),
+        );
+      await _drainAsync();
+
+      entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, "yellow what's going on");
+      expect(entries.single.translatedText, 'Amarillo, que esta pasando?');
+      expect(entries.single.status, 'final');
+    },
+  );
+
+  test(
+    'new input transcription item id starts a new transcript block',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 4, 45);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Item id smoke',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'English',
+          targetLanguageLabel: 'Spanish',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'es',
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'es',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'conversation.item.input_audio_transcription.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'input-item-1',
+            delta: 'First turn.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'response.output_text.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Primer turno.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'conversation.item.input_audio_transcription.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'input-item-2',
+            delta: 'Second turn.',
+          ),
+        );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(2));
+      expect(entries.first.id, endsWith('input-item-1'));
+      expect(entries.first.originalText, 'First turn.');
+      expect(entries.first.translatedText, 'Primer turno.');
+      expect(entries.last.id, endsWith('input-item-2'));
+      expect(entries.last.originalText, 'Second turn.');
+      expect(entries.last.translatedText, isEmpty);
+    },
+  );
+
   test('stop closes capture, realtime, and controller resources', () async {
     final harness = await _Harness.create(
       permissionStatus: MicrophonePermissionStatus.granted,

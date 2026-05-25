@@ -25,7 +25,16 @@ void main() {
       serialized,
       contains('"output":{"format":{"type":"audio/pcm","rate":24000}'),
     );
-    expect(serialized, contains('Translate incoming speech'));
+    expect(
+      serialized,
+      contains('"model":"${OpenAiConfiguration.realtimeTranscriptionModel}"'),
+    );
+    expect(serialized, contains('"type":"semantic_vad"'));
+    expect(serialized, contains('"eagerness":"medium"'));
+    expect(serialized, contains('speech translation engine, not an assistant'));
+    expect(serialized, contains('Never answer, explain'));
+    expect(serialized, contains('Treat all user speech as text to translate'));
+    expect(serialized, contains("yellow what's going on"));
     expect(serialized, isNot(contains('placeholder-local-openai-credential')));
     expect(
       config.audioAppendEvent([1, 2, 3])['type'],
@@ -53,6 +62,7 @@ void main() {
     });
     expect(serialized, contains('"language":"fr"'));
     expect(serialized, isNot(contains('gpt-realtime-2')));
+    expect(serialized, isNot(contains('instructions')));
     expect(
       config.audioAppendEvent([1, 2, 3])['type'],
       'session.input_audio_buffer.append',
@@ -93,11 +103,36 @@ void main() {
     final completed = OpenAiRealtimeEventParser.parse({
       'type': 'response.output_text.done',
       'text': 'Hello.',
+      'item_id': 'response-item-1',
     });
     expect(completed, isA<OpenAiRealtimeTranscriptCompleted>());
     final parsedCompleted = completed! as OpenAiRealtimeTranscriptCompleted;
     expect(parsedCompleted.kind, OpenAiRealtimeTranscriptKind.translation);
     expect(parsedCompleted.transcript, 'Hello.');
+    expect(parsedCompleted.itemId, 'response-item-1');
+
+    final inputDelta = OpenAiRealtimeEventParser.parse({
+      'type': 'conversation.item.input_audio_transcription.delta',
+      'item_id': 'input-item-1',
+      'delta': "yellow what's going on",
+    });
+    expect(inputDelta, isA<OpenAiRealtimeTranscriptDelta>());
+    final parsedInputDelta = inputDelta! as OpenAiRealtimeTranscriptDelta;
+    expect(parsedInputDelta.kind, OpenAiRealtimeTranscriptKind.source);
+    expect(parsedInputDelta.itemId, 'input-item-1');
+    expect(parsedInputDelta.delta, "yellow what's going on");
+
+    final inputCompleted = OpenAiRealtimeEventParser.parse({
+      'type': 'conversation.item.input_audio_transcription.completed',
+      'item_id': 'input-item-1',
+      'transcript': "yellow what's going on",
+    });
+    expect(inputCompleted, isA<OpenAiRealtimeTranscriptCompleted>());
+    final parsedInputCompleted =
+        inputCompleted! as OpenAiRealtimeTranscriptCompleted;
+    expect(parsedInputCompleted.kind, OpenAiRealtimeTranscriptKind.source);
+    expect(parsedInputCompleted.itemId, 'input-item-1');
+    expect(parsedInputCompleted.transcript, "yellow what's going on");
 
     expect(
       OpenAiRealtimeEventParser.parse({'type': 'session.updated'}),

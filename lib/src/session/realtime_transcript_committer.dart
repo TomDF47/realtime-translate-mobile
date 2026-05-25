@@ -34,13 +34,20 @@ class LiveRealtimeTranscriptCommitter {
   bool _sourceCompleted = false;
   bool _translationCompleted = false;
   bool _readyForNextReadableBlock = false;
+  String? _sourceItemId;
+  String? _translationItemId;
 
   Future<void> commitDelta(OpenAiRealtimeTranscriptDelta event) {
     return _enqueue(() async {
-      if (_shouldStartNewSegment(event.kind)) {
+      if (_isDuplicateFinalItem(event.kind, event.itemId)) {
+        return;
+      }
+
+      if (_shouldStartNewSegment(event.kind, itemId: event.itemId)) {
         _resetSegment();
       }
 
+      _seedEntryIdFromItemIfNew(event);
       _appendDelta(event);
       await _upsert(status: _statusForCurrentSegment());
       if (_shouldRollReadableBlock()) {
@@ -55,10 +62,16 @@ class LiveRealtimeTranscriptCommitter {
         return Future<void>.value();
       }
 
-      if (_shouldStartNewSegment(event.kind, isCompletion: true)) {
+      if (_shouldStartNewSegment(
+        event.kind,
+        isCompletion: true,
+        itemId: event.itemId,
+      )) {
         _resetSegment();
       }
 
+      _seedEntryIdFromItemIfNew(event);
+      _recordItemId(event.kind, event.itemId);
       if (event.transcript != null) {
         _replaceTranscript(event.kind, event.transcript!);
       }
@@ -103,6 +116,8 @@ class LiveRealtimeTranscriptCommitter {
     _sourceCompleted = false;
     _translationCompleted = false;
     _readyForNextReadableBlock = false;
+    _sourceItemId = null;
+    _translationItemId = null;
   }
 
   void _appendDelta(OpenAiRealtimeTranscriptDelta event) {
@@ -110,9 +125,11 @@ class LiveRealtimeTranscriptCommitter {
     _hasTranscript = true;
     switch (event.kind) {
       case OpenAiRealtimeTranscriptKind.source:
+        _sourceItemId ??= event.itemId;
         _sourceBuffer.write(event.delta);
         _sourceCompleted = false;
       case OpenAiRealtimeTranscriptKind.translation:
+        _translationItemId ??= event.itemId;
         _translationBuffer.write(event.delta);
         _translationCompleted = false;
     }
@@ -145,6 +162,19 @@ class LiveRealtimeTranscriptCommitter {
     }
   }
 
+  void _recordItemId(OpenAiRealtimeTranscriptKind kind, String? itemId) {
+    if (itemId == null || itemId.isEmpty) {
+      return;
+    }
+
+    switch (kind) {
+      case OpenAiRealtimeTranscriptKind.source:
+        _sourceItemId ??= itemId;
+      case OpenAiRealtimeTranscriptKind.translation:
+        _translationItemId ??= itemId;
+    }
+  }
+
   Future<void> _upsert({required String status}) {
     if (!_hasTranscript) {
       return Future<void>.value();
@@ -172,9 +202,17 @@ class LiveRealtimeTranscriptCommitter {
   bool _shouldStartNewSegment(
     OpenAiRealtimeTranscriptKind nextKind, {
     bool isCompletion = false,
+    String? itemId,
   }) {
     if (!_hasTranscript) {
       return false;
+    }
+
+    if (itemId != null &&
+        nextKind == OpenAiRealtimeTranscriptKind.source &&
+        _sourceItemId != null &&
+        _sourceItemId != itemId) {
+      return true;
     }
 
     if (_isFinal) {
@@ -197,6 +235,19 @@ class LiveRealtimeTranscriptCommitter {
     }
 
     return _sourceCompleted;
+  }
+
+  void _seedEntryIdFromItemIfNew(OpenAiRealtimeEvent event) {
+    final itemId = switch (event) {
+      OpenAiRealtimeTranscriptDelta(:final itemId) => itemId,
+      OpenAiRealtimeTranscriptCompleted(:final itemId) => itemId,
+      _ => null,
+    };
+    if (_hasTranscript || itemId == null || itemId.isEmpty) {
+      return;
+    }
+
+    _entryId = _newEntryIdForRealtimeItem(target, itemId);
   }
 
   bool _shouldRollReadableBlock() {
@@ -231,6 +282,20 @@ class LiveRealtimeTranscriptCommitter {
             _translationBuffer.toString().trim() == transcript,
     };
   }
+
+  bool _isDuplicateFinalItem(
+    OpenAiRealtimeTranscriptKind kind,
+    String? itemId,
+  ) {
+    if (!_isFinal || itemId == null || itemId.isEmpty) {
+      return false;
+    }
+
+    return switch (kind) {
+      OpenAiRealtimeTranscriptKind.source => _sourceItemId == itemId,
+      OpenAiRealtimeTranscriptKind.translation => _translationItemId == itemId,
+    };
+  }
 }
 
 bool _endsAtSentenceBoundary(String text) {
@@ -254,4 +319,12 @@ int _sentenceBoundaryCount(String text) {
 String _newEntryId(LiveRealtimeTranscriptCommitTarget target, int sequence) {
   return '${target.meetingId}-realtime-'
       '${target.now().microsecondsSinceEpoch}-$sequence';
+}
+
+String _newEntryIdForRealtimeItem(
+  LiveRealtimeTranscriptCommitTarget target,
+  String itemId,
+) {
+  final safeItemId = itemId.replaceAll(RegExp(r'[^a-zA-Z0-9_-]+'), '-');
+  return '${target.meetingId}-realtime-item-$safeItemId';
 }

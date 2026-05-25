@@ -108,6 +108,28 @@ Implications:
 - UI, tests, and regression checklists must verify both realtime labels and fallback labels.
 - Selecting a fallback target must continue to surface the direct OpenAI fallback state instead of routing through app-owned backend infrastructure.
 
+## 2026-05-25 - Runtime Realtime Sessions Prefer GPT Realtime 2
+
+Status: Accepted
+
+Decision:
+
+- Route the installed app's live meeting runtime through the primary `gpt-realtime-2` profile when the selected language route is realtime-capable.
+- Keep `gpt-realtime-translate` as the dedicated translation compatibility fallback/profile.
+- Configure realtime input transcription with `gpt-realtime-whisper` so on-screen original speech updates from input transcription delta/completed events.
+- Treat realtime model output as translation-only: selected target language only, no answers, no explanations, no continuation, no follow-up questions, and no filler.
+
+Rationale:
+
+- Tom's installed APK report showed assistant-like behavior and pending original speech. `gpt-realtime-2` is the stronger instruction-following realtime voice model, while `gpt-realtime-whisper` is intended for low-latency live transcript deltas.
+- Hard translation-only session instructions reduce the chance that phrases such as "yellow what's going on" are interpreted as conversational prompts instead of text to translate.
+- Preserving the dedicated translation profile keeps a narrow fallback if endpoint compatibility or live validation requires it.
+
+Implications:
+
+- Runtime event handling must keep input transcription text separate from translated output and use event item IDs to update the correct transcript block.
+- The dedicated translation endpoint remains available for compatibility testing and fallback, but the app's normal realtime-capable path should start with `gpt-realtime-2`.
+
 ## 2026-05-24 - Initial MVP Architecture
 
 Status: Superseded by `2026-05-24 - Phone-Only MVP Architecture`

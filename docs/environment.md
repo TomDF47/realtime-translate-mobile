@@ -175,6 +175,7 @@ Mobile-safe values may include app environment names, package names, model inten
 Important placeholders:
 
 - `OPENAI_REALTIME_MODEL`: expected default is `gpt-realtime-2`.
+- `OPENAI_REALTIME_TRANSCRIPTION_MODEL`: expected default is `gpt-realtime-whisper`.
 - `OPENAI_TRANSLATION_FALLBACK_MODEL`: dedicated translation fallback/profile is `gpt-realtime-translate`.
 - `OPENAI_SUMMARY_MODEL_INTENT`: product intent is GPT-5.5 for meeting summaries.
 - `OPENAI_SUMMARY_REASONING_INTENT`: product intent is `xhigh` reasoning for meeting summaries.
