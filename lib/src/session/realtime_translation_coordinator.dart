@@ -10,6 +10,7 @@ import '../openai/openai_realtime_resilience.dart';
 import '../openai/openai_realtime_translation.dart';
 import 'live_session_controller.dart';
 import 'microphone_capture.dart';
+import 'microphone_permission.dart';
 import 'realtime_transcript_committer.dart';
 import 'translated_audio_playback.dart';
 
@@ -93,7 +94,8 @@ class LiveRealtimeTranslationCoordinator {
     }
 
     await sessionController.startMeeting();
-    if (sessionController.state.phase != LiveSessionPhase.listening) {
+    if (sessionController.state.microphonePermission !=
+        MicrophonePermissionStatus.granted) {
       return LiveRealtimeStartResult.permissionNotGranted;
     }
 
@@ -119,6 +121,7 @@ class LiveRealtimeTranslationCoordinator {
           sampleRateHz: config.inputAudioRate,
         ),
       );
+      sessionController.markRealtimeStarted();
       diagnostics.info(
         'live_realtime.streaming_started',
         fields: {

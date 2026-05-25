@@ -61,10 +61,12 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 ## Transcript Chunking And Timer
 
+- Latest Tom feedback regression: start a live meeting from setup and verify the app immediately moves to the live surface with a `Connecting` or microphone-permission state instead of looking stalled on the start screen.
 - Verify the elapsed timer starts at `00:00` for a new active meeting.
 - Verify the timer advances only while microphone capture is open.
 - Verify the timer pauses during stopped/offline/reconnecting/backgrounded states.
 - Verify the timer resumes after listening resumes and resets when returning to setup or starting a new meeting.
+- Feed translation transcript deltas before matching source/original deltas and verify the late source text appears in the same visible transcript card as the existing translation.
 - Feed streaming transcript deltas with three or more spoken sentences.
 - Verify partial live rows appear before final completion and refresh on screen without leaving the live surface.
 - Verify each visible transcript card shows both an `Original` section for spoken source text and a `Translation` section for translated text; pending halves should show a pending placeholder, not a blank card.

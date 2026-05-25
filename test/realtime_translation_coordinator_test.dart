@@ -295,7 +295,83 @@ void main() {
   );
 
   test(
-    'rolls streaming transcript into readable two-sentence blocks',
+    'rolls streaming transcript into readable two-sentence paired blocks',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 4);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Live smoke',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Primera frase. Segunda frase.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'First sentence. Second sentence.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: ' Third sentence.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: ' Tercera frase.',
+          ),
+        );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(2));
+      expect(entries.first.originalText, 'Primera frase. Segunda frase.');
+      expect(entries.first.translatedText, 'First sentence. Second sentence.');
+      expect(entries.last.originalText, 'Tercera frase.');
+      expect(entries.last.translatedText, 'Third sentence.');
+    },
+  );
+
+  test(
+    'keeps delayed source transcript on the same card as translation',
     () async {
       final harness = await _Harness.create(
         permissionStatus: MicrophonePermissionStatus.granted,
@@ -329,14 +405,21 @@ void main() {
           const OpenAiRealtimeTranscriptDelta(
             type: 'session.output_transcript.delta',
             kind: OpenAiRealtimeTranscriptKind.translation,
-            delta: 'First sentence. Second sentence.',
+            delta: 'One, two, three.',
           ),
         )
         ..addEvent(
           const OpenAiRealtimeTranscriptDelta(
-            type: 'session.output_transcript.delta',
-            kind: OpenAiRealtimeTranscriptKind.translation,
-            delta: ' Third sentence.',
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Uno, dos, tres.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Uno, dos, tres.',
           ),
         );
       await Future<void>.delayed(Duration.zero);
@@ -347,9 +430,9 @@ void main() {
           .meetings
           .single
           .transcriptEntries;
-      expect(entries, hasLength(2));
-      expect(entries.first.translatedText, 'First sentence. Second sentence.');
-      expect(entries.last.translatedText, 'Third sentence.');
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, 'Uno, dos, tres.');
+      expect(entries.single.translatedText, 'One, two, three.');
     },
   );
 

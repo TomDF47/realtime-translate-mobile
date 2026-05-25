@@ -70,11 +70,11 @@ void main() {
     );
     expect(
       sink.records.last.fields,
-      containsPair('nextPhase', LiveSessionPhase.listening.name),
+      containsPair('nextPhase', LiveSessionPhase.connecting.name),
     );
     expect(
       sink.records.last.fields,
-      containsPair('isRealtimeSessionOpen', 'true'),
+      containsPair('isRealtimeSessionOpen', 'false'),
     );
     expect(
       _serializeAll(sink.records),

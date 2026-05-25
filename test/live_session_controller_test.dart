@@ -26,9 +26,9 @@ void main() {
       gateway.complete(MicrophonePermissionStatus.granted);
       await start;
 
-      expect(controller.state.phase, LiveSessionPhase.listening);
-      expect(controller.state.isMicrophoneCaptureOpen, isTrue);
-      expect(controller.state.isRealtimeSessionOpen, isTrue);
+      expect(controller.state.phase, LiveSessionPhase.connecting);
+      expect(controller.state.isMicrophoneCaptureOpen, isFalse);
+      expect(controller.state.isRealtimeSessionOpen, isFalse);
     },
   );
 
@@ -40,6 +40,7 @@ void main() {
     );
 
     await controller.startMeeting();
+    controller.markRealtimeStarted();
 
     expect(controller.state.phase, LiveSessionPhase.microphoneDenied);
     expect(controller.state.isMicrophoneCaptureOpen, isFalse);
@@ -54,6 +55,7 @@ void main() {
     final controller = LiveSessionController(permissionGateway: gateway);
 
     await controller.startMeeting();
+    controller.markRealtimeStarted();
     await controller.openPermissionSettings();
 
     expect(
@@ -87,6 +89,7 @@ void main() {
     );
 
     await controller.startMeeting();
+    controller.markRealtimeStarted();
     controller.handleAppLifecycleState(AppLifecycleState.paused);
 
     expect(controller.state.phase, LiveSessionPhase.readAloudPaused);

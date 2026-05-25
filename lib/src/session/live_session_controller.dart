@@ -176,19 +176,8 @@ class LiveSessionController extends ChangeNotifier {
       ),
     );
 
-    _setState(
-      _state.copyWith(
-        phase: LiveSessionPhase.listening,
-        isMicrophoneCaptureOpen: true,
-        isRealtimeSessionOpen: true,
-        isPlaybackQueueOpen: true,
-        realtimeRetryAttempt: 0,
-        realtimeReconnectDelay: Duration.zero,
-        clearRealtimeRecoveryAction: true,
-        clearRealtimeFailureKind: true,
-        clearNotice: true,
-      ),
-    );
+    // The realtime coordinator marks the session as listening only after the
+    // WebSocket, playback queue, and microphone capture have opened.
   }
 
   Future<void> retryMicrophonePermission() {
@@ -243,6 +232,27 @@ class LiveSessionController extends ChangeNotifier {
   }
 
   void resumeListening() {
+    if (!_state.microphonePermission.isGranted) {
+      return;
+    }
+
+    _pausedByLifecycle = false;
+    _setState(
+      _state.copyWith(
+        phase: LiveSessionPhase.listening,
+        isMicrophoneCaptureOpen: true,
+        isRealtimeSessionOpen: true,
+        isPlaybackQueueOpen: true,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
+        clearNotice: true,
+      ),
+    );
+  }
+
+  void markRealtimeStarted() {
     if (!_state.microphonePermission.isGranted) {
       return;
     }

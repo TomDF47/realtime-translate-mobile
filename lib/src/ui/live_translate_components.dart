@@ -331,8 +331,8 @@ class SessionStatusCard extends StatelessWidget {
                 ),
               ),
               StatusPill(
-                label: session.mode.statusLabel,
-                accent: session.mode.accent,
+                label: session.statusLabel ?? session.mode.statusLabel,
+                accent: session.statusAccent ?? session.mode.accent,
               ),
             ],
           ),

@@ -424,6 +424,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     _resetRecordingTimer();
     final meetingId = 'meeting-${DateTime.now().microsecondsSinceEpoch}';
     _activeMeetingId = meetingId;
+    setState(() => _surface = _AppSurface.listening);
     await _persistMeetingFromSession(MockLiveTranslateData.listeningSession);
     if (!mounted) {
       return;
@@ -653,7 +654,36 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       toLanguage: target,
       features: _featuresForSession(base),
       bottomControls: _bottomControlsForSession(base),
+      statusLabel: _liveStatusLabel(base.mode),
+      statusAccent: _liveStatusAccent(base.mode),
     );
+  }
+
+  String? _liveStatusLabel(LiveSessionMode fallbackMode) {
+    return switch (_sessionController.state.phase) {
+      LiveSessionPhase.requestingMicrophonePermission => 'Mic permission',
+      LiveSessionPhase.connecting => 'Connecting',
+      LiveSessionPhase.reconnecting => 'Reconnecting',
+      LiveSessionPhase.offline => 'Offline',
+      LiveSessionPhase.error => 'Needs attention',
+      LiveSessionPhase.listening => 'Listening',
+      LiveSessionPhase.speaking => 'Speaking',
+      LiveSessionPhase.readAloudPaused => fallbackMode.statusLabel,
+      _ => fallbackMode.statusLabel,
+    };
+  }
+
+  LiveAccent? _liveStatusAccent(LiveSessionMode fallbackMode) {
+    return switch (_sessionController.state.phase) {
+      LiveSessionPhase.requestingMicrophonePermission ||
+      LiveSessionPhase.connecting ||
+      LiveSessionPhase.reconnecting => LiveAccent.amber,
+      LiveSessionPhase.offline || LiveSessionPhase.error => LiveAccent.red,
+      LiveSessionPhase.listening => LiveAccent.teal,
+      LiveSessionPhase.speaking ||
+      LiveSessionPhase.readAloudPaused => LiveAccent.amber,
+      _ => fallbackMode.accent,
+    };
   }
 
   LanguageSelectorData _selectorForLanguage(
@@ -1380,8 +1410,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   @override
   Widget build(BuildContext context) {
     final sessionState = _sessionController.state;
-    if (sessionState.phase == LiveSessionPhase.requestingMicrophonePermission ||
-        sessionState.phase == LiveSessionPhase.connecting) {
+    if (_activeMeetingId == null &&
+        (sessionState.phase ==
+                LiveSessionPhase.requestingMicrophonePermission ||
+            sessionState.phase == LiveSessionPhase.connecting)) {
       return _LifecycleProgressScreen(state: sessionState);
     }
 

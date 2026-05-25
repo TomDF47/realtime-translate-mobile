@@ -207,6 +207,36 @@ void main() {
     expect(find.text('Read aloud is paused'), findsOneWidget);
   });
 
+  testWidgets('shows live connecting surface while realtime starts', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final realtimeGateway = _BlockingRealtimeTranslationGateway();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+      ),
+    );
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Connecting'), findsOneWidget);
+    expect(find.text('Start new meeting'), findsNothing);
+
+    realtimeGateway.completeConnect();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Listening'), findsOneWidget);
+  });
+
   testWidgets('switches direction repeatedly without corrupting languages', (
     tester,
   ) async {
@@ -269,16 +299,16 @@ void main() {
     realtimeGateway.sessions.last
       ..addEvent(
         const OpenAiRealtimeTranscriptDelta(
-          type: 'conversation.item.input_audio_transcription.delta',
-          kind: OpenAiRealtimeTranscriptKind.source,
-          delta: 'Hola equipo.',
+          type: 'session.output_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          delta: 'Hello team.',
         ),
       )
       ..addEvent(
         const OpenAiRealtimeTranscriptDelta(
-          type: 'response.output_text.delta',
-          kind: OpenAiRealtimeTranscriptKind.translation,
-          delta: 'Hello team.',
+          type: 'session.input_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          delta: 'Hola equipo.',
         ),
       );
 
@@ -774,6 +804,26 @@ class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
     final session = _FakeRealtimeTranslationSession();
     sessions.add(session);
     return session;
+  }
+}
+
+class _BlockingRealtimeTranslationGateway
+    implements RealtimeTranslationGateway {
+  final _connectCompleter = Completer<RealtimeTranslationSession>();
+  final session = _FakeRealtimeTranslationSession();
+
+  @override
+  Future<RealtimeTranslationSession> connect({
+    required OpenAiRealtimeTranslationConfig config,
+    required String credential,
+  }) {
+    return _connectCompleter.future;
+  }
+
+  void completeConnect() {
+    if (!_connectCompleter.isCompleted) {
+      _connectCompleter.complete(session);
+    }
   }
 }
 

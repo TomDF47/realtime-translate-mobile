@@ -185,6 +185,8 @@ class LiveSessionViewData {
     required this.bottomControls,
     this.queueBanner,
     this.isAtLiveEdge = true,
+    this.statusLabel,
+    this.statusAccent,
   });
 
   final String routeLabel;
@@ -197,6 +199,8 @@ class LiveSessionViewData {
   final List<BottomControlActionData> bottomControls;
   final QueueBannerData? queueBanner;
   final bool isAtLiveEdge;
+  final String? statusLabel;
+  final LiveAccent? statusAccent;
 
   LiveSessionViewData copyWith({
     String? routeLabel,
@@ -209,6 +213,8 @@ class LiveSessionViewData {
     List<BottomControlActionData>? bottomControls,
     QueueBannerData? queueBanner,
     bool? isAtLiveEdge,
+    String? statusLabel,
+    LiveAccent? statusAccent,
   }) {
     return LiveSessionViewData(
       routeLabel: routeLabel ?? this.routeLabel,
@@ -221,6 +227,8 @@ class LiveSessionViewData {
       bottomControls: bottomControls ?? this.bottomControls,
       queueBanner: queueBanner ?? this.queueBanner,
       isAtLiveEdge: isAtLiveEdge ?? this.isAtLiveEdge,
+      statusLabel: statusLabel ?? this.statusLabel,
+      statusAccent: statusAccent ?? this.statusAccent,
     );
   }
 }

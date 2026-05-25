@@ -31,34 +31,43 @@ class LiveRealtimeTranscriptCommitter {
   int _entrySequence = 1;
   bool _hasTranscript = false;
   bool _isFinal = false;
+  bool _sourceCompleted = false;
+  bool _translationCompleted = false;
+  bool _readyForNextReadableBlock = false;
 
   Future<void> commitDelta(OpenAiRealtimeTranscriptDelta event) {
     return _enqueue(() async {
-      if (_isFinal) {
+      if (_shouldStartNewSegment(event.kind)) {
         _resetSegment();
       }
 
       _appendDelta(event);
-      await _upsert(status: 'partial');
-      if (_shouldRollReadableBlock(event.kind)) {
-        _isFinal = true;
-        _resetSegment();
+      await _upsert(status: _statusForCurrentSegment());
+      if (_shouldRollReadableBlock()) {
+        _readyForNextReadableBlock = true;
       }
     });
   }
 
   Future<void> commitCompleted(OpenAiRealtimeTranscriptCompleted event) {
     return _enqueue(() {
+      if (_shouldStartNewSegment(event.kind, isCompletion: true)) {
+        _resetSegment();
+      }
+
       if (event.transcript != null) {
         _replaceTranscript(event.kind, event.transcript!);
       }
+      _markCompleted(event.kind);
 
-      if (event.kind == OpenAiRealtimeTranscriptKind.translation) {
+      if (_translationCompleted && _hasSourceText) {
         _isFinal = true;
-        return _upsert(status: 'final');
+      }
+      if (_shouldRollReadableBlock()) {
+        _readyForNextReadableBlock = true;
       }
 
-      return _upsert(status: 'partial');
+      return _upsert(status: _statusForCurrentSegment());
     });
   }
 
@@ -87,6 +96,9 @@ class LiveRealtimeTranscriptCommitter {
     _timestamp = null;
     _hasTranscript = false;
     _isFinal = false;
+    _sourceCompleted = false;
+    _translationCompleted = false;
+    _readyForNextReadableBlock = false;
   }
 
   void _appendDelta(OpenAiRealtimeTranscriptDelta event) {
@@ -95,8 +107,10 @@ class LiveRealtimeTranscriptCommitter {
     switch (event.kind) {
       case OpenAiRealtimeTranscriptKind.source:
         _sourceBuffer.write(event.delta);
+        _sourceCompleted = false;
       case OpenAiRealtimeTranscriptKind.translation:
         _translationBuffer.write(event.delta);
+        _translationCompleted = false;
     }
   }
 
@@ -115,6 +129,15 @@ class LiveRealtimeTranscriptCommitter {
         _translationBuffer
           ..clear()
           ..write(transcript);
+    }
+  }
+
+  void _markCompleted(OpenAiRealtimeTranscriptKind kind) {
+    switch (kind) {
+      case OpenAiRealtimeTranscriptKind.source:
+        _sourceCompleted = true;
+      case OpenAiRealtimeTranscriptKind.translation:
+        _translationCompleted = true;
     }
   }
 
@@ -142,14 +165,53 @@ class LiveRealtimeTranscriptCommitter {
     );
   }
 
-  bool _shouldRollReadableBlock(OpenAiRealtimeTranscriptKind kind) {
-    if (kind != OpenAiRealtimeTranscriptKind.translation) {
+  bool _shouldStartNewSegment(
+    OpenAiRealtimeTranscriptKind nextKind, {
+    bool isCompletion = false,
+  }) {
+    if (!_hasTranscript) {
+      return false;
+    }
+
+    if (_isFinal) {
+      if (isCompletion &&
+          ((nextKind == OpenAiRealtimeTranscriptKind.source &&
+                  !_sourceCompleted) ||
+              (nextKind == OpenAiRealtimeTranscriptKind.translation &&
+                  !_translationCompleted))) {
+        return false;
+      }
+      return true;
+    }
+
+    if (!_readyForNextReadableBlock) {
+      return false;
+    }
+
+    if (nextKind == OpenAiRealtimeTranscriptKind.translation) {
+      return true;
+    }
+
+    return _sourceCompleted;
+  }
+
+  bool _shouldRollReadableBlock() {
+    if (!_hasSourceText || !_hasTranslationText) {
       return false;
     }
 
     final text = _translationBuffer.toString().trim();
     return _sentenceBoundaryCount(text) >= 2 && _endsAtSentenceBoundary(text);
   }
+
+  String _statusForCurrentSegment() {
+    return _isFinal || _translationCompleted ? 'final' : 'partial';
+  }
+
+  bool get _hasSourceText => _sourceBuffer.toString().trim().isNotEmpty;
+
+  bool get _hasTranslationText =>
+      _translationBuffer.toString().trim().isNotEmpty;
 }
 
 bool _endsAtSentenceBoundary(String text) {
