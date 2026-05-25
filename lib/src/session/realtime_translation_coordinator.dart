@@ -65,6 +65,8 @@ class LiveRealtimeTranslationCoordinator {
   bool _closingIntentionally = false;
   bool _handlingFailure = false;
   bool _isDisposed = false;
+  bool _translationOutputEnabled = true;
+  bool _readAloudOutputEnabled = true;
   int _reconnectGeneration = 0;
 
   bool get isStreaming {
@@ -160,6 +162,19 @@ class LiveRealtimeTranslationCoordinator {
     _activeTranscriptCommitTarget = null;
     await _closeRealtimeResources(graceful: true, finishTranscript: true);
     sessionController.stopMeeting();
+  }
+
+  Future<void> pauseReadAloudOutput() {
+    _readAloudOutputEnabled = false;
+    return playbackGateway.stop(clearQueue: true);
+  }
+
+  void setRuntimeOutputOptions({
+    required bool translationOutputEnabled,
+    required bool readAloudOutputEnabled,
+  }) {
+    _translationOutputEnabled = translationOutputEnabled;
+    _readAloudOutputEnabled = readAloudOutputEnabled;
   }
 
   Future<LiveRealtimeDebugProofResult>
@@ -299,10 +314,19 @@ class LiveRealtimeTranslationCoordinator {
 
     switch (event) {
       case OpenAiRealtimeTranscriptDelta():
+        if (!_shouldHandleTranscript(event.kind)) {
+          return;
+        }
         _commitTranscript(_transcriptCommitter?.commitDelta(event));
       case OpenAiRealtimeTranscriptCompleted():
+        if (!_shouldHandleTranscript(event.kind)) {
+          return;
+        }
         _commitTranscript(_transcriptCommitter?.commitCompleted(event));
       case OpenAiRealtimeAudioDelta():
+        if (!_shouldHandleTranslatedAudio()) {
+          return;
+        }
         _enqueueTranslatedAudio(event);
       case OpenAiRealtimeError():
         unawaited(
@@ -321,6 +345,27 @@ class LiveRealtimeTranslationCoordinator {
       default:
         break;
     }
+  }
+
+  bool _shouldHandleTranscript(OpenAiRealtimeTranscriptKind kind) {
+    if (kind == OpenAiRealtimeTranscriptKind.source) {
+      return true;
+    }
+
+    return _translationOutputEnabled &&
+        (_activeConfig?.translationOutputEnabled ?? true);
+  }
+
+  bool _shouldHandleTranslatedAudio() {
+    final config = _activeConfig;
+    if (config == null) {
+      return true;
+    }
+
+    return _translationOutputEnabled &&
+        _readAloudOutputEnabled &&
+        config.translationOutputEnabled &&
+        config.readAloudOutputEnabled;
   }
 
   void _commitTranscript(Future<void>? commit) {

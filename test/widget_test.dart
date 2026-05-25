@@ -166,6 +166,45 @@ void main() {
     );
   });
 
+  testWidgets('selects realtime target language and toggles live outputs', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+      ),
+    );
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pumpAndSettle();
+    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(realtimeGateway.configs.last.targetLanguageCode, 'en');
+
+    await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('French (FR)'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('Auto-detect Spanish -> French'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('Translate Text on'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('Translate Text off'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('Read Aloud on'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('Read Aloud off'), findsOneWidget);
+    expect(find.text('Read aloud is paused'), findsOneWidget);
+  });
+
   testWidgets('shows reconnecting realtime recovery state on live surface', (
     tester,
   ) async {
@@ -586,6 +625,8 @@ Widget _liveSessionHarness(LiveSessionState state) {
       onDirectionSwitch: () {},
       onRetryLiveSession: () {},
       onBottomAction: (_) {},
+      onFeatureToggle: (_) {},
+      onJumpToLive: () {},
     ),
   );
 }
@@ -630,11 +671,14 @@ class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
 }
 
 class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
+  final List<OpenAiRealtimeTranslationConfig> configs = [];
+
   @override
   Future<RealtimeTranslationSession> connect({
     required OpenAiRealtimeTranslationConfig config,
     required String credential,
   }) async {
+    configs.add(config);
     return _FakeRealtimeTranslationSession();
   }
 }

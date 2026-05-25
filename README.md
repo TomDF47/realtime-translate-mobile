@@ -15,6 +15,7 @@ Android-first Flutter app for live speech translation, designed to stay iOS-comp
 - Privacy-safe diagnostics: [docs/privacy-safe-diagnostics.md](docs/privacy-safe-diagnostics.md)
 - Environment setup: [docs/environment.md](docs/environment.md)
 - Testing strategy: [docs/testing-strategy.md](docs/testing-strategy.md)
+- Regression checklist: [docs/regression-testing-checklist.md](docs/regression-testing-checklist.md)
 - Decision log: [docs/decision-log.md](docs/decision-log.md)
 
 ## Decision Record
@@ -60,6 +61,7 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [docs/development-workflow.md](docs/development-workflow.md): issue workflow, doc update matrix, and handoff checklist.
 - [docs/environment.md](docs/environment.md): local setup, emulator notes, env placeholders, and secret handling.
 - [docs/testing-strategy.md](docs/testing-strategy.md): docs, Flutter, privacy, cybersecurity, and emulator verification plan.
+- [docs/regression-testing-checklist.md](docs/regression-testing-checklist.md): concrete pre-release checklist for main screen controls, language selection, toggles, realtime smoke, transcript chunking, timer behavior, generated exports, and APK release sanity.
 - [docs/decision-log.md](docs/decision-log.md): durable decisions future agents should preserve.
 - [docs/codex-starter-prompt.md](docs/codex-starter-prompt.md): starter prompt for the first Flutter implementation pass.
 - [.env.example](.env.example): placeholder-only environment contract.

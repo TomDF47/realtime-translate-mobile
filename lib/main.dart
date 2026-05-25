@@ -279,6 +279,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       const OpenAiCredentialStatus.missing();
   String? _activeMeetingId;
   String? _debugRealtimeProofStatus;
+  TranslationLanguage _selectedSourceLanguage =
+      LanguageSupport.autoDetectSource;
+  TranslationLanguage _selectedTargetLanguage =
+      LanguageSupport.realtimeTargetLanguages.first;
+  bool _translateTextEnabled = true;
+  bool _readAloudEnabled = true;
+  Duration _recordingElapsed = Duration.zero;
+  DateTime? _recordingStartedAt;
+  Timer? _recordingTicker;
 
   @override
   void initState() {
@@ -318,6 +327,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
   @override
   void dispose() {
+    _recordingTicker?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _realtimeCoordinator.dispose();
     _sessionController.removeListener(_handleSessionStateChanged);
@@ -330,7 +340,59 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return;
     }
 
+    _syncRecordingTimer();
     setState(() {});
+  }
+
+  void _syncRecordingTimer() {
+    final shouldRun = _sessionController.state.isMicrophoneCaptureOpen;
+    if (shouldRun && _recordingStartedAt == null) {
+      _recordingStartedAt = DateTime.now();
+      _recordingTicker ??= Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) {
+          setState(() => _refreshRecordingElapsed());
+        }
+      });
+      return;
+    }
+
+    if (!shouldRun && _recordingStartedAt != null) {
+      _refreshRecordingElapsed();
+      _recordingStartedAt = null;
+    }
+  }
+
+  void _refreshRecordingElapsed() {
+    final startedAt = _recordingStartedAt;
+    if (startedAt == null) {
+      return;
+    }
+
+    _recordingElapsed += DateTime.now().difference(startedAt);
+    _recordingStartedAt = DateTime.now();
+  }
+
+  void _resetRecordingTimer() {
+    _recordingStartedAt = null;
+    _recordingElapsed = Duration.zero;
+  }
+
+  String _recordingElapsedLabel() {
+    final elapsed = _recordingStartedAt == null
+        ? _recordingElapsed
+        : _recordingElapsed + DateTime.now().difference(_recordingStartedAt!);
+    final totalSeconds = elapsed.inSeconds;
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:'
+          '${minutes.toString().padLeft(2, '0')}:'
+          '${seconds.toString().padLeft(2, '0')}';
+    }
+
+    return '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -358,6 +420,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   Future<void> _startMeeting() async {
+    _resetRecordingTimer();
     final meetingId = 'meeting-${DateTime.now().microsecondsSinceEpoch}';
     _activeMeetingId = meetingId;
     await _persistMeetingFromSession(MockLiveTranslateData.listeningSession);
@@ -392,6 +455,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     LiveSessionViewData session, {
     String? meetingId,
   }) async {
+    _realtimeCoordinator.setRuntimeOutputOptions(
+      translationOutputEnabled: _translateTextEnabled,
+      readAloudOutputEnabled: _readAloudEnabled,
+    );
     final targetLanguageCode = _languageCodeForSelector(session.toLanguage);
     final result = await _realtimeCoordinator.start(
       config: _realtimeConfigForSession(
@@ -490,6 +557,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       sourceLanguageCode: 'auto',
       targetLanguageCode: targetLanguageCode,
       profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+      translationOutputEnabled: _translateTextEnabled,
+      readAloudOutputEnabled: _readAloudEnabled,
     );
   }
 
@@ -520,11 +589,92 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   LiveSessionViewData _sessionForSurface(_AppSurface surface) {
     final meeting = _activeMeeting;
     final base = _baseSessionForSurface(surface);
+    final selectedSession = _applyLiveControls(base);
     if (meeting == null || _surfaceForMeeting(meeting) != surface) {
-      return base;
+      return selectedSession;
     }
 
-    return _sessionFromStoredMeeting(meeting: meeting, base: base);
+    return _applyLiveControls(
+      _sessionFromStoredMeeting(meeting: meeting, base: base),
+    );
+  }
+
+  LiveSessionViewData _applyLiveControls(LiveSessionViewData base) {
+    final source = _selectorForLanguage(
+      _selectedSourceLanguage,
+      fallback: base.fromLanguage,
+      isTarget: false,
+    );
+    final target = _selectorForLanguage(
+      _selectedTargetLanguage,
+      fallback: base.toLanguage,
+      isTarget: true,
+    );
+    return base.copyWith(
+      routeLabel:
+          '${_routeEndpointLabel(_languageLabel(source))} -> '
+          '${_routeEndpointLabel(_languageLabel(target))}',
+      elapsedLabel: _recordingElapsedLabel(),
+      fromLanguage: source,
+      toLanguage: target,
+      features: _featuresForSession(base),
+      bottomControls: _bottomControlsForSession(base),
+    );
+  }
+
+  LanguageSelectorData _selectorForLanguage(
+    TranslationLanguage language, {
+    required LanguageSelectorData fallback,
+    required bool isTarget,
+  }) {
+    return LanguageSelectorData(
+      eyebrow: isTarget ? 'To' : 'From',
+      primaryLabel: language.name,
+      secondaryLabel: language.code == 'auto'
+          ? fallback.secondaryLabel
+          : language.regionLabel,
+      icon: fallback.icon,
+      accent: fallback.accent,
+    );
+  }
+
+  List<FeatureChipData> _featuresForSession(LiveSessionViewData base) {
+    return [
+      for (final feature in base.features)
+        if (feature.label == 'Translate Text')
+          FeatureChipData(
+            label: feature.label,
+            icon: feature.icon,
+            accent: feature.accent,
+            isEnabled: _translateTextEnabled,
+          )
+        else if (feature.label == 'Read Aloud')
+          FeatureChipData(
+            label: feature.label,
+            icon: feature.icon,
+            accent: feature.accent,
+            isEnabled: _readAloudEnabled,
+          )
+        else
+          feature,
+    ];
+  }
+
+  List<BottomControlActionData> _bottomControlsForSession(
+    LiveSessionViewData base,
+  ) {
+    return [
+      for (final control in base.bottomControls)
+        if (control.label == 'Pause Read Aloud' && !_readAloudEnabled)
+          const BottomControlActionData(
+            label: 'Resume Read Aloud',
+            icon: Icons.play_arrow_rounded,
+            accent: LiveAccent.amber,
+            semanticLabel: 'Resume read aloud',
+          )
+        else
+          control,
+    ];
   }
 
   Future<void> _appendContinuationToMeeting({
@@ -568,6 +718,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     final nextSurface = _surfaceForMeeting(meeting);
     final session = _baseSessionForSurface(nextSurface);
     _activeMeetingId = meeting.id;
+    _selectedSourceLanguage = _languageFromStoredLabel(
+      meeting.sourceLanguageLabel,
+      fallback: _selectedSourceLanguage,
+    );
+    _selectedTargetLanguage = _languageFromStoredLabel(
+      meeting.targetLanguageLabel,
+      fallback: _selectedTargetLanguage,
+    );
+    _resetRecordingTimer();
     final isReady = await _ensureLiveSessionReady(
       nextSurface == _AppSurface.speakingPaused
           ? MockLiveTranslateData.listeningSession
@@ -600,6 +759,20 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     setState(() => _surface = nextSurface);
   }
 
+  TranslationLanguage _languageFromStoredLabel(
+    String label, {
+    required TranslationLanguage fallback,
+  }) {
+    final normalized = label.toLowerCase();
+    for (final language in LanguageSupport.languages) {
+      if (normalized.contains(language.name.toLowerCase())) {
+        return language;
+      }
+    }
+
+    return fallback;
+  }
+
   void _openListening() {
     unawaited(_openListeningAfterPermission());
   }
@@ -613,6 +786,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     _sessionController.resumeListening();
+    _selectedSourceLanguage = LanguageSupport.autoDetectSource;
+    _selectedTargetLanguage = LanguageSupport.languageByCode('en');
     setState(() => _surface = _AppSurface.listening);
   }
 
@@ -632,12 +807,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     _sessionController.enterSpeakingPaused();
+    _selectedSourceLanguage = LanguageSupport.languageByCode('en');
+    _selectedTargetLanguage = LanguageSupport.languageByCode('ja');
     setState(() => _surface = _AppSurface.speakingPaused);
   }
 
   void _openSetup() {
     unawaited(_realtimeCoordinator.stop());
     _activeMeetingId = null;
+    _resetRecordingTimer();
     setState(() => _surface = _AppSurface.setup);
   }
 
@@ -654,8 +832,122 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     if (action.label == 'Resume Read Aloud') {
+      _setReadAloudEnabled(true);
       _openListening();
     }
+  }
+
+  void _toggleFeature(String label) {
+    if (label == 'Translate Text') {
+      _setTranslateTextEnabled(!_translateTextEnabled);
+    } else if (label == 'Read Aloud') {
+      _setReadAloudEnabled(!_readAloudEnabled);
+    }
+  }
+
+  void _setTranslateTextEnabled(bool enabled) {
+    if (_translateTextEnabled == enabled) {
+      return;
+    }
+
+    setState(() => _translateTextEnabled = enabled);
+    _realtimeCoordinator.setRuntimeOutputOptions(
+      translationOutputEnabled: _translateTextEnabled,
+      readAloudOutputEnabled: _readAloudEnabled,
+    );
+    unawaited(_restartRealtimeIfActive());
+  }
+
+  void _setReadAloudEnabled(bool enabled) {
+    if (_readAloudEnabled == enabled) {
+      return;
+    }
+
+    setState(() => _readAloudEnabled = enabled);
+    _realtimeCoordinator.setRuntimeOutputOptions(
+      translationOutputEnabled: _translateTextEnabled,
+      readAloudOutputEnabled: _readAloudEnabled,
+    );
+    if (enabled) {
+      unawaited(_restartRealtimeIfActive());
+    } else {
+      unawaited(_realtimeCoordinator.pauseReadAloudOutput());
+      _sessionController.enterSpeakingPaused();
+      setState(() => _surface = _AppSurface.speakingPaused);
+    }
+  }
+
+  void _selectLanguage(TranslationLanguage language, {required bool isTarget}) {
+    setState(() {
+      if (isTarget) {
+        _selectedTargetLanguage = language;
+      } else {
+        _selectedSourceLanguage = language;
+      }
+    });
+    unawaited(_persistActiveRouteAndRestart());
+  }
+
+  Future<void> _persistActiveRouteAndRestart() async {
+    await _restartRealtimeIfActive();
+    final activeMeeting = _activeMeeting;
+    if (activeMeeting != null) {
+      await _meetingRepository.upsertMeeting(
+        activeMeeting.copyWith(
+          sourceLanguageLabel: _languageLabel(
+            _selectorForLanguage(
+              _selectedSourceLanguage,
+              fallback: MockLiveTranslateData.listeningSession.fromLanguage,
+              isTarget: false,
+            ),
+          ),
+          targetLanguageLabel: _languageLabel(
+            _selectorForLanguage(
+              _selectedTargetLanguage,
+              fallback: MockLiveTranslateData.listeningSession.toLanguage,
+              isTarget: true,
+            ),
+          ),
+          updatedAt: DateTime.now().toUtc(),
+        ),
+      );
+      await _loadStoredMeetings();
+    }
+  }
+
+  Future<void> _restartRealtimeIfActive() async {
+    final meetingId = _activeMeetingId;
+    if (meetingId == null) {
+      return;
+    }
+
+    await _startRealtimeForSelectedRoute(meetingId: meetingId);
+  }
+
+  Future<void> _startRealtimeForSelectedRoute({
+    required String meetingId,
+  }) async {
+    final targetLanguageCode = _selectedTargetLanguage.code;
+    _realtimeCoordinator.setRuntimeOutputOptions(
+      translationOutputEnabled: _translateTextEnabled,
+      readAloudOutputEnabled: _readAloudEnabled,
+    );
+    await _realtimeCoordinator.start(
+      config: OpenAiRealtimeTranslationConfig(
+        sourceLanguageCode: _selectedSourceLanguage.code,
+        targetLanguageCode: targetLanguageCode,
+        profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+        translationOutputEnabled: _translateTextEnabled,
+        readAloudOutputEnabled: _readAloudEnabled,
+      ),
+      transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+        repository: _meetingRepository,
+        meetingId: meetingId,
+        sourceLanguageCode: _selectedSourceLanguage.code,
+        targetLanguageCode: targetLanguageCode,
+        now: DateTime.now,
+      ),
+    );
   }
 
   void _showAssistantSheet(AiChatScope scope) {
@@ -878,6 +1170,12 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
   }
 
+  void _jumpToLive() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Jumped to latest transcript.')),
+    );
+  }
+
   List<_GeneratedExportListItem> _generatedExportItems() {
     final items = <_GeneratedExportListItem>[
       for (final meeting in _storedMeetings)
@@ -933,7 +1231,16 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _LanguageOptionsSheet(isTarget: isTarget),
+      builder: (context) => _LanguageOptionsSheet(
+        isTarget: isTarget,
+        selectedLanguage: isTarget
+            ? _selectedTargetLanguage
+            : _selectedSourceLanguage,
+        onSelected: (language) {
+          Navigator.of(context).pop();
+          _selectLanguage(language, isTarget: isTarget);
+        },
+      ),
     );
   }
 
@@ -1039,6 +1346,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         onDirectionSwitch: _openSpeakingPaused,
         onRetryLiveSession: _openListening,
         onBottomAction: _handleBottomAction,
+        onFeatureToggle: _toggleFeature,
+        onJumpToLive: _jumpToLive,
         debugHarness: _debugE2eHarnessEnabled
             ? DebugRealtimeProofPanel(
                 status: _debugRealtimeProofStatus,
@@ -1058,6 +1367,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         onDirectionSwitch: _openListening,
         onRetryLiveSession: _openSpeakingPaused,
         onBottomAction: _handleBottomAction,
+        onFeatureToggle: _toggleFeature,
+        onJumpToLive: _jumpToLive,
         debugHarness: _debugE2eHarnessEnabled
             ? DebugRealtimeProofPanel(
                 status: _debugRealtimeProofStatus,
@@ -1432,6 +1743,8 @@ class LiveSessionScreen extends StatelessWidget {
     required this.onDirectionSwitch,
     required this.onRetryLiveSession,
     required this.onBottomAction,
+    required this.onFeatureToggle,
+    required this.onJumpToLive,
     this.debugHarness,
   });
 
@@ -1444,6 +1757,8 @@ class LiveSessionScreen extends StatelessWidget {
   final VoidCallback onDirectionSwitch;
   final VoidCallback onRetryLiveSession;
   final ValueChanged<BottomControlActionData> onBottomAction;
+  final ValueChanged<String> onFeatureToggle;
+  final VoidCallback onJumpToLive;
   final Widget? debugHarness;
 
   @override
@@ -1478,7 +1793,7 @@ class LiveSessionScreen extends StatelessWidget {
             onOpenTargetLanguageOptions: onOpenTargetLanguageOptions,
           ),
           const SizedBox(height: AppSpacing.xs),
-          _FeatureRow(features: session.features),
+          _FeatureRow(features: session.features, onToggle: onFeatureToggle),
           if (debugHarness != null) ...[
             const SizedBox(height: AppSpacing.xs),
             debugHarness!,
@@ -1504,7 +1819,7 @@ class LiveSessionScreen extends StatelessWidget {
                     ),
                     child: JumpToLiveChip(
                       accent: session.mode.accent,
-                      onPressed: () {},
+                      onPressed: onJumpToLive,
                     ),
                   ),
               ],
@@ -1772,9 +2087,10 @@ class _LanguageRouteRow extends StatelessWidget {
 }
 
 class _FeatureRow extends StatelessWidget {
-  const _FeatureRow({required this.features});
+  const _FeatureRow({required this.features, required this.onToggle});
 
   final List<FeatureChipData> features;
+  final ValueChanged<String> onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -1782,7 +2098,14 @@ class _FeatureRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         for (var index = 0; index < features.length; index++) ...[
-          Expanded(child: FeatureChip(data: features[index])),
+          Expanded(
+            child: FeatureChip(
+              data: features[index],
+              onTap: features[index].isPassive
+                  ? null
+                  : () => onToggle(features[index].label),
+            ),
+          ),
           if (index < features.length - 1) const SizedBox(width: AppSpacing.xs),
         ],
       ],
@@ -1791,9 +2114,15 @@ class _FeatureRow extends StatelessWidget {
 }
 
 class _LanguageOptionsSheet extends StatelessWidget {
-  const _LanguageOptionsSheet({required this.isTarget});
+  const _LanguageOptionsSheet({
+    required this.isTarget,
+    required this.selectedLanguage,
+    required this.onSelected,
+  });
 
   final bool isTarget;
+  final TranslationLanguage selectedLanguage;
+  final ValueChanged<TranslationLanguage> onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -1824,6 +2153,8 @@ class _LanguageOptionsSheet extends StatelessWidget {
             _LanguageOptionRow(
               language: language,
               statusLabel: isTarget ? 'Realtime output' : 'Source input',
+              isSelected: language.code == selectedLanguage.code,
+              onTap: () => onSelected(language),
             ),
           if (isTarget) ...[
             const SizedBox(height: AppSpacing.sm),
@@ -1850,10 +2181,17 @@ class _LanguageOptionsSheet extends StatelessWidget {
 }
 
 class _LanguageOptionRow extends StatelessWidget {
-  const _LanguageOptionRow({required this.language, required this.statusLabel});
+  const _LanguageOptionRow({
+    required this.language,
+    required this.statusLabel,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   final TranslationLanguage language;
   final String statusLabel;
+  final bool isSelected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1872,6 +2210,10 @@ class _LanguageOptionRow extends StatelessWidget {
         statusLabel,
         style: AppTextStyles.compact(Theme.of(context).textTheme),
       ),
+      trailing: isSelected
+          ? const Icon(Icons.check_circle_rounded, color: AppColors.teal)
+          : const Icon(Icons.chevron_right_rounded),
+      onTap: onTap,
     );
   }
 }
@@ -2040,6 +2382,15 @@ class _AssistantSheetState extends State<_AssistantSheet> {
     }
   }
 
+  void _recordFeedback(bool helpful) {
+    setState(() {
+      _statusLabel = helpful
+          ? 'Feedback saved for this answer.'
+          : 'Feedback saved. The answer can be regenerated.';
+      _errorLabel = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
@@ -2103,12 +2454,12 @@ class _AssistantSheetState extends State<_AssistantSheet> {
                 children: [
                   IconButton(
                     tooltip: 'Helpful',
-                    onPressed: () {},
+                    onPressed: () => _recordFeedback(true),
                     icon: const Icon(Icons.thumb_up_alt_outlined),
                   ),
                   IconButton(
                     tooltip: 'Not helpful',
-                    onPressed: () {},
+                    onPressed: () => _recordFeedback(false),
                     icon: const Icon(Icons.thumb_down_alt_outlined),
                   ),
                 ],

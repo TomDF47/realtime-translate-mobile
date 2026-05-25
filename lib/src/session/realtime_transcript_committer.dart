@@ -33,13 +33,17 @@ class LiveRealtimeTranscriptCommitter {
   bool _isFinal = false;
 
   Future<void> commitDelta(OpenAiRealtimeTranscriptDelta event) {
-    return _enqueue(() {
+    return _enqueue(() async {
       if (_isFinal) {
         _resetSegment();
       }
 
       _appendDelta(event);
-      return _upsert(status: 'partial');
+      await _upsert(status: 'partial');
+      if (_shouldRollReadableBlock(event.kind)) {
+        _isFinal = true;
+        _resetSegment();
+      }
     });
   }
 
@@ -137,6 +141,33 @@ class LiveRealtimeTranscriptCommitter {
       ),
     );
   }
+
+  bool _shouldRollReadableBlock(OpenAiRealtimeTranscriptKind kind) {
+    if (kind != OpenAiRealtimeTranscriptKind.translation) {
+      return false;
+    }
+
+    final text = _translationBuffer.toString().trim();
+    return _sentenceBoundaryCount(text) >= 2 && _endsAtSentenceBoundary(text);
+  }
+}
+
+bool _endsAtSentenceBoundary(String text) {
+  if (text.isEmpty) {
+    return false;
+  }
+
+  final trimmed = text.trimRight();
+  return trimmed.endsWith('.') ||
+      trimmed.endsWith('?') ||
+      trimmed.endsWith('!') ||
+      trimmed.endsWith('。') ||
+      trimmed.endsWith('？') ||
+      trimmed.endsWith('！');
+}
+
+int _sentenceBoundaryCount(String text) {
+  return RegExp(r'[.!?。？！](?:\s|$)').allMatches(text).length;
 }
 
 String _newEntryId(LiveRealtimeTranscriptCommitTarget target, int sequence) {

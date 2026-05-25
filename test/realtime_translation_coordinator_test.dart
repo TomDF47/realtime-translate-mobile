@@ -224,6 +224,135 @@ void main() {
     },
   );
 
+  test(
+    'suppresses translation transcript and read-aloud output when disabled',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 4);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Live smoke',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      final result = await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'en',
+          translationOutputEnabled: false,
+          readAloudOutputEnabled: false,
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hola.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Hello.',
+          ),
+        )
+        ..addEvent(
+          OpenAiRealtimeAudioDelta(
+            type: 'session.output_audio.delta',
+            base64Audio: base64Encode([4, 5, 6, 7]),
+          ),
+        );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(result, LiveRealtimeStartResult.started);
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, 'Hola.');
+      expect(entries.single.translatedText, isEmpty);
+      expect(harness.playbackGateway.enqueuedChunks, isEmpty);
+    },
+  );
+
+  test(
+    'rolls streaming transcript into readable two-sentence blocks',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 4);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Live smoke',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'First sentence. Second sentence.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: ' Third sentence.',
+          ),
+        );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(2));
+      expect(entries.first.translatedText, 'First sentence. Second sentence.');
+      expect(entries.last.translatedText, 'Third sentence.');
+    },
+  );
+
   test('stop closes capture, realtime, and controller resources', () async {
     final harness = await _Harness.create(
       permissionStatus: MicrophonePermissionStatus.granted,

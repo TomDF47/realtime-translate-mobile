@@ -491,9 +491,10 @@ class DirectionSwitchButton extends StatelessWidget {
 }
 
 class FeatureChip extends StatelessWidget {
-  const FeatureChip({super.key, required this.data});
+  const FeatureChip({super.key, required this.data, this.onTap});
 
   final FeatureChipData data;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -506,54 +507,60 @@ class FeatureChip extends StatelessWidget {
 
     return Semantics(
       container: true,
+      button: onTap != null,
       label: '${data.label} $stateLabel',
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 38),
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.xs,
-          vertical: AppSpacing.xxs,
-        ),
-        decoration: BoxDecoration(
-          color: data.isEnabled || data.isPassive
-              ? accentColor.withValues(alpha: 0.14)
-              : AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadii.chip),
-          border: Border.all(
-            color: data.isEnabled || data.isPassive
-                ? accentColor
-                : AppColors.border,
+      onTap: onTap,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.chip),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 38),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.xs,
+            vertical: AppSpacing.xxs,
           ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(data.icon, size: 16, color: accentColor),
-            const SizedBox(width: AppSpacing.xs),
-            Flexible(
-              child: Text(
-                data.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.compact(Theme.of(context).textTheme)
-                    .copyWith(
-                      color: data.isPassive
-                          ? accentColor
-                          : AppColors.textPrimary,
-                      fontSize: 11,
-                    ),
-              ),
+          decoration: BoxDecoration(
+            color: data.isEnabled || data.isPassive
+                ? accentColor.withValues(alpha: 0.14)
+                : AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadii.chip),
+            border: Border.all(
+              color: data.isEnabled || data.isPassive
+                  ? accentColor
+                  : AppColors.border,
             ),
-            if (!data.isPassive) ...[
-              const SizedBox(width: AppSpacing.xxs),
-              Icon(
-                data.isEnabled
-                    ? Icons.toggle_on_rounded
-                    : Icons.toggle_off_rounded,
-                size: 24,
-                color: data.isEnabled ? accentColor : AppColors.textTertiary,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(data.icon, size: 16, color: accentColor),
+              const SizedBox(width: AppSpacing.xs),
+              Flexible(
+                child: Text(
+                  data.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.compact(Theme.of(context).textTheme)
+                      .copyWith(
+                        color: data.isPassive
+                            ? accentColor
+                            : AppColors.textPrimary,
+                        fontSize: 11,
+                      ),
+                ),
               ),
+              if (!data.isPassive) ...[
+                const SizedBox(width: AppSpacing.xxs),
+                Icon(
+                  data.isEnabled
+                      ? Icons.toggle_on_rounded
+                      : Icons.toggle_off_rounded,
+                  size: 24,
+                  color: data.isEnabled ? accentColor : AppColors.textTertiary,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

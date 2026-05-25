@@ -78,6 +78,8 @@ class OpenAiRealtimeTranslationConfig {
     this.profile = OpenAiRealtimeTranslationProfile.primaryRealtime2,
     this.inputAudioRate = 24000,
     this.outputVoice = 'marin',
+    this.translationOutputEnabled = true,
+    this.readAloudOutputEnabled = true,
   });
 
   final String sourceLanguageCode;
@@ -85,6 +87,8 @@ class OpenAiRealtimeTranslationConfig {
   final OpenAiRealtimeTranslationProfile profile;
   final int inputAudioRate;
   final String outputVoice;
+  final bool translationOutputEnabled;
+  final bool readAloudOutputEnabled;
 
   Uri webSocketUri({Uri? baseUri}) {
     final base =
@@ -137,12 +141,21 @@ class OpenAiRealtimeTranslationConfig {
     final sourceLabel = sourceLanguageCode == 'auto'
         ? 'auto-detected source language'
         : sourceLanguageCode;
+    final outputModalities = readAloudOutputEnabled ? ['audio'] : ['text'];
+    final instruction = translationOutputEnabled
+        ? 'Translate incoming speech from $sourceLabel into '
+              '$targetLanguageCode. Return translated audio and transcript '
+              'deltas only. Preserve names, numbers, dates, and meeting terms.'
+        : 'Transcribe incoming speech from $sourceLabel only. Do not translate '
+              'or return translated output. Preserve names, numbers, dates, '
+              'and meeting terms.';
+
     return {
       'type': 'session.update',
       'session': {
         'type': 'realtime',
         'model': OpenAiConfiguration.realtimeModel,
-        'output_modalities': ['audio'],
+        'output_modalities': outputModalities,
         'audio': {
           'input': {
             'format': {'type': 'audio/pcm', 'rate': inputAudioRate},
@@ -153,10 +166,7 @@ class OpenAiRealtimeTranslationConfig {
             'voice': outputVoice,
           },
         },
-        'instructions':
-            'Translate incoming speech from $sourceLabel into '
-            '$targetLanguageCode. Return translated audio and transcript '
-            'deltas only. Preserve names, numbers, dates, and meeting terms.',
+        'instructions': instruction,
       },
     };
   }

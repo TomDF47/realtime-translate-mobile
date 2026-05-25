@@ -14,6 +14,8 @@ bash scripts/check-supply-chain.sh
 scripts/final_qa_gate.sh
 ```
 
+Use [regression-testing-checklist.md](regression-testing-checklist.md) for the concrete manual and installed-app regression pass before publishing APKs. It covers main screen controls, language selection, toggle behavior, realtime session smoke, transcript chunking, elapsed timer behavior, generated exports, and APK release sanity.
+
 Optional live OpenAI smoke, only when a credential is supplied through the process environment from an uncommitted local source:
 
 ```bash
