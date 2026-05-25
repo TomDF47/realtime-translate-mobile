@@ -81,6 +81,33 @@ void main() {
   });
 
   test(
+    'initial realtime connect timeout enters visible reconnecting state',
+    () async {
+      final reconnectDelays = <Duration>[];
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectDelay: (delay) {
+          reconnectDelays.add(delay);
+          return Completer<void>().future;
+        },
+        connectionTimeout: const Duration(milliseconds: 1),
+      );
+      harness.realtimeGateway.hangNextConnect = true;
+
+      final result = await harness.coordinator.start(config: config);
+      await _drainAsync();
+
+      expect(result, LiveRealtimeStartResult.failed);
+      expect(harness.realtimeGateway.connectCount, 1);
+      expect(harness.captureGateway.isCapturing, isFalse);
+      expect(harness.playbackGateway.isOpen, isFalse);
+      expect(harness.controller.state.phase, LiveSessionPhase.reconnecting);
+      expect(harness.controller.state.realtimeRetryAttempt, 1);
+      expect(reconnectDelays, hasLength(1));
+    },
+  );
+
+  test(
     'decodes realtime translated audio deltas into playback queue',
     () async {
       final harness = await _Harness.create(
@@ -712,6 +739,78 @@ void main() {
   );
 
   test(
+    'duplicate completed transcript events after reconnect do not create rows',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 9);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Duplicate completion',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Hola equipo.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Hello team.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Hello team.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Hola equipo.',
+          ),
+        );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, 'Hola equipo.');
+      expect(entries.single.translatedText, 'Hello team.');
+      expect(entries.single.status, 'final');
+    },
+  );
+
+  test(
     'debug generated-speech proof writes one realtime row and recovered audio',
     () async {
       final harness = await _Harness.create(
@@ -838,6 +937,28 @@ void main() {
     expect(harness.playbackGateway.isOpen, isFalse);
     expect(harness.realtimeGateway.session.closeImmediatelyCount, 1);
   });
+
+  test('foreground resume schedules lifecycle reconnect', () async {
+    final reconnectDelays = <Duration>[];
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+      reconnectDelay: (delay) async {
+        reconnectDelays.add(delay);
+      },
+    );
+
+    await harness.coordinator.start(config: config);
+    harness.coordinator.handleAppLifecycleState(AppLifecycleState.paused);
+    await _drainAsync();
+    harness.coordinator.handleAppLifecycleState(AppLifecycleState.resumed);
+    await _drainAsync();
+
+    expect(reconnectDelays, [Duration.zero]);
+    expect(harness.realtimeGateway.connectCount, 2);
+    expect(harness.captureGateway.startCount, 2);
+    expect(harness.playbackGateway.startCount, 2);
+    expect(harness.controller.state.phase, LiveSessionPhase.listening);
+  });
 }
 
 Future<void> _drainAsync() async {
@@ -870,6 +991,7 @@ class _Harness {
     OpenAiRealtimeReconnectPolicy reconnectPolicy =
         const OpenAiRealtimeReconnectPolicy(),
     LiveRealtimeReconnectDelay? reconnectDelay,
+    Duration connectionTimeout = const Duration(seconds: 12),
   }) async {
     final harness = _Harness._(permissionStatus: permissionStatus);
     harness.coordinator = LiveRealtimeTranslationCoordinator(
@@ -880,6 +1002,7 @@ class _Harness {
       playbackGateway: harness.playbackGateway,
       reconnectPolicy: reconnectPolicy,
       reconnectDelay: reconnectDelay ?? (_) => Future<void>.value(),
+      connectionTimeout: connectionTimeout,
     );
     if (seedCredential) {
       await harness.credentialStore.saveUserProvidedCredential(
@@ -1000,6 +1123,7 @@ class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
   final List<String> credentials = [];
   int connectCount = 0;
   bool failNextConnect = false;
+  bool hangNextConnect = false;
 
   _FakeRealtimeTranslationSession get session => sessions.last;
 
@@ -1009,6 +1133,10 @@ class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
     required String credential,
   }) async {
     connectCount += 1;
+    if (hangNextConnect) {
+      hangNextConnect = false;
+      return Completer<RealtimeTranslationSession>().future;
+    }
     if (failNextConnect) {
       failNextConnect = false;
       throw StateError('socket reconnect failed');

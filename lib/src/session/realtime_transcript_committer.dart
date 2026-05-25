@@ -51,6 +51,10 @@ class LiveRealtimeTranscriptCommitter {
 
   Future<void> commitCompleted(OpenAiRealtimeTranscriptCompleted event) {
     return _enqueue(() {
+      if (_isDuplicateCompletion(event)) {
+        return Future<void>.value();
+      }
+
       if (_shouldStartNewSegment(event.kind, isCompletion: true)) {
         _resetSegment();
       }
@@ -212,6 +216,21 @@ class LiveRealtimeTranscriptCommitter {
 
   bool get _hasTranslationText =>
       _translationBuffer.toString().trim().isNotEmpty;
+
+  bool _isDuplicateCompletion(OpenAiRealtimeTranscriptCompleted event) {
+    final transcript = event.transcript?.trim();
+    if (!_isFinal || transcript == null || transcript.isEmpty) {
+      return false;
+    }
+
+    return switch (event.kind) {
+      OpenAiRealtimeTranscriptKind.source =>
+        _sourceCompleted && _sourceBuffer.toString().trim() == transcript,
+      OpenAiRealtimeTranscriptKind.translation =>
+        _translationCompleted &&
+            _translationBuffer.toString().trim() == transcript,
+    };
+  }
 }
 
 bool _endsAtSentenceBoundary(String text) {

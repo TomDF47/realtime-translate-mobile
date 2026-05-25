@@ -237,6 +237,35 @@ void main() {
     expect(find.text('Listening'), findsOneWidget);
   });
 
+  testWidgets('keeps startup failure on live surface with recovery banner', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: _ThrowingRealtimeTranslationGateway(),
+      ),
+    );
+
+    await tester.tap(find.text('Start new meeting'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Reconnecting to OpenAI'), findsOneWidget);
+    expect(
+      find.text('Connection interrupted. Reconnecting to OpenAI shortly.'),
+      findsOneWidget,
+    );
+    expect(find.text('socket connection interrupted'), findsNothing);
+    expect((await repository.loadSnapshot()).meetings, hasLength(1));
+    expect(find.text('Start new meeting'), findsNothing);
+  });
+
   testWidgets('switches direction repeatedly without corrupting languages', (
     tester,
   ) async {
@@ -824,6 +853,17 @@ class _BlockingRealtimeTranslationGateway
     if (!_connectCompleter.isCompleted) {
       _connectCompleter.complete(session);
     }
+  }
+}
+
+class _ThrowingRealtimeTranslationGateway
+    implements RealtimeTranslationGateway {
+  @override
+  Future<RealtimeTranslationSession> connect({
+    required OpenAiRealtimeTranslationConfig config,
+    required String credential,
+  }) async {
+    throw StateError('socket connection interrupted');
   }
 }
 

@@ -44,7 +44,8 @@ class LiveRealtimeTranslationCoordinator {
     required this.realtimeGateway,
     TranslatedAudioPlaybackGateway? playbackGateway,
     this.reconnectPolicy = const OpenAiRealtimeReconnectPolicy(),
-    this.reconnectDelay = Future.delayed,
+    this.reconnectDelay,
+    this.connectionTimeout = const Duration(seconds: 12),
     this.diagnostics = const PrivacySafeDiagnostics(),
     this.onTranscriptCommitted,
   }) : playbackGateway =
@@ -56,7 +57,8 @@ class LiveRealtimeTranslationCoordinator {
   final RealtimeTranslationGateway realtimeGateway;
   final TranslatedAudioPlaybackGateway playbackGateway;
   final OpenAiRealtimeReconnectPolicy reconnectPolicy;
-  final LiveRealtimeReconnectDelay reconnectDelay;
+  final LiveRealtimeReconnectDelay? reconnectDelay;
+  final Duration connectionTimeout;
   final PrivacySafeDiagnostics diagnostics;
   final LiveRealtimeTranscriptCommitted? onTranscriptCommitted;
 
@@ -72,6 +74,8 @@ class LiveRealtimeTranslationCoordinator {
   bool _translationOutputEnabled = true;
   bool _readAloudOutputEnabled = true;
   int _reconnectGeneration = 0;
+  Timer? _pendingReconnectTimer;
+  Completer<void>? _pendingReconnectDelay;
 
   bool get isStreaming {
     return _realtimeSession != null && captureGateway.isCapturing;
@@ -101,7 +105,7 @@ class LiveRealtimeTranslationCoordinator {
 
     RealtimeTranslationSession? realtimeSession;
     try {
-      realtimeSession = await realtimeGateway.connect(
+      realtimeSession = await _connectWithTimeout(
         config: config,
         credential: credential,
       );
@@ -136,12 +140,14 @@ class LiveRealtimeTranslationCoordinator {
     } catch (error) {
       await realtimeSession?.closeImmediately();
       await _closeRealtimeResources(graceful: false, finishTranscript: true);
-      sessionController.applyRealtimeRecoveryDecision(
-        reconnectPolicy.plan(
-          failure: OpenAiRealtimeFailure.fromSocketError(error),
-          retryAttempt: sessionController.state.realtimeRetryAttempt + 1,
-        ),
+      final decision = reconnectPolicy.plan(
+        failure: OpenAiRealtimeFailure.fromSocketError(error),
+        retryAttempt: sessionController.state.realtimeRetryAttempt + 1,
       );
+      sessionController.applyRealtimeRecoveryDecision(decision);
+      if (decision.shouldRetry) {
+        _scheduleReconnect(decision);
+      }
       return LiveRealtimeStartResult.failed;
     }
   }
@@ -158,6 +164,21 @@ class LiveRealtimeTranslationCoordinator {
           _closeRealtimeResources(graceful: false, finishTranscript: true),
         );
       case AppLifecycleState.resumed:
+        if (sessionController.state.phase == LiveSessionPhase.reconnecting &&
+            sessionController.state.realtimeFailureKind ==
+                OpenAiRealtimeFailureKind.lifecycleInterrupted) {
+          final retryAttempt = sessionController.state.realtimeRetryAttempt <= 0
+              ? 1
+              : sessionController.state.realtimeRetryAttempt;
+          _scheduleReconnect(
+            OpenAiRealtimeReconnectDecision(
+              action: OpenAiRealtimeRecoveryAction.reconnectAfterBackoff,
+              failure: OpenAiRealtimeFailure.lifecycleInterrupted(),
+              retryAttempt: retryAttempt,
+              delay: Duration.zero,
+            ),
+          );
+        }
         break;
     }
   }
@@ -476,6 +497,7 @@ class LiveRealtimeTranslationCoordinator {
       return;
     }
 
+    _clearPendingReconnectDelay();
     final generation = ++_reconnectGeneration;
     final transcriptCommitTarget = _activeTranscriptCommitTarget;
     unawaited(
@@ -494,7 +516,7 @@ class LiveRealtimeTranslationCoordinator {
     required OpenAiRealtimeTranslationConfig config,
     required LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
   }) async {
-    await reconnectDelay(decision.delay);
+    await _waitForReconnectDelay(decision.delay);
     if (_isDisposed || generation != _reconnectGeneration) {
       return;
     }
@@ -513,7 +535,7 @@ class LiveRealtimeTranslationCoordinator {
         return;
       }
 
-      realtimeSession = await realtimeGateway.connect(
+      realtimeSession = await _connectWithTimeout(
         config: config,
         credential: credential,
       );
@@ -570,6 +592,55 @@ class LiveRealtimeTranslationCoordinator {
 
   void _cancelPendingReconnect() {
     _reconnectGeneration += 1;
+    _clearPendingReconnectDelay();
+  }
+
+  void _clearPendingReconnectDelay() {
+    final pendingTimer = _pendingReconnectTimer;
+    final pendingDelay = _pendingReconnectDelay;
+    _pendingReconnectTimer = null;
+    _pendingReconnectDelay = null;
+    pendingTimer?.cancel();
+    if (pendingDelay != null && !pendingDelay.isCompleted) {
+      pendingDelay.complete();
+    }
+  }
+
+  Future<void> _waitForReconnectDelay(Duration delay) {
+    final injectedReconnectDelay = reconnectDelay;
+    if (injectedReconnectDelay != null) {
+      return injectedReconnectDelay(delay);
+    }
+    if (delay <= Duration.zero) {
+      return Future<void>.value();
+    }
+
+    final delayCompleter = Completer<void>();
+    _pendingReconnectDelay = delayCompleter;
+    _pendingReconnectTimer = Timer(delay, () {
+      if (_pendingReconnectDelay == delayCompleter) {
+        _pendingReconnectTimer = null;
+        _pendingReconnectDelay = null;
+      }
+      if (!delayCompleter.isCompleted) {
+        delayCompleter.complete();
+      }
+    });
+    return delayCompleter.future;
+  }
+
+  Future<RealtimeTranslationSession> _connectWithTimeout({
+    required OpenAiRealtimeTranslationConfig config,
+    required String credential,
+  }) {
+    return realtimeGateway
+        .connect(config: config, credential: credential)
+        .timeout(
+          connectionTimeout,
+          onTimeout: () {
+            throw const LiveRealtimeConnectTimeoutException();
+          },
+        );
   }
 
   Future<void> _closeRealtimeResources({
@@ -611,4 +682,8 @@ class LiveRealtimeTranslationCoordinator {
       await Future<void>.delayed(Duration.zero);
     }
   }
+}
+
+class LiveRealtimeConnectTimeoutException implements Exception {
+  const LiveRealtimeConnectTimeoutException();
 }

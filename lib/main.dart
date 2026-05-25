@@ -441,6 +441,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     if (started) {
       setState(() => _surface = _AppSurface.listening);
     } else {
+      if (_shouldKeepRecoveryMeetingVisible(_sessionController.state)) {
+        setState(() => _surface = _AppSurface.listening);
+        return;
+      }
       await _meetingRepository.deleteMeeting(meetingId);
       if (_activeMeetingId == meetingId) {
         _activeMeetingId = null;
@@ -451,6 +455,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       }
       setState(() {});
     }
+  }
+
+  bool _shouldKeepRecoveryMeetingVisible(LiveSessionState state) {
+    return switch (state.phase) {
+      LiveSessionPhase.reconnecting ||
+      LiveSessionPhase.offline ||
+      LiveSessionPhase.error => true,
+      _ => false,
+    };
   }
 
   Future<bool> _startRealtimeForSession(
