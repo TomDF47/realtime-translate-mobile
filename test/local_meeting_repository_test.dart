@@ -155,6 +155,51 @@ void main() {
   });
 
   test(
+    'stores generated export bodies on the encrypted meeting snapshot',
+    () async {
+      final store = MemoryEncryptedLocalStore();
+      final repository = LocalMeetingRepository(store: store);
+      final now = DateTime.utc(2026, 5, 24, 3);
+      await repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Generated export meeting',
+          createdAt: now,
+          updatedAt: now,
+          sourceLanguageLabel: 'Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      final updated = await repository.saveGeneratedExport(
+        meetingId: 'meeting-1',
+        updatedAt: now.add(const Duration(minutes: 2)),
+        generatedExport: StoredGeneratedExport(
+          id: 'export-1',
+          meetingId: 'meeting-1',
+          type: 'transcript',
+          subject: 'Live Translate - Generated export meeting',
+          body: 'Synthetic local export body',
+          createdAt: now.add(const Duration(minutes: 2)),
+          transcriptEntryCount: 0,
+        ),
+      );
+      final snapshot = await repository.loadSnapshot();
+
+      expect(repository.isEncryptedAtRest, isTrue);
+      expect(updated, isNotNull);
+      expect(snapshot.meetings.single.generatedExports, hasLength(1));
+      expect(
+        snapshot.meetings.single.generatedExports.single.body,
+        contains('Synthetic'),
+      );
+      expect(snapshot.recipientPreferences.lastSelectedRecipients, isEmpty);
+    },
+  );
+
+  test(
     'deletes meeting history without clearing recipient preferences',
     () async {
       final repository = LocalMeetingRepository(

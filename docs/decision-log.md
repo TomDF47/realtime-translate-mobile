@@ -16,7 +16,7 @@ Decision:
 - Store meetings, transcript/history, summaries, recipient preferences, sensitive preferences, and credential/session material only in encrypted local device storage for the MVP.
 - Add local meeting management: start a new meeting, select an old meeting, and continue from it.
 - Add scoped AI chat over `This meeting` or `All meetings`.
-- Add user-initiated email export through device-native mail/share composer semantics where practical.
+- Add user-initiated export support. The active MVP export UX is now superseded by `2026-05-25 - Generated Exports Stay In App Until Copy`.
 - Treat cybersecurity as a first-class acceptance criterion.
 
 Rationale:
@@ -25,7 +25,7 @@ Rationale:
 - Direct phone-to-OpenAI calls preserve the intended realtime product path without introducing a transcript/audio proxy.
 - Local encrypted storage keeps the MVP privacy model simple and auditable.
 - Explicit AI chat scope reduces accidental cross-meeting disclosure.
-- Native mail/share export avoids operating a server-side email relay for sensitive transcript data.
+- In-app generated export copy avoids operating a server-side email relay for sensitive transcript data.
 
 Implications:
 
@@ -60,6 +60,31 @@ Implications:
 - Credential UX, encrypted storage, redaction, reset/removal, and credential-invalid recovery are MVP implementation requirements.
 - A real OpenAI network smoke test requires Tom to provide a key out-of-band or interactively at that point; no placeholder or real key belongs in the repo.
 - If live endpoint/API testing shows `gpt-realtime-2` cannot meet translation needs, use the dedicated `gpt-realtime-translate` profile without adding backend infrastructure.
+
+## 2026-05-25 - Generated Exports Stay In App Until Copy
+
+Status: Accepted
+
+Decision:
+
+- Replace the active MVP email-recipient/share-sheet export flow with in-app generated exports.
+- Keep the Transcript/Summary/Both selector.
+- Disable the active recipient list UI: no recipient input, checklist, example recipients, add-recipient controls, delete-recipient controls, or selected-recipient requirement.
+- Generate exports in the background from the UI perspective and notify completion with an in-app action that opens the generated export detail view.
+- Store generated export bodies only through encrypted local meeting storage.
+- Expose plaintext export bodies only in the generated export detail view and the explicit user-triggered Copy action.
+
+Rationale:
+
+- Opening the share sheet after summary generation blocks too long for the meeting workflow.
+- Executive-grade privacy requires generated exports to remain phone-local and encrypted until the user deliberately copies content out of the app.
+- Keeping browsing/review inside the app avoids accidental external handoff through a mail/share target before the user is ready.
+
+Implications:
+
+- Native share/mail handoff can remain a later explicit user-initiated option, but it is no longer the primary MVP generation flow.
+- Tests and diagnostics must avoid real generated export payloads and must not log export bodies.
+- Future recipient or outbound delivery work remains deferred unless source-of-truth docs and issue scope are updated.
 
 ## 2026-05-24 - Initial MVP Architecture
 

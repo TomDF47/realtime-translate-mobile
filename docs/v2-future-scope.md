@@ -75,7 +75,7 @@ Deferred from MVP:
 - Export queue.
 - Server-side recipient management.
 
-MVP export should use user-initiated device-native mail/share composer semantics where practical.
+MVP export should keep generated export bodies encrypted and in app until an explicit user Copy action. Device-native mail/share composer work is deferred unless a later accepted decision restores it as an active explicit handoff.
 
 ## Future Security Conditions
 

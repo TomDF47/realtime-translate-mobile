@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'src/export/local_meeting_exporter.dart';
 import 'src/language/language_support.dart';
@@ -38,7 +39,6 @@ class LiveTranslateApp extends StatelessWidget {
     super.key,
     this.permissionGateway,
     this.meetingRepository,
-    this.nativeShareGateway,
     this.aiChatGateway,
     this.meetingSummaryGateway,
     this.microphoneCaptureGateway,
@@ -48,7 +48,6 @@ class LiveTranslateApp extends StatelessWidget {
 
   final MicrophonePermissionGateway? permissionGateway;
   final LocalMeetingRepository? meetingRepository;
-  final NativeShareGateway? nativeShareGateway;
   final AiChatGateway? aiChatGateway;
   final MeetingSummaryGateway? meetingSummaryGateway;
   final MicrophoneCaptureGateway? microphoneCaptureGateway;
@@ -64,7 +63,6 @@ class LiveTranslateApp extends StatelessWidget {
       home: LiveTranslateHome(
         permissionGateway: permissionGateway,
         meetingRepository: meetingRepository,
-        nativeShareGateway: nativeShareGateway,
         aiChatGateway: aiChatGateway,
         meetingSummaryGateway: meetingSummaryGateway,
         microphoneCaptureGateway: microphoneCaptureGateway,
@@ -248,7 +246,6 @@ class LiveTranslateHome extends StatefulWidget {
     super.key,
     this.permissionGateway,
     this.meetingRepository,
-    this.nativeShareGateway,
     this.aiChatGateway,
     this.meetingSummaryGateway,
     this.microphoneCaptureGateway,
@@ -258,7 +255,6 @@ class LiveTranslateHome extends StatefulWidget {
 
   final MicrophonePermissionGateway? permissionGateway;
   final LocalMeetingRepository? meetingRepository;
-  final NativeShareGateway? nativeShareGateway;
   final AiChatGateway? aiChatGateway;
   final MeetingSummaryGateway? meetingSummaryGateway;
   final MicrophoneCaptureGateway? microphoneCaptureGateway;
@@ -274,7 +270,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   late final LiveSessionController _sessionController;
   late final LocalMeetingRepository _meetingRepository;
   late final OpenAiCredentialStore _openAiCredentialStore;
-  late final NativeShareGateway _nativeShareGateway;
   late final AiChatGateway _aiChatGateway;
   late final MeetingSummaryGateway _meetingSummaryGateway;
   late final LiveRealtimeTranslationCoordinator _realtimeCoordinator;
@@ -301,8 +296,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     _openAiCredentialStore = OpenAiCredentialStore(
       repository: _meetingRepository,
     );
-    _nativeShareGateway =
-        widget.nativeShareGateway ?? const MethodChannelNativeShareGateway();
     _aiChatGateway = widget.aiChatGateway ?? OpenAiResponsesAiChatGateway();
     _meetingSummaryGateway =
         widget.meetingSummaryGateway ?? OpenAiResponsesMeetingSummaryGateway();
@@ -464,8 +457,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       _storedMeetingFromSession(
         id: meetingId,
         title: session.mode == LiveSessionMode.speaking
-            ? 'Read-aloud follow-up'
-            : 'Project timeline review',
+            ? 'Live read-aloud meeting'
+            : 'Live translation meeting',
         session: session,
         now: now,
       ),
@@ -539,11 +532,16 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     required LiveSessionViewData session,
   }) async {
     final sourceEntries = session.transcriptEntries;
+    final now = _nextActivityTimestamp(meeting.updatedAt);
     if (sourceEntries.isEmpty) {
+      await _meetingRepository.touchMeeting(
+        meetingId: meeting.id,
+        updatedAt: now,
+      );
+      await _loadStoredMeetings();
       return;
     }
 
-    final now = DateTime.now().toUtc();
     final sourceEntry =
         sourceEntries[meeting.transcriptEntries.length % sourceEntries.length];
     await _meetingRepository.appendTranscriptEntry(
@@ -557,6 +555,13 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       ),
     );
     await _loadStoredMeetings();
+  }
+
+  DateTime _nextActivityTimestamp(DateTime previous) {
+    final now = DateTime.now().toUtc();
+    return now.isAfter(previous)
+        ? now
+        : previous.add(const Duration(microseconds: 1));
   }
 
   Future<void> _continueMeeting(StoredMeeting meeting) async {
@@ -681,6 +686,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           Navigator.of(context).pop();
           _showExportSheet();
         },
+        onOpenGeneratedExports: () {
+          Navigator.of(context).pop();
+          _showGeneratedExportsSheet();
+        },
         onResumeAmberMeeting: () {
           Navigator.of(context).pop();
           _openSpeakingPaused();
@@ -734,14 +743,186 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => _ExportSheet(
-        repository: _meetingRepository,
-        credentialStore: _openAiCredentialStore,
-        nativeShareGateway: _nativeShareGateway,
-        meetingSummaryGateway: _meetingSummaryGateway,
         meeting: _activeMeeting,
-        onMeetingUpdated: (meeting) async {
-          _activeMeetingId = meeting.id;
-          await _loadStoredMeetings();
+        onGenerateExport: _queueGeneratedExport,
+        onOpenGeneratedExports: _showGeneratedExportsSheet,
+      ),
+    );
+  }
+
+  void _queueGeneratedExport(ExportType type) {
+    final meeting = _activeMeeting;
+    if (meeting == null) {
+      _showExportSnackBar('Start or select a meeting before generating.');
+      return;
+    }
+
+    _showExportSnackBar('Generating export in the background.');
+    unawaited(_generateExportInBackground(meetingId: meeting.id, type: type));
+  }
+
+  Future<void> _generateExportInBackground({
+    required String meetingId,
+    required ExportType type,
+  }) async {
+    try {
+      var meeting = await _loadMeetingById(meetingId);
+      if (meeting == null) {
+        _showExportSnackBar('Meeting is no longer available.');
+        return;
+      }
+
+      if (type != ExportType.transcript && !_hasFreshStoredSummary(meeting)) {
+        final credential = await _openAiCredentialStore
+            .readCredentialForNetworkUse();
+        if (credential == null) {
+          _showExportSnackBar(
+            'OpenAI setup is required before generating this export.',
+          );
+          return;
+        }
+
+        final summary = await _meetingSummaryGateway.generate(
+          request: MeetingSummaryRequest(meeting: meeting),
+          credential: credential,
+        );
+        final updatedMeeting = await _meetingRepository.saveMeetingSummary(
+          meetingId: meeting.id,
+          summaryMetadata: summary.toMetadata(),
+          updatedAt: summary.generatedAt,
+        );
+        if (updatedMeeting != null) {
+          meeting = updatedMeeting;
+        }
+      }
+
+      final document = LocalMeetingExportComposer.compose(
+        meeting: meeting,
+        type: type,
+        recipients: const [],
+      );
+      final now = DateTime.now().toUtc();
+      final generatedExport = StoredGeneratedExport(
+        id: 'export-${now.microsecondsSinceEpoch}',
+        meetingId: meeting.id,
+        type: type.name,
+        subject: document.subject,
+        body: document.body,
+        createdAt: now,
+        transcriptEntryCount: meeting.transcriptEntries.length,
+      );
+      final updatedMeeting = await _meetingRepository.saveGeneratedExport(
+        meetingId: meeting.id,
+        generatedExport: generatedExport,
+        updatedAt: now,
+      );
+      if (updatedMeeting != null && _activeMeetingId == meeting.id) {
+        _activeMeetingId = meeting.id;
+      }
+      await _loadStoredMeetings();
+      _showGeneratedExportReady(generatedExport);
+    } on SummaryExportUnavailableException {
+      _showExportSnackBar(
+        'Generate a summary before exporting this selection.',
+      );
+    } on MeetingSummaryCredentialException {
+      _showExportSnackBar(
+        'OpenAI rejected the stored credential. Update OpenAI setup.',
+      );
+    } on MeetingSummaryNetworkException {
+      _showExportSnackBar(
+        'Could not reach OpenAI from this device. Try again when online.',
+      );
+    } on MeetingSummaryMalformedResponseException {
+      _showExportSnackBar('OpenAI returned an unreadable summary. Try again.');
+    } on MeetingSummaryRequestException {
+      _showExportSnackBar(
+        'OpenAI could not generate the summary for this meeting.',
+      );
+    } catch (_) {
+      _showExportSnackBar('Could not generate the export on this device.');
+    }
+  }
+
+  Future<StoredMeeting?> _loadMeetingById(String meetingId) async {
+    final snapshot = await _meetingRepository.loadSnapshot();
+    return _meetingById(snapshot.meetings, meetingId);
+  }
+
+  void _showGeneratedExportReady(StoredGeneratedExport generatedExport) {
+    _showExportSnackBar(
+      'Generated export is ready.',
+      actionLabel: 'Open',
+      onAction: () => _showGeneratedExportDetail(generatedExport),
+    );
+  }
+
+  void _showExportSnackBar(
+    String message, {
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    if (!mounted) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: actionLabel == null || onAction == null
+            ? null
+            : SnackBarAction(label: actionLabel, onPressed: onAction),
+      ),
+    );
+  }
+
+  List<_GeneratedExportListItem> _generatedExportItems() {
+    final items = <_GeneratedExportListItem>[
+      for (final meeting in _storedMeetings)
+        for (final generatedExport in meeting.generatedExports)
+          _GeneratedExportListItem(
+            meetingTitle: meeting.title,
+            generatedExport: generatedExport,
+          ),
+    ];
+    items.sort(
+      (a, b) =>
+          b.generatedExport.createdAt.compareTo(a.generatedExport.createdAt),
+    );
+    return items;
+  }
+
+  void _showGeneratedExportsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _GeneratedExportsSheet(
+        items: _generatedExportItems(),
+        onOpenExport: (item) {
+          Navigator.of(context).pop();
+          _showGeneratedExportDetail(item.generatedExport);
+        },
+      ),
+    );
+  }
+
+  void _showGeneratedExportDetail(StoredGeneratedExport generatedExport) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _GeneratedExportDetailSheet(
+        generatedExport: generatedExport,
+        onCopy: () async {
+          await Clipboard.setData(ClipboardData(text: generatedExport.body));
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Generated export copied.')),
+            );
+          }
         },
       ),
     );
@@ -922,9 +1103,7 @@ class LocalSetupScreen extends StatelessWidget {
                   ),
                   const Padding(
                     padding: EdgeInsets.only(top: AppSpacing.xxl),
-                    child: FooterBadgeRow(
-                      badges: MockLiveTranslateData.footerBadges,
-                    ),
+                    child: FooterBranding(),
                   ),
                 ],
               ),
@@ -946,8 +1125,8 @@ class _LocalSetupHero extends StatelessWidget {
     return Column(
       children: [
         const SizedBox(height: AppSpacing.xxl),
-        const WaveLogo(),
-        const SizedBox(height: AppSpacing.xxl),
+        const XenovisLogo(),
+        const SizedBox(height: AppSpacing.xl),
         Text(
           'Live Translate',
           textAlign: TextAlign.center,
@@ -1599,13 +1778,14 @@ class _FeatureRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Wrap(
-        spacing: AppSpacing.xs,
-        runSpacing: AppSpacing.xs,
-        children: [for (final feature in features) FeatureChip(data: feature)],
-      ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        for (var index = 0; index < features.length; index++) ...[
+          Expanded(child: FeatureChip(data: features[index])),
+          if (index < features.length - 1) const SizedBox(width: AppSpacing.xs),
+        ],
+      ],
     );
   }
 }
@@ -1738,10 +1918,14 @@ class _AssistantSheetState extends State<_AssistantSheet> {
 
   Future<void> _loadContext() async {
     final snapshot = await widget.repository.loadSnapshot();
+    final activeMeetingId = widget.activeMeeting?.id;
+    final activeMeeting = activeMeetingId == null
+        ? null
+        : _meetingById(snapshot.meetings, activeMeetingId);
     final context = AiChatContextBuilder.fromSnapshot(
       scope: widget.scope,
       snapshot: snapshot,
-      activeMeeting: widget.activeMeeting,
+      activeMeeting: activeMeeting ?? widget.activeMeeting,
     );
     if (!mounted) {
       return;
@@ -1984,6 +2168,23 @@ class _AssistantSheetState extends State<_AssistantSheet> {
   }
 }
 
+StoredMeeting? _meetingById(List<StoredMeeting> meetings, String meetingId) {
+  for (final meeting in meetings) {
+    if (meeting.id == meetingId) {
+      return meeting;
+    }
+  }
+
+  return null;
+}
+
+bool _hasFreshStoredSummary(StoredMeeting meeting) {
+  final summary = meeting.summaryMetadata;
+  return summary.isUsable &&
+      summary.modelIntent == OpenAiConfiguration.summaryModel &&
+      summary.transcriptEntryCount == meeting.transcriptEntries.length;
+}
+
 class _ChatBubbleData {
   const _ChatBubbleData({
     required this.label,
@@ -2038,11 +2239,13 @@ class _MeetingMenuSheet extends StatelessWidget {
   const _MeetingMenuSheet({
     required this.onOpenHistory,
     required this.onExport,
+    required this.onOpenGeneratedExports,
     required this.onResumeAmberMeeting,
   });
 
   final VoidCallback onOpenHistory;
   final VoidCallback onExport;
+  final VoidCallback onOpenGeneratedExports;
   final VoidCallback onResumeAmberMeeting;
 
   @override
@@ -2059,8 +2262,13 @@ class _MeetingMenuSheet extends StatelessWidget {
           ),
           _SheetAction(
             icon: Icons.ios_share_rounded,
-            label: 'Export meeting',
+            label: 'Generate export',
             onTap: onExport,
+          ),
+          _SheetAction(
+            icon: Icons.folder_copy_outlined,
+            label: 'Open generated exports',
+            onTap: onOpenGeneratedExports,
           ),
           _SheetAction(
             icon: Icons.play_circle_outline_rounded,
@@ -2351,20 +2559,14 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
 
 class _ExportSheet extends StatefulWidget {
   const _ExportSheet({
-    required this.repository,
-    required this.credentialStore,
-    required this.nativeShareGateway,
-    required this.meetingSummaryGateway,
     required this.meeting,
-    required this.onMeetingUpdated,
+    required this.onGenerateExport,
+    required this.onOpenGeneratedExports,
   });
 
-  final LocalMeetingRepository repository;
-  final OpenAiCredentialStore credentialStore;
-  final NativeShareGateway nativeShareGateway;
-  final MeetingSummaryGateway meetingSummaryGateway;
   final StoredMeeting? meeting;
-  final Future<void> Function(StoredMeeting meeting) onMeetingUpdated;
+  final ValueChanged<ExportType> onGenerateExport;
+  final VoidCallback onOpenGeneratedExports;
 
   @override
   State<_ExportSheet> createState() => _ExportSheetState();
@@ -2372,257 +2574,24 @@ class _ExportSheet extends StatefulWidget {
 
 class _ExportSheetState extends State<_ExportSheet> {
   ExportType _selectedType = ExportType.transcript;
-  final TextEditingController _recipientController = TextEditingController();
-  StoredMeeting? _meeting;
-  Map<String, bool> _recipients = const {};
-  bool _isLoadingRecipients = true;
-  bool _isGeneratingSummary = false;
-  bool _isSharing = false;
-  String? _statusLabel;
   String? _errorLabel;
-
-  @override
-  void initState() {
-    super.initState();
-    _meeting = widget.meeting;
-    unawaited(_loadRecipientPreferences());
-  }
-
-  @override
-  void dispose() {
-    _recipientController.dispose();
-    super.dispose();
-  }
-
-  List<String> get _selectedRecipients {
-    return [
-      for (final entry in _recipients.entries)
-        if (entry.value) entry.key,
-    ];
-  }
 
   bool get _summaryRequired => _selectedType != ExportType.transcript;
 
-  bool get _isBusy => _isGeneratingSummary || _isSharing;
-
-  bool get _canOpenShareSheet {
-    return !_isLoadingRecipients &&
-        !_isBusy &&
-        _meeting != null &&
-        _selectedRecipients.isNotEmpty;
-  }
-
-  Future<void> _loadRecipientPreferences() async {
-    final snapshot = await widget.repository.loadSnapshot();
-    final preferences = snapshot.recipientPreferences;
-    final remembered = preferences.rememberedRecipients.isEmpty
-        ? const ['recipient@example.com', 'assistant@example.com']
-        : preferences.rememberedRecipients;
-    final selected = preferences.lastSelectedRecipients.toSet();
-    final defaultSelected = preferences.lastSelectedRecipients.isEmpty;
-
-    if (!mounted) {
+  void _generateExport() {
+    if (widget.meeting == null) {
+      setState(() => _errorLabel = 'Start or select a meeting first.');
       return;
     }
 
-    setState(() {
-      _recipients = {
-        for (var index = 0; index < remembered.length; index++)
-          remembered[index]: defaultSelected
-              ? index == 0
-              : selected.contains(remembered[index]),
-      };
-      _isLoadingRecipients = false;
-    });
-  }
-
-  void _addRecipient() {
-    final value = _recipientController.text.trim();
-    if (value.isEmpty) {
-      setState(() => _errorLabel = 'Enter an email address to add.');
-      return;
-    }
-
-    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)) {
-      setState(() => _errorLabel = 'Enter a valid email address.');
-      return;
-    }
-
-    setState(() {
-      _recipients = {..._recipients, value: true};
-      _recipientController.clear();
-      _errorLabel = null;
-      _statusLabel = null;
-    });
-  }
-
-  void _removeRecipient(String recipient) {
-    setState(() {
-      _recipients = {
-        for (final entry in _recipients.entries)
-          if (entry.key != recipient) entry.key: entry.value,
-      };
-      _statusLabel = null;
-    });
-  }
-
-  Future<void> _saveRecipientPreferences() {
-    return widget.repository.saveRecipientPreferences(
-      RecipientPreferences(
-        rememberedRecipients: _recipients.keys.toList(growable: false),
-        lastSelectedRecipients: _selectedRecipients,
-      ),
-    );
-  }
-
-  Future<void> _openShareSheet() async {
-    var meeting = _meeting;
-    if (meeting == null) {
-      setState(
-        () => _errorLabel = 'Start or select a meeting before exporting.',
-      );
-      return;
-    }
-
-    final selectedRecipients = _selectedRecipients;
-    if (selectedRecipients.isEmpty) {
-      setState(
-        () => _errorLabel = 'Select at least one recipient before exporting.',
-      );
-      return;
-    }
-
-    final needsSummary = _summaryRequired && !_hasFreshSummary(meeting);
-    setState(() {
-      _isGeneratingSummary = needsSummary;
-      _isSharing = !_isGeneratingSummary;
-      _errorLabel = null;
-      _statusLabel = null;
-    });
-
-    try {
-      await _saveRecipientPreferences();
-      if (_summaryRequired && !_hasFreshSummary(meeting)) {
-        final credential = await widget.credentialStore
-            .readCredentialForNetworkUse();
-        if (credential == null) {
-          if (mounted) {
-            setState(
-              () => _errorLabel =
-                  'OpenAI setup is required before generating a summary.',
-            );
-          }
-          return;
-        }
-
-        final summary = await widget.meetingSummaryGateway.generate(
-          request: MeetingSummaryRequest(meeting: meeting),
-          credential: credential,
-        );
-        final updatedMeeting = await widget.repository.saveMeetingSummary(
-          meetingId: meeting.id,
-          summaryMetadata: summary.toMetadata(),
-          updatedAt: summary.generatedAt,
-        );
-        if (updatedMeeting != null) {
-          meeting = updatedMeeting;
-          await widget.onMeetingUpdated(updatedMeeting);
-          if (!mounted) {
-            return;
-          }
-
-          setState(() {
-            _meeting = updatedMeeting;
-            _isGeneratingSummary = false;
-            _isSharing = true;
-            _statusLabel = 'Summary generated and stored on this device.';
-          });
-        }
-      }
-
-      final document = LocalMeetingExportComposer.compose(
-        meeting: meeting,
-        type: _selectedType,
-        recipients: selectedRecipients,
-      );
-      final result = await widget.nativeShareGateway.shareMeetingExport(
-        document,
-      );
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _statusLabel = switch (result) {
-          NativeShareResult.launched =>
-            'Share sheet opened. Review the export before sending.',
-          NativeShareResult.unavailable =>
-            'No local share target is available on this device.',
-        };
-      });
-    } on SummaryExportUnavailableException {
-      if (mounted) {
-        setState(
-          () => _errorLabel =
-              'Generate a summary before exporting this selection.',
-        );
-      }
-    } on MeetingSummaryCredentialException {
-      if (mounted) {
-        setState(
-          () => _errorLabel =
-              'OpenAI rejected the stored credential. Update OpenAI setup and try again.',
-        );
-      }
-    } on MeetingSummaryNetworkException {
-      if (mounted) {
-        setState(
-          () => _errorLabel =
-              'Could not reach OpenAI from this device. Try again when online.',
-        );
-      }
-    } on MeetingSummaryMalformedResponseException {
-      if (mounted) {
-        setState(
-          () => _errorLabel =
-              'OpenAI returned an unreadable summary. Try again before exporting.',
-        );
-      }
-    } on MeetingSummaryRequestException {
-      if (mounted) {
-        setState(
-          () => _errorLabel =
-              'OpenAI could not generate the summary for this meeting.',
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(
-          () => _errorLabel =
-              'Could not open the local share sheet on this device.',
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isGeneratingSummary = false;
-          _isSharing = false;
-        });
-      }
-    }
-  }
-
-  bool _hasFreshSummary(StoredMeeting meeting) {
-    final summary = meeting.summaryMetadata;
-    return summary.isUsable &&
-        summary.modelIntent == OpenAiConfiguration.summaryModel &&
-        summary.transcriptEntryCount == meeting.transcriptEntries.length;
+    widget.onGenerateExport(_selectedType);
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final meeting = _meeting;
+    final meeting = widget.meeting;
 
     return _SheetFrame(
       child: Column(
@@ -2636,13 +2605,13 @@ class _ExportSheetState extends State<_ExportSheet> {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  'Email export',
+                  'Generate export',
                   overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.title(textTheme),
                 ),
               ),
               IconButton(
-                tooltip: 'Close email export',
+                tooltip: 'Close export',
                 onPressed: () => Navigator.of(context).pop(),
                 icon: const Icon(Icons.close_rounded),
               ),
@@ -2656,94 +2625,37 @@ class _ExportSheetState extends State<_ExportSheet> {
           else
             Text(meeting.title, style: AppTextStyles.compact(textTheme)),
           const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                widget.onOpenGeneratedExports();
+              },
+              icon: const Icon(Icons.folder_copy_outlined),
+              label: const Text('Open generated exports'),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
           ExportTypeSelector(
             selected: _selectedType,
             onChanged: (type) {
               setState(() {
                 _selectedType = type;
                 _errorLabel = null;
-                _statusLabel = null;
               });
             },
           ),
           if (_summaryRequired) ...[
             const SizedBox(height: AppSpacing.sm),
             Text(
-              meeting != null && _hasFreshSummary(meeting)
+              meeting != null && _hasFreshStoredSummary(meeting)
                   ? 'A GPT-5.5 summary is stored locally for this transcript.'
                   : 'Summary is generated by a direct OpenAI request from this device, then stored locally for review.',
               style: AppTextStyles.compact(textTheme),
             ),
           ],
-          const SizedBox(height: AppSpacing.md),
-          Text('Recipients', style: AppTextStyles.label(textTheme)),
-          const SizedBox(height: AppSpacing.xs),
-          TextField(
-            controller: _recipientController,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.done,
-            decoration: InputDecoration(
-              labelText: 'Add recipient',
-              errorText: _errorLabel != null && _errorLabel!.contains('email')
-                  ? _errorLabel
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(AppRadii.card),
-              ),
-            ),
-            onSubmitted: (_) => _addRecipient(),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton.filled(
-              tooltip: 'Add recipient',
-              onPressed: _addRecipient,
-              icon: const Icon(Icons.add_rounded),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          if (_isLoadingRecipients)
-            Text(
-              'Loading recipients...',
-              style: AppTextStyles.compact(textTheme),
-            )
-          else if (_recipients.isEmpty)
-            Text(
-              'No remembered recipients yet.',
-              style: AppTextStyles.compact(textTheme),
-            )
-          else
-            for (final recipient in _recipients.keys)
-              Row(
-                children: [
-                  Checkbox(
-                    value: _recipients[recipient],
-                    onChanged: (value) {
-                      setState(() {
-                        _recipients = {
-                          ..._recipients,
-                          recipient: value ?? false,
-                        };
-                        _statusLabel = null;
-                      });
-                    },
-                  ),
-                  Expanded(
-                    child: Text(
-                      recipient,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.body(textTheme),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Remove $recipient',
-                    onPressed: () => _removeRecipient(recipient),
-                    icon: const Icon(Icons.delete_outline_rounded),
-                  ),
-                ],
-              ),
-          if (_errorLabel != null && !_errorLabel!.contains('email')) ...[
+          if (_errorLabel != null) ...[
             const SizedBox(height: AppSpacing.xs),
             Text(
               _errorLabel!,
@@ -2752,40 +2664,201 @@ class _ExportSheetState extends State<_ExportSheet> {
               ).copyWith(color: AppColors.red),
             ),
           ],
-          if (_statusLabel != null) ...[
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              _statusLabel!,
-              style: AppTextStyles.compact(
-                textTheme,
-              ).copyWith(color: AppColors.teal),
-            ),
-          ],
           const SizedBox(height: AppSpacing.md),
-          PrivacyNote(
+          const PrivacyNote(
             label:
-                'Exports are prepared locally and handed to the device mail or share sheet. Review before sending.',
+                'Generated exports stay encrypted on this device. Plain text is shown only in the in-app export view and when you press Copy.',
             icon: Icons.lock_outline_rounded,
           ),
           const SizedBox(height: AppSpacing.md),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _canOpenShareSheet ? _openShareSheet : null,
-              icon: const Icon(Icons.ios_share_rounded),
-              label: Text(
-                _isGeneratingSummary
-                    ? 'Generating summary'
-                    : _isSharing
-                    ? 'Opening share sheet'
-                    : 'Open share sheet',
-              ),
+              onPressed: _generateExport,
+              icon: const Icon(Icons.add_to_photos_outlined),
+              label: const Text('Generate export'),
             ),
           ),
         ],
       ),
     );
   }
+}
+
+class _GeneratedExportListItem {
+  const _GeneratedExportListItem({
+    required this.meetingTitle,
+    required this.generatedExport,
+  });
+
+  final String meetingTitle;
+  final StoredGeneratedExport generatedExport;
+}
+
+class _GeneratedExportsSheet extends StatelessWidget {
+  const _GeneratedExportsSheet({
+    required this.items,
+    required this.onOpenExport,
+  });
+
+  final List<_GeneratedExportListItem> items;
+  final ValueChanged<_GeneratedExportListItem> onOpenExport;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return _SheetFrame(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SheetHandle(),
+          Row(
+            children: [
+              const Icon(Icons.folder_copy_outlined, color: AppColors.teal),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'Generated exports',
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.title(textTheme),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Close generated exports',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (items.isEmpty)
+            Text(
+              'No generated exports yet.',
+              style: AppTextStyles.body(textTheme),
+            )
+          else
+            for (final item in items)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  backgroundColor: AppColors.surfacePressed,
+                  foregroundColor: AppColors.teal,
+                  child: Icon(Icons.description_outlined),
+                ),
+                title: Text(
+                  item.generatedExport.subject,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.label(textTheme),
+                ),
+                subtitle: Text(
+                  '${item.meetingTitle} - '
+                  '${_exportTypeLabel(item.generatedExport.type)} - '
+                  '${_timeLabel(item.generatedExport.createdAt)}',
+                  style: AppTextStyles.compact(textTheme),
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => onOpenExport(item),
+              ),
+          const SizedBox(height: AppSpacing.sm),
+          const PrivacyNote(
+            label:
+                'Generated export bodies are stored only in encrypted local app storage.',
+            icon: Icons.lock_outline_rounded,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GeneratedExportDetailSheet extends StatelessWidget {
+  const _GeneratedExportDetailSheet({
+    required this.generatedExport,
+    required this.onCopy,
+  });
+
+  final StoredGeneratedExport generatedExport;
+  final Future<void> Function() onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return _SheetFrame(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SheetHandle(),
+          Row(
+            children: [
+              const Icon(Icons.description_outlined, color: AppColors.teal),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  generatedExport.subject,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.title(textTheme),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Close generated export',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
+          ),
+          Text(
+            '${_exportTypeLabel(generatedExport.type)} generated '
+            '${_timeLabel(generatedExport.createdAt)}',
+            style: AppTextStyles.compact(textTheme),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxHeight: 360),
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.surface.withValues(alpha: 0.78),
+              borderRadius: BorderRadius.circular(AppRadii.card),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                generatedExport.body,
+                style: AppTextStyles.body(textTheme),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const PrivacyNote(
+            label:
+                'This is the only in-app plaintext view. Use Copy only when you are ready to place the export on the clipboard.',
+            icon: Icons.lock_outline_rounded,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onCopy,
+              icon: const Icon(Icons.copy_rounded),
+              label: const Text('Copy generated export'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _exportTypeLabel(String value) {
+  return switch (value) {
+    'summary' => 'Summary',
+    'both' => 'Both',
+    _ => 'Transcript',
+  };
 }
 
 class _SheetFrame extends StatelessWidget {

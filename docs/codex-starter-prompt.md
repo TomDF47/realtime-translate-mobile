@@ -27,8 +27,8 @@ Product decisions:
 - No AWS, Lambda, token broker, app backend, cloud identity gate, cloud sync, server mailer, or server-side transcript handling in MVP.
 - Preferred realtime voice/translation model: gpt-realtime-2; keep gpt-realtime-translate as a dedicated translation fallback/profile.
 - AI chat must be scoped explicitly to This meeting or All meetings.
-- Meetings, transcripts, summaries, recipient preferences, sensitive preferences, and credential/session material are local encrypted device storage only.
-- Email export uses device-native mail/share composer semantics where practical and no outbound mail backend.
+- Meetings, transcripts, summaries, generated exports, recipient preferences, sensitive preferences, and credential/session material are local encrypted device storage only.
+- Generated exports stay in app until explicit Copy; no outbound mail backend.
 - Summary export product intent is GPT-5.5 with xhigh reasoning; verify current OpenAI API support before coding.
 
 Important machine detail:
@@ -38,7 +38,7 @@ Important machine detail:
 Implementation expectations:
 - Use docs/mockup-ux-spec.md as the visual and interaction source of truth.
 - Adapt the welcome/sign-in mockup to the revised phone-only MVP; provider sign-in is V2/future.
-- Implement the supplied mockup-derived surfaces plus phone-local meeting management and email export controls.
+- Implement the supplied mockup-derived surfaces plus phone-local meeting management and generated export controls.
 - Keep the UI clean, premium, and executive-grade.
 - Do not turn the first screen into a technical control panel.
 - Create a pragmatic Flutter project structure suitable for Android now and iOS later.

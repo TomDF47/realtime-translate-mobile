@@ -64,6 +64,22 @@ class LocalMeetingRepository {
     await saveSnapshot(snapshot.copyWith(meetings: meetings));
   }
 
+  Future<void> touchMeeting({
+    required String meetingId,
+    required DateTime updatedAt,
+  }) async {
+    final snapshot = await loadSnapshot();
+    final meetings = [
+      for (final meeting in snapshot.meetings)
+        if (meeting.id == meetingId)
+          meeting.copyWith(updatedAt: updatedAt)
+        else
+          meeting,
+    ];
+    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    await saveSnapshot(snapshot.copyWith(meetings: meetings));
+  }
+
   Future<void> upsertTranscriptEntry({
     required String meetingId,
     required StoredTranscriptEntry entry,
@@ -100,6 +116,32 @@ class LocalMeetingRepository {
           updatedMeeting = meeting.copyWith(
             updatedAt: updatedAt,
             summaryMetadata: summaryMetadata,
+          )
+        else
+          meeting,
+    ];
+    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    await saveSnapshot(snapshot.copyWith(meetings: meetings));
+    return updatedMeeting;
+  }
+
+  Future<StoredMeeting?> saveGeneratedExport({
+    required String meetingId,
+    required StoredGeneratedExport generatedExport,
+    required DateTime updatedAt,
+  }) async {
+    final snapshot = await loadSnapshot();
+    StoredMeeting? updatedMeeting;
+    final meetings = [
+      for (final meeting in snapshot.meetings)
+        if (meeting.id == meetingId)
+          updatedMeeting = meeting.copyWith(
+            updatedAt: updatedAt,
+            generatedExports: [
+              generatedExport,
+              for (final existing in meeting.generatedExports)
+                if (existing.id != generatedExport.id) existing,
+            ],
           )
         else
           meeting,

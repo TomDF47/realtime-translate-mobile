@@ -214,7 +214,7 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
 - Fixed bottom control bar with three primary actions.
 - Local setup action button.
 - Meeting history row or selector.
-- Email export controls with Transcript/Summary/Both selector and recipient checklist.
+- Generated export controls with Transcript/Summary/Both selector, generated export browser, in-app detail view, and explicit Copy action. Active MVP UI does not show the deferred email recipient checklist.
 - Footer privacy/badge row.
 - Scoped AI chat bottom sheet.
 - AI chat message bubbles, citations, feedback controls, prompt chips, input, send button, scope label/control, and privacy note.

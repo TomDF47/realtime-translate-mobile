@@ -41,8 +41,8 @@ Mobile app:
 - Flutter, Android-first, iOS-compatible later.
 - Phone-only MVP aside from direct OpenAI API calls.
 - Explicit microphone permission and app lifecycle state handling.
-- Local encrypted meeting, transcript, summary, recipient, preference, and credential/session storage only for MVP.
-- User-initiated email export through device-native mail/share composer semantics where practical.
+- Local encrypted meeting, transcript, summary, generated export, recipient, preference, and credential/session storage only for MVP.
+- User-initiated generated exports stay in app until explicit Copy; no outbound mail backend.
 
 Backend/cloud:
 

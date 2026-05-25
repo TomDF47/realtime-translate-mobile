@@ -15,7 +15,7 @@ Build an Android-first, iOS-compatible mobile app for continuous live speech tra
 5. OpenAI streams translated audio and transcript deltas while the speaker is still talking.
 6. User can review local meeting history and continue from an old meeting.
 7. User can use scoped AI chat over `This meeting` or `All meetings`.
-8. User can export Transcript, Summary, or Both through a user-initiated device mail/share flow.
+8. User can generate Transcript, Summary, or Both as encrypted local exports, review them in app, and explicitly copy an export when ready.
 
 ## Supplied Mockups
 
@@ -38,7 +38,7 @@ The revised MVP keeps the visual direction but adapts sign-in affordances into p
 - Android-first implementation.
 - Keep iOS compatibility in project structure and dependencies.
 - Store sensitive local data using encrypted device storage.
-- Store meetings, transcript/history, summary metadata, recipient preferences, recent languages, and sensitive settings locally.
+- Store meetings, transcript/history, summary metadata, generated exports, recipient preferences, recent languages, and sensitive settings locally.
 - Do not embed a standard OpenAI API key.
 
 ### Backend
@@ -73,13 +73,13 @@ The revised MVP keeps the visual direction but adapts sign-in affordances into p
 - Answers should be grounded in local transcript context and cite timestamps when possible.
 - Transcript context is sent only through direct OpenAI calls from the phone.
 
-## Email Export
+## Generated Exports
 
 - User can choose Transcript, Summary, or Both.
-- On send, app presents a checklist of email addresses.
-- User can add/remove recipients and check/select recipients at send time.
-- App remembers the recipient list and last selected recipients locally.
-- Export should use device-native mail/share composer semantics where practical.
+- Generation runs in the background from the UI perspective.
+- Active MVP UI does not show recipient input, recipient checklist, example recipients, add-recipient controls, or delete-recipient controls.
+- Generated export bodies are stored only in encrypted local storage.
+- The app shows generated exports in app and exposes clipboard copy only after an explicit user action.
 - No outbound mail backend in MVP.
 - If Summary or Both is selected, product intent is GPT-5.5 with `xhigh` reasoning through the Responses API.
 

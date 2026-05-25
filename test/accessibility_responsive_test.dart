@@ -12,6 +12,7 @@ import 'package:realtime_translate_mobile/src/session/microphone_permission.dart
 import 'package:realtime_translate_mobile/src/session/translated_audio_playback.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
+import 'package:realtime_translate_mobile/src/storage/local_storage_models.dart';
 
 void main() {
   testWidgets('core controls expose semantic labels and tap actions', (
@@ -63,6 +64,8 @@ void main() {
 
       await tester.tap(find.text('Start new meeting'));
       await tester.pumpAndSettle();
+      final activeMeeting = (await repository.loadSnapshot()).meetings.single;
+      await _appendStoredTranscriptLine(repository, activeMeeting.id);
 
       expect(find.byTooltip('Open menu'), findsOneWidget);
       expect(find.byTooltip('Open AI chat'), findsOneWidget);
@@ -136,7 +139,7 @@ void main() {
     _expectNoFlutterOverflow(tester);
 
     expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
-    expect(find.text('Jump to Live'), findsOneWidget);
+    expect(find.text('Waiting for speech'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Open AI chat'));
     await tester.pumpAndSettle();
@@ -154,15 +157,22 @@ void main() {
 
     await tester.tap(find.byTooltip('Open menu'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export meeting'));
+    await tester.tap(find.text('Generate export'));
     await tester.pumpAndSettle();
     _expectNoFlutterOverflow(tester);
 
-    expect(find.text('Email export'), findsOneWidget);
+    expect(find.text('Generate export'), findsWidgets);
     expect(find.text('Transcript'), findsOneWidget);
     expect(find.text('Summary'), findsOneWidget);
     expect(find.text('Both'), findsOneWidget);
-    expect(find.text('recipient@example.com'), findsOneWidget);
+    expect(find.text('Open generated exports'), findsOneWidget);
+    expect(
+      find.textContaining('stay encrypted on this device'),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Add recipient'), findsNothing);
+    expect(find.byType(Checkbox), findsNothing);
+    expect(find.text('recipient@example.com'), findsNothing);
   });
 }
 
@@ -174,6 +184,34 @@ Future<void> _seedCredential(LocalMeetingRepository repository) {
   return OpenAiCredentialStore(
     repository: repository,
   ).saveUserProvidedCredential('placeholder-local-openai-credential');
+}
+
+Future<void> _appendStoredTranscriptLine(
+  LocalMeetingRepository repository,
+  String meetingId,
+) async {
+  final snapshot = await repository.loadSnapshot();
+  final meeting = snapshot.meetings.singleWhere((item) => item.id == meetingId);
+  final currentTime = DateTime.now().toUtc();
+  final now = currentTime.isAfter(meeting.updatedAt)
+      ? currentTime
+      : meeting.updatedAt.add(const Duration(microseconds: 1));
+  await repository.appendTranscriptEntry(
+    meetingId: meetingId,
+    updatedAt: now,
+    entry: StoredTranscriptEntry(
+      id: '$meetingId-test-line',
+      meetingId: meetingId,
+      languageCode: 'EN',
+      originalText: 'Timeline was agreed.',
+      translatedText: 'They agreed to meet on Tuesday at 10 AM.',
+      timestamp: now,
+      speakerLabel: null,
+      confidence: null,
+      status: 'final',
+      playbackState: 'playable',
+    ),
+  );
 }
 
 void _configureCompactLargeTextViewport(WidgetTester tester) {

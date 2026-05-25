@@ -47,7 +47,15 @@ void main() {
               const SizedBox(height: AppSpacing.sm),
               FeatureChip(data: session.features.first),
               const SizedBox(height: AppSpacing.sm),
-              TranscriptCard(entry: session.transcriptEntries.first),
+              const TranscriptCard(
+                entry: TranscriptEntryData(
+                  languageCode: 'EN',
+                  originalText: 'Source speech captured locally.',
+                  translatedText: 'Live translation is ready.',
+                  timestamp: '10:37 AM',
+                  accent: LiveAccent.blue,
+                ),
+              ),
               const SizedBox(height: AppSpacing.sm),
               SizedBox(
                 height: 220,
@@ -65,7 +73,8 @@ void main() {
     expect(find.text('Listening'), findsOneWidget);
     expect(find.text('Spanish'), findsOneWidget);
     expect(find.text('Translate Text'), findsOneWidget);
-    expect(find.text('Can we meet on Tuesday at 10 AM?'), findsWidgets);
+    expect(find.text('Live translation is ready.'), findsOneWidget);
+    expect(find.text('Waiting for speech'), findsOneWidget);
     expect(find.text('Jump to Live', skipOffstage: false), findsOneWidget);
   });
 

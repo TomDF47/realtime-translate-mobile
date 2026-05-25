@@ -109,6 +109,55 @@ class WaveLogo extends StatelessWidget {
   }
 }
 
+class XenovisLogo extends StatelessWidget {
+  const XenovisLogo({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Semantics(
+      label: 'Xenovis logo',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppColors.teal, AppColors.blue],
+              ),
+              boxShadow: AppElevation.raised(AppColors.background),
+            ),
+            child: const Center(
+              child: Text(
+                'X',
+                style: TextStyle(
+                  color: AppColors.background,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  height: 1,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Text(
+            'XENOVIS',
+            style: AppTextStyles.title(
+              textTheme,
+            ).copyWith(letterSpacing: 0, fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class AudioWavePanel extends StatelessWidget {
   const AudioWavePanel({super.key, this.accent = LiveAccent.teal});
 
@@ -244,40 +293,17 @@ class PrivacyNote extends StatelessWidget {
   }
 }
 
-class FooterBadgeRow extends StatelessWidget {
-  const FooterBadgeRow({super.key, required this.badges});
+class FooterBranding extends StatelessWidget {
+  const FooterBranding({super.key});
 
-  final List<FooterBadgeData> badges;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      alignment: WrapAlignment.center,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: AppSpacing.xl,
-      runSpacing: AppSpacing.xs,
-      children: [for (final badge in badges) _FooterBadge(badge: badge)],
-    );
-  }
-}
-
-class _FooterBadge extends StatelessWidget {
-  const _FooterBadge({required this.badge});
-
-  final FooterBadgeData badge;
+  static const label = 'Copyright by Xenovis Pty Ltd';
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(badge.icon, color: AppColors.textSecondary, size: 18),
-        const SizedBox(width: AppSpacing.xs),
-        Text(
-          badge.label,
-          style: AppTextStyles.body(Theme.of(context).textTheme),
-        ),
-      ],
+    return Text(
+      label,
+      textAlign: TextAlign.center,
+      style: AppTextStyles.compact(Theme.of(context).textTheme),
     );
   }
 }
@@ -482,9 +508,10 @@ class FeatureChip extends StatelessWidget {
       container: true,
       label: '${data.label} $stateLabel',
       child: Container(
+        constraints: const BoxConstraints(minHeight: 38),
         padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm,
-          vertical: AppSpacing.xs,
+          horizontal: AppSpacing.xs,
+          vertical: AppSpacing.xxs,
         ),
         decoration: BoxDecoration(
           color: data.isEnabled || data.isPassive
@@ -498,24 +525,31 @@ class FeatureChip extends StatelessWidget {
           ),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(data.icon, size: 16, color: accentColor),
             const SizedBox(width: AppSpacing.xs),
-            Text(
-              data.label,
-              style: AppTextStyles.compact(Theme.of(context).textTheme)
-                  .copyWith(
-                    color: data.isPassive ? accentColor : AppColors.textPrimary,
-                  ),
+            Flexible(
+              child: Text(
+                data.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.compact(Theme.of(context).textTheme)
+                    .copyWith(
+                      color: data.isPassive
+                          ? accentColor
+                          : AppColors.textPrimary,
+                      fontSize: 11,
+                    ),
+              ),
             ),
             if (!data.isPassive) ...[
-              const SizedBox(width: AppSpacing.xs),
+              const SizedBox(width: AppSpacing.xxs),
               Icon(
                 data.isEnabled
                     ? Icons.toggle_on_rounded
                     : Icons.toggle_off_rounded,
-                size: 28,
+                size: 24,
                 color: data.isEnabled ? accentColor : AppColors.textTertiary,
               ),
             ],
@@ -540,12 +574,18 @@ class TranscriptCard extends StatelessWidget {
       container: true,
       label: 'Transcript ${entry.languageCode} at ${entry.timestamp}',
       child: _Surface(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.sm,
+          AppSpacing.xs,
+          AppSpacing.sm,
+          AppSpacing.xs,
+        ),
         borderColor: accentColor.withValues(alpha: 0.82),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CircleAvatar(
-              radius: 18,
+              radius: 16,
               backgroundColor: accentColor.withValues(alpha: 0.12),
               foregroundColor: accentColor,
               child: Text(
@@ -576,17 +616,17 @@ class TranscriptCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: AppSpacing.xs),
+                  const SizedBox(height: AppSpacing.xxs),
                   Text(
                     entry.originalText,
                     style: AppTextStyles.body(textTheme),
                   ),
-                  const SizedBox(height: AppSpacing.xs),
+                  const SizedBox(height: AppSpacing.xxs),
                   Text(
                     entry.translatedText,
                     style: AppTextStyles.title(
                       textTheme,
-                    ).copyWith(fontSize: 18),
+                    ).copyWith(fontSize: 16),
                   ),
                 ],
               ),
@@ -624,12 +664,62 @@ class TranscriptList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (entries.isEmpty) {
+      return ListView(
+        padding: EdgeInsets.only(bottom: bottomPadding),
+        children: const [_EmptyTranscriptState()],
+      );
+    }
+
     return ListView.separated(
       padding: EdgeInsets.only(bottom: bottomPadding),
       itemBuilder: (context, index) => TranscriptCard(entry: entries[index]),
       separatorBuilder: (context, index) =>
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.xs),
       itemCount: entries.length,
+    );
+  }
+}
+
+class _EmptyTranscriptState extends StatelessWidget {
+  const _EmptyTranscriptState();
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Semantics(
+      container: true,
+      label: 'Transcript waiting for speech',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xl,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.surface.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          children: [
+            const Icon(Icons.graphic_eq_rounded, color: AppColors.textTertiary),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Waiting for speech',
+              textAlign: TextAlign.center,
+              style: AppTextStyles.label(textTheme),
+            ),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              'Live transcript lines will appear here.',
+              textAlign: TextAlign.center,
+              style: AppTextStyles.compact(textTheme),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

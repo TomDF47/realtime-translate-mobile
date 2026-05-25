@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
-import 'package:realtime_translate_mobile/src/export/local_meeting_exporter.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_meeting_summary.dart';
@@ -15,6 +15,7 @@ import 'package:realtime_translate_mobile/src/session/microphone_permission.dart
 import 'package:realtime_translate_mobile/src/session/translated_audio_playback.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
+import 'package:realtime_translate_mobile/src/storage/local_storage_models.dart';
 import 'package:realtime_translate_mobile/src/theme/live_translate_theme.dart';
 import 'package:realtime_translate_mobile/src/ui/live_translate_models.dart';
 
@@ -33,8 +34,9 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Secure & Private'), findsOneWidget);
-    expect(find.text('Android MVP'), findsOneWidget);
+    expect(find.text('Copyright by Xenovis Pty Ltd'), findsOneWidget);
+    expect(find.text('Secure & Private'), findsNothing);
+    expect(find.text('Android MVP'), findsNothing);
 
     expect(find.textContaining('Continue with'), findsNothing);
     expect(find.textContaining('Flutter Demo'), findsNothing);
@@ -113,7 +115,15 @@ void main() {
     expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
     expect(find.text('Listening'), findsOneWidget);
     expect(find.text('Translate Text'), findsOneWidget);
-    expect(find.text('Jump to Live'), findsOneWidget);
+    expect(find.text('Waiting for speech'), findsOneWidget);
+    expect(
+      find.text('Live transcript lines will appear here.'),
+      findsOneWidget,
+    );
+    expect(find.text('Jump to Live'), findsNothing);
+
+    final activeMeeting = (await repository.loadSnapshot()).meetings.single;
+    await _appendStoredTranscriptLine(repository, activeMeeting.id);
 
     await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
     await tester.pumpAndSettle();
@@ -305,6 +315,9 @@ void main() {
 
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
+    final activeMeeting = (await repository.loadSnapshot()).meetings.single;
+    await _appendStoredTranscriptLine(repository, activeMeeting.id);
+
     await tester.tap(find.byTooltip('Open menu'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Meeting history'));
@@ -331,14 +344,12 @@ void main() {
     tester,
   ) async {
     final repository = _testRepository();
-    final nativeShareGateway = _FakeNativeShareGateway();
     final meetingSummaryGateway = _FakeMeetingSummaryGateway();
     await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
-        nativeShareGateway: nativeShareGateway,
         meetingSummaryGateway: meetingSummaryGateway,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
@@ -353,51 +364,77 @@ void main() {
 
     expect(find.text('English -> Japanese'), findsOneWidget);
     expect(find.text('Speaking'), findsOneWidget);
-    expect(find.text('Fallback pending'), findsOneWidget);
+    expect(find.text('Speaker Active'), findsOneWidget);
     expect(find.text('Read aloud is paused'), findsOneWidget);
     expect(find.text('Resume Read Aloud'), findsOneWidget);
+    expect(find.text('Waiting for speech'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Open menu'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Export meeting'));
+    await tester.tap(find.text('Generate export'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Email export'), findsOneWidget);
+    expect(find.text('Generate export'), findsWidgets);
     expect(find.text('Transcript'), findsOneWidget);
     expect(find.text('Summary'), findsOneWidget);
     expect(find.text('Both'), findsOneWidget);
-    expect(find.text('recipient@example.com'), findsOneWidget);
+    expect(find.text('Open generated exports'), findsOneWidget);
+    expect(
+      find.textContaining('stay encrypted on this device'),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Add recipient'), findsNothing);
+    expect(find.byType(Checkbox), findsNothing);
+    expect(find.text('recipient@example.com'), findsNothing);
 
     await tester.tap(find.text('Summary'));
     await tester.pumpAndSettle();
     expect(find.textContaining('direct OpenAI request'), findsOneWidget);
-    await tester.ensureVisible(find.text('Open share sheet'));
-    await tester.tap(find.text('Open share sheet'));
+    final generateButton = find.widgetWithText(FilledButton, 'Generate export');
+    await tester.ensureVisible(generateButton);
+    await tester.tap(generateButton);
     await tester.pumpAndSettle();
 
     final snapshot = await repository.loadSnapshot();
-    expect(snapshot.recipientPreferences.lastSelectedRecipients, [
-      'recipient@example.com',
-    ]);
     expect(snapshot.meetings.single.summaryAvailable, isTrue);
+    expect(snapshot.meetings.single.generatedExports, hasLength(1));
     expect(meetingSummaryGateway.requests, hasLength(1));
-    expect(nativeShareGateway.documents, hasLength(1));
-    expect(nativeShareGateway.documents.single.type, ExportType.summary);
-    expect(nativeShareGateway.documents.single.recipients, [
-      'recipient@example.com',
-    ]);
+    expect(snapshot.meetings.single.generatedExports.single.type, 'summary');
     expect(
-      nativeShareGateway.documents.single.body,
+      snapshot.meetings.single.generatedExports.single.body,
       contains('Executive Summary'),
     );
     expect(
-      nativeShareGateway.documents.single.body,
+      snapshot.meetings.single.generatedExports.single.body,
       isNot(contains('Transcript\n\n[')),
     );
-    expect(
-      find.text('Share sheet opened. Review the export before sending.'),
-      findsOneWidget,
+    expect(find.text('Generated export is ready.'), findsOneWidget);
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy generated export'), findsOneWidget);
+    expect(find.textContaining('Executive Summary'), findsOneWidget);
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            expect('${call.arguments}', isNot(contains('placeholder')));
+          }
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    final copyButton = find.widgetWithText(
+      FilledButton,
+      'Copy generated export',
     );
+    await tester.ensureVisible(copyButton);
+    await tester.tap(copyButton);
+    await tester.pumpAndSettle();
+    expect(find.text('Generated export copied.'), findsOneWidget);
   });
 
   testWidgets('blocks live session when microphone permission is denied', (
@@ -449,9 +486,9 @@ void main() {
     await tester.tap(find.text('Meeting history'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Project timeline review'), findsOneWidget);
+    expect(find.text('Live translation meeting'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Delete Project timeline review'));
+    await tester.tap(find.byTooltip('Delete Live translation meeting'));
     await tester.pumpAndSettle();
 
     expect((await repository.loadSnapshot()).meetings, isEmpty);
@@ -482,21 +519,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Meeting history'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Project timeline review'));
+    await tester.tap(find.text('Live translation meeting'));
     await tester.pumpAndSettle();
 
     final continuedMeeting = (await repository.loadSnapshot()).meetings.single;
     expect(continuedMeeting.id, initialMeeting.id);
-    expect(
-      continuedMeeting.transcriptCount,
-      initialMeeting.transcriptCount + 1,
-    );
+    expect(continuedMeeting.transcriptCount, initialMeeting.transcriptCount);
     expect(continuedMeeting.createdAt, initialMeeting.createdAt);
     expect(
       continuedMeeting.updatedAt.isAfter(initialMeeting.updatedAt),
       isTrue,
     );
-    expect(find.text('Project timeline review'), findsNothing);
+    expect(find.text('Live translation meeting'), findsNothing);
     expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
   });
 }
@@ -509,6 +543,34 @@ Future<void> _seedCredential(LocalMeetingRepository repository) {
   return OpenAiCredentialStore(
     repository: repository,
   ).saveUserProvidedCredential('placeholder-local-openai-credential');
+}
+
+Future<void> _appendStoredTranscriptLine(
+  LocalMeetingRepository repository,
+  String meetingId,
+) async {
+  final snapshot = await repository.loadSnapshot();
+  final meeting = snapshot.meetings.singleWhere((item) => item.id == meetingId);
+  final currentTime = DateTime.now().toUtc();
+  final now = currentTime.isAfter(meeting.updatedAt)
+      ? currentTime
+      : meeting.updatedAt.add(const Duration(microseconds: 1));
+  await repository.appendTranscriptEntry(
+    meetingId: meetingId,
+    updatedAt: now,
+    entry: StoredTranscriptEntry(
+      id: '$meetingId-test-line',
+      meetingId: meetingId,
+      languageCode: 'EN',
+      originalText: 'Timeline was agreed.',
+      translatedText: 'They agreed to meet on Tuesday at 10 AM.',
+      timestamp: now,
+      speakerLabel: null,
+      confidence: null,
+      status: 'final',
+      playbackState: TranscriptPlaybackState.playable.name,
+    ),
+  );
 }
 
 Widget _liveSessionHarness(LiveSessionState state) {
@@ -598,18 +660,6 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
 
   @override
   void sendSessionUpdate() {}
-}
-
-class _FakeNativeShareGateway implements NativeShareGateway {
-  final List<MeetingExportDocument> documents = [];
-
-  @override
-  Future<NativeShareResult> shareMeetingExport(
-    MeetingExportDocument document,
-  ) async {
-    documents.add(document);
-    return NativeShareResult.launched;
-  }
 }
 
 class _FakeAiChatGateway implements AiChatGateway {

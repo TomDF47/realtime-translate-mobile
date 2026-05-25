@@ -22,11 +22,6 @@ abstract final class MockLiveTranslateData {
     ),
   ];
 
-  static const footerBadges = [
-    FooterBadgeData(label: 'Secure & Private', icon: Icons.shield_outlined),
-    FooterBadgeData(label: 'Android MVP', icon: Icons.android_rounded),
-  ];
-
   static const assistantPrompts = [
     PromptChipData(label: 'Summarise action items'),
     PromptChipData(label: 'What do they need from me?'),
@@ -71,31 +66,7 @@ abstract final class MockLiveTranslateData {
         isPassive: true,
       ),
     ],
-    transcriptEntries: [
-      TranscriptEntryData(
-        languageCode: 'ES',
-        originalText: '¿Podemos reunirnos el martes a las 10 de la mañana?',
-        translatedText: 'Can we meet on Tuesday at 10 AM?',
-        timestamp: '10:37 AM',
-        accent: LiveAccent.teal,
-      ),
-      TranscriptEntryData(
-        languageCode: 'EN',
-        originalText: 'Sí, eso debería funcionar para mí.',
-        translatedText: 'Yes, that should work for me.',
-        timestamp: '10:38 AM',
-        accent: LiveAccent.blue,
-      ),
-      TranscriptEntryData(
-        languageCode: 'ES',
-        originalText:
-            'Perfecto. Revisaremos los entregables y el cronograma del proyecto.',
-        translatedText:
-            "Perfect. We'll review the deliverables and project timeline.",
-        timestamp: '10:38 AM',
-        accent: LiveAccent.teal,
-      ),
-    ],
+    transcriptEntries: [],
     bottomControls: [
       BottomControlActionData(
         label: 'Stop Listening',
@@ -116,7 +87,7 @@ abstract final class MockLiveTranslateData {
         semanticLabel: 'Switch translation direction',
       ),
     ],
-    isAtLiveEdge: false,
+    isAtLiveEdge: true,
   );
 
   static const speakingPausedSession = LiveSessionViewData(
@@ -151,50 +122,20 @@ abstract final class MockLiveTranslateData {
         isEnabled: true,
       ),
       FeatureChipData(
-        label: 'Fallback pending',
-        icon: Icons.route_outlined,
+        label: 'Speaker Active',
+        icon: Icons.volume_up_rounded,
         accent: LiveAccent.amber,
         isPassive: true,
       ),
     ],
     queueBanner: QueueBannerData(
       title: 'Read aloud is paused',
-      detail: 'Queued: 4 lines (00:12 behind)',
+      detail: 'Translated audio will queue while paused.',
       primaryActionLabel: 'Resume',
       secondaryActionLabel: 'Skip to Live',
       accent: LiveAccent.amber,
     ),
-    transcriptEntries: [
-      TranscriptEntryData(
-        languageCode: 'EN',
-        speakerLabel: 'You',
-        originalText:
-            "Thanks everyone. I'd like to walk through the next steps for the project.",
-        translatedText:
-            "Thanks everyone. I'd like to walk through the next steps for the project.",
-        timestamp: '10:37 AM',
-        accent: LiveAccent.amber,
-        playbackState: TranscriptPlaybackState.speaking,
-      ),
-      TranscriptEntryData(
-        languageCode: 'JA',
-        originalText: 'ありがとうございます。プロジェクトの次のステップについて説明します。',
-        translatedText: 'ありがとうございます。プロジェクトの次のステップについて説明します。',
-        timestamp: '10:37 AM',
-        accent: LiveAccent.amber,
-      ),
-      TranscriptEntryData(
-        languageCode: 'EN',
-        speakerLabel: 'You',
-        originalText:
-            'We are targeting a draft by end of day Friday. Does that timeline work for you?',
-        translatedText:
-            'We are targeting a draft by end of day Friday. Does that timeline work for you?',
-        timestamp: '10:38 AM',
-        accent: LiveAccent.amber,
-        playbackState: TranscriptPlaybackState.speaking,
-      ),
-    ],
+    transcriptEntries: [],
     bottomControls: [
       BottomControlActionData(
         label: 'Stop Listening',
@@ -215,6 +156,6 @@ abstract final class MockLiveTranslateData {
         semanticLabel: 'Switch translation direction',
       ),
     ],
-    isAtLiveEdge: false,
+    isAtLiveEdge: true,
   );
 }

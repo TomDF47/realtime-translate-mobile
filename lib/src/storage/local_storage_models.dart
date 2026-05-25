@@ -83,6 +83,7 @@ class StoredMeeting {
     required this.targetLanguageLabel,
     required this.transcriptEntries,
     required this.summaryMetadata,
+    this.generatedExports = const [],
   });
 
   final String id;
@@ -93,6 +94,7 @@ class StoredMeeting {
   final String targetLanguageLabel;
   final List<StoredTranscriptEntry> transcriptEntries;
   final StoredSummaryMetadata summaryMetadata;
+  final List<StoredGeneratedExport> generatedExports;
 
   int get transcriptCount => transcriptEntries.length;
 
@@ -107,6 +109,7 @@ class StoredMeeting {
     String? targetLanguageLabel,
     List<StoredTranscriptEntry>? transcriptEntries,
     StoredSummaryMetadata? summaryMetadata,
+    List<StoredGeneratedExport>? generatedExports,
   }) {
     return StoredMeeting(
       id: id ?? this.id,
@@ -117,6 +120,7 @@ class StoredMeeting {
       targetLanguageLabel: targetLanguageLabel ?? this.targetLanguageLabel,
       transcriptEntries: transcriptEntries ?? this.transcriptEntries,
       summaryMetadata: summaryMetadata ?? this.summaryMetadata,
+      generatedExports: generatedExports ?? this.generatedExports,
     );
   }
 
@@ -132,6 +136,9 @@ class StoredMeeting {
         for (final entry in transcriptEntries) entry.toJson(),
       ],
       'summaryMetadata': summaryMetadata.toJson(),
+      'generatedExports': [
+        for (final export in generatedExports) export.toJson(),
+      ],
     };
   }
 
@@ -149,6 +156,54 @@ class StoredMeeting {
       summaryMetadata: StoredSummaryMetadata.fromJson(
         _jsonMap(json['summaryMetadata']),
       ),
+      generatedExports: _jsonList(
+        json['generatedExports'],
+      ).map(StoredGeneratedExport.fromJson).toList(growable: false),
+    );
+  }
+}
+
+class StoredGeneratedExport {
+  const StoredGeneratedExport({
+    required this.id,
+    required this.meetingId,
+    required this.type,
+    required this.subject,
+    required this.body,
+    required this.createdAt,
+    required this.transcriptEntryCount,
+  });
+
+  final String id;
+  final String meetingId;
+  final String type;
+  final String subject;
+  final String body;
+  final DateTime createdAt;
+  final int transcriptEntryCount;
+
+  Map<String, Object?> toJson() {
+    return {
+      'id': id,
+      'meetingId': meetingId,
+      'type': type,
+      'subject': subject,
+      'body': body,
+      'createdAt': createdAt.toIso8601String(),
+      'transcriptEntryCount': transcriptEntryCount,
+    };
+  }
+
+  static StoredGeneratedExport fromJson(Map<String, Object?> json) {
+    return StoredGeneratedExport(
+      id: json['id'] as String? ?? '',
+      meetingId: json['meetingId'] as String? ?? '',
+      type: json['type'] as String? ?? 'transcript',
+      subject: json['subject'] as String? ?? 'Generated export',
+      body: json['body'] as String? ?? '',
+      createdAt: _dateTime(json['createdAt']),
+      transcriptEntryCount:
+          (json['transcriptEntryCount'] as num?)?.toInt() ?? 0,
     );
   }
 }

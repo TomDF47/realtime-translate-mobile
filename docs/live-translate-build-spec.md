@@ -18,7 +18,7 @@ Build an Android-first, iOS-compatible Flutter app for continuous live speech tr
 | AI chat | Direct OpenAI path scoped explicitly to `This meeting` or `All meetings` |
 | Storage | Encrypted local device storage only |
 | Meetings | Local meeting history, transcript/history, and summary metadata stored on phone |
-| Email export | User-initiated device-native mail/share composer where practical; no outbound mail backend |
+| Generated exports | In-app Transcript/Summary/Both export generation, encrypted local storage, explicit in-app Copy action; no outbound mail backend |
 | Cloud/backend/auth scope | Deferred to [docs/v2-future-scope.md](v2-future-scope.md) |
 | Mockups | Supplied Android mockups in `assets/mockups/`, interpreted through [docs/mockup-ux-spec.md](mockup-ux-spec.md) |
 
@@ -56,7 +56,7 @@ Supplied mockups:
 7. User can pause/resume read-aloud, skip queued audio to live, switch direction, and jump to the latest transcript.
 8. App stores meeting transcript/history/summary metadata in encrypted local device storage.
 9. User can open AI chat from a meeting with `This meeting` scope or from a global/history surface with `All meetings` scope.
-10. User can export Transcript, Summary, or Both through a user-initiated mail/share flow with locally remembered recipients.
+10. User can generate Transcript, Summary, or Both as an encrypted local export, continue browsing while generation runs, review generated exports in app, and explicitly copy an export when ready.
 
 ## Mobile App Requirements
 
@@ -93,12 +93,12 @@ Required first-pass surfaces:
 - Main live translation screen in teal listening mode.
 - Scoped AI chat bottom sheet over a dimmed live screen.
 - Main live translation screen in amber speaking/read-aloud-paused mode.
-- Email export sheet/dialog with export type selector and recipient checklist.
+- Generated export sheet/dialog with Transcript/Summary/Both selector and generated export browser/detail views.
 
 Required UI foundations:
 
 - Small design token layer for colors, spacing, radii, typography, shadows/elevation, and state colors.
-- Reusable components for app shell, header, status card, language selectors, direction switch, feature toggles, transcript cards, queue banner, jump-to-live chip, bottom controls, local setup actions, meeting selector/history rows, AI chat sheet, prompt chips, input, email export controls, recipient checklist, and privacy notes.
+- Reusable components for app shell, header, status card, language selectors, direction switch, feature toggles, transcript cards, queue banner, jump-to-live chip, bottom controls, local setup actions, meeting selector/history rows, AI chat sheet, prompt chips, input, generated export controls, generated export browser/detail views, and privacy notes.
 - Safe-area handling for Android status/navigation bars.
 - Bottom transcript padding equal to fixed controls plus safe-area inset.
 - Large-text and small-device handling so labels, buttons, transcript rows, export controls, and bottom controls do not overlap or clip.
@@ -168,23 +168,25 @@ Current implementation note: language support was verified on 2026-05-24 against
 
 Current implementation note: the Flutter app has a scoped AI chat sheet for `This meeting`, an `All meetings` entry from meeting history, local transcript context assembly, a fakeable direct OpenAI Responses gateway, and tests that verify `store: false` request construction without credential leakage. Live Responses smoke on 2026-05-24 passed for both `This meeting` and `All meetings` using `gpt-5.5`, `reasoning.effort: medium`, and `store: false` without printing generated answer text.
 
-## Email Export Requirements
+## Generated Export Requirements
 
-- User can choose `Transcript`, `Summary`, or `Both` from a dropdown/select before exporting.
-- On send, the app presents a checklist of email addresses.
-- User can add/remove recipients and check/select recipients at send time.
-- App remembers the recipient list and the last selected recipients locally.
-- Email export should use device-native mail/share composer semantics where practical.
+- User can choose `Transcript`, `Summary`, or `Both` before generating an export.
+- Export generation must be asynchronous from the UI perspective; the user can close the sheet and continue browsing while summary/export generation runs.
+- Active MVP export UI does not show recipient input, recipient checklist, example recipients, add-recipient controls, or delete-recipient controls.
+- The app stores generated export documents only in encrypted local device storage and exposes them through an in-app generated exports browser/detail view.
+- A completion snackbar/banner should appear when generation finishes, with an action that opens the generated export detail view.
+- The generated export detail view may render the plaintext export body in app and must provide an explicit Copy action through platform clipboard APIs.
 - The MVP must not operate an outbound mail backend.
+- Native share/mail handoff is deferred as a later explicit user-initiated option and must not be the primary generation flow.
 - If `Summary` or `Both` is selected, product intent is GPT-5.5 with `xhigh` reasoning to summarize the transcript through the Responses API.
 - Summary output must include:
   - brief executive summary paragraph
   - all critical talking points and outcomes as bullet points
   - actions listed at the bottom
   - transcript below the summary if `Both` was selected
-- Transcript, summary, recipient addresses, and export payloads must not be logged, sent to app-owned backend infrastructure, or included in analytics/crash reports.
+- Transcript, summary, recipient addresses, and export payloads must not be logged, sent to app-owned backend infrastructure, stored in plaintext files/preferences, or included in analytics/crash reports.
 
-Current implementation note: Transcript exports are prepared locally and handed to the Android share sheet. Summary and Both exports now use a fakeable direct OpenAI Responses gateway from the phone with `gpt-5.5`, `reasoning.effort: xhigh`, and `store: false`; credentials stay in the Authorization header only, generated summary text/metadata is stored only in encrypted local storage, and the share sheet opens only from the user-initiated export action. Unit/widget tests cover request construction, credential non-leakage, local summary persistence, and Summary/Both export composition. Live Responses smoke on 2026-05-24 passed for the summary path with `gpt-5.5`, `reasoning.effort: xhigh`, `store: false`, and expected summary headings validated without printing generated summary text.
+Current implementation note: Transcript/Summary/Both exports are generated into encrypted local meeting storage and browsed in app. Summary and Both exports use a fakeable direct OpenAI Responses gateway from the phone with `gpt-5.5`, `reasoning.effort: xhigh`, and `store: false`; credentials stay in the Authorization header only, generated summary text/metadata and generated export bodies are stored only in encrypted local storage. Generation runs in the background from the UI perspective, completion appears as an in-app snackbar with an Open action, and plaintext export bodies are exposed only in the generated export detail view and the explicit Copy action. Unit/widget tests cover request construction, credential non-leakage, local summary persistence, encrypted local generated-export persistence, and Summary/Both export composition. Live Responses smoke on 2026-05-24 passed for the summary path with `gpt-5.5`, `reasoning.effort: xhigh`, `store: false`, and expected summary headings validated without printing generated summary text.
 
 ## Privacy, Security, And Logging Requirements
 
@@ -193,7 +195,7 @@ Target users include very high-level executives. Cybersecurity is a first-class 
 - No standard OpenAI API keys in mobile source, committed config, assets, logs, tests, screenshots, or app bundles.
 - No app backend, AWS, cloud sync, server mailer, or server-side transcript handling in the MVP.
 - Direct OpenAI API calls are the only routine network path for app product behavior.
-- User-initiated device mail/share export may hand content to the user's chosen local OS/provider composer; the app must not run an outbound mail backend.
+- User-initiated generated export copy may place content on the platform clipboard only after the user explicitly presses Copy; the app must not run an outbound mail backend.
 - Local meeting transcript history, summary metadata, sensitive preferences, remembered recipients, and credential/session material must be encrypted on device when implementation exists.
 - Use least-privilege mobile permissions. Microphone access is required; any additional permission needs product/security justification.
 - Logs and diagnostics must exclude speech, transcript payloads, full prompts, translated content, summaries, recipient lists, raw auth/session tokens, OpenAI credential material, and API keys.
@@ -211,8 +213,8 @@ Minimum verification plan once implementation exists:
 - Secret scanning or equivalent check that no standard OpenAI API key appears in mobile code/config/assets/tests/build outputs
 - Dependency/advisory check for pinned Flutter/Dart/native package versions
 - Local cybersecurity gate: `bash scripts/check-supply-chain.sh`
-- UI smoke checks for supplied mockup-derived surfaces plus meeting management and email export surfaces
-- Accessibility checks for labels, focus order, large text, recipient checklist, and contrast-sensitive states
+- UI smoke checks for supplied mockup-derived surfaces plus meeting management and generated export surfaces
+- Accessibility checks for labels, focus order, large text, generated export controls, and contrast-sensitive states
 - Privacy routing test showing no transcript/audio/prompt/summary/export content is sent to an app backend
 - Logging/diagnostics tests showing transcript, summary, recipients, prompts, microphone audio, and OpenAI credential material are redacted or absent
 

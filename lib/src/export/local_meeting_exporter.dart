@@ -169,7 +169,7 @@ abstract final class LocalMeetingExportComposer {
   }
 
   static const _localPreparationNotice =
-      'Prepared locally on this device. Review before sending from your chosen mail or share app.';
+      'Prepared locally on this device. Copy only when you are ready to share outside the app.';
 
   static String _timeLabel(DateTime value) {
     final local = value.toLocal();
