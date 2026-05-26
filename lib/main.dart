@@ -1103,11 +1103,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           Navigator.of(context).pop();
           _showGeneratedExportsSheet();
         },
-        onResumeAmberMeeting: () async {
-          await _openSpeakingPausedAfterPermission();
-          if (context.mounted) {
-            Navigator.of(context).pop();
-          }
+        onResumeAmberMeeting: () {
+          Navigator.of(context).pop();
+          unawaited(_openSpeakingPausedAfterPermission());
         },
       ),
     );
@@ -1426,11 +1424,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         selectedLanguage: isTarget
             ? _selectedTargetLanguage
             : _selectedSourceLanguage,
-        onSelected: (language) async {
-          await _selectLanguage(language, isTarget: isTarget);
-          if (context.mounted) {
-            Navigator.of(context).pop();
-          }
+        onSelected: (language) {
+          Navigator.of(context).pop();
+          unawaited(_selectLanguage(language, isTarget: isTarget));
         },
       ),
     );
@@ -2335,7 +2331,7 @@ class _LanguageOptionsSheet extends StatelessWidget {
 
   final bool isTarget;
   final TranslationLanguage selectedLanguage;
-  final Future<void> Function(TranslationLanguage language) onSelected;
+  final ValueChanged<TranslationLanguage> onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -2408,7 +2404,7 @@ class _LanguageOptionRow extends StatelessWidget {
   final TranslationLanguage language;
   final String statusLabel;
   final bool isSelected;
-  final Future<void> Function() onTap;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2430,9 +2426,7 @@ class _LanguageOptionRow extends StatelessWidget {
       trailing: isSelected
           ? const Icon(Icons.check_circle_rounded, color: AppColors.teal)
           : const Icon(Icons.chevron_right_rounded),
-      onTap: () async {
-        await onTap();
-      },
+      onTap: onTap,
     );
   }
 }
@@ -2816,7 +2810,7 @@ class _MeetingMenuSheet extends StatelessWidget {
   final VoidCallback onOpenHistory;
   final VoidCallback onExport;
   final VoidCallback onOpenGeneratedExports;
-  final Future<void> Function() onResumeAmberMeeting;
+  final VoidCallback onResumeAmberMeeting;
 
   @override
   Widget build(BuildContext context) {
