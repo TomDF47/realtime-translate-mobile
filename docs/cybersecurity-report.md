@@ -189,7 +189,7 @@ For each package or tool version introduced:
 ## Open Security Risks To Resolve During Implementation
 
 - User-provided OpenAI credential/session material in a mobile app is accepted for MVP only because Tom chose a phone-local no-backend path. Implementation must minimize exposure with encrypted local storage, no logging/screenshots/test output, and a clear reset/removal path.
-- Direct realtime endpoint creation now works for both configured profiles, Android PCM16 capture is wired locally, and translated-audio deltas can enter Android `AudioTrack` output through the fakeable local playback gateway, but audible live output/recovery and a real microphone translation smoke must determine whether `gpt-realtime-2` or the dedicated `gpt-realtime-translate` profile is the final runtime fit.
+- Direct realtime endpoint creation now works for both configured profiles, Android PCM16 capture is wired locally, and translated-audio deltas can enter Android `AudioTrack` output through the fakeable local playback gateway. Normal MVP live interpretation now uses the dedicated `gpt-realtime-translate` profile; remaining live-audio risk is real physical microphone translation, committed live transcript validation from the installed app, and audible speaker output/recovery under live streaming.
 - Native secure-storage behavior should be smoke-tested on real Android and iOS devices before production release, especially for long transcript volume and backup/restore edge cases.
 - Any crash reporting or analytics SDK should be deferred unless a strong need and redaction/consent model are documented.
 - Native email/share composer behavior must continue to be tested as export features expand, especially once iOS share handoff is validated.

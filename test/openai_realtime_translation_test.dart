@@ -70,10 +70,16 @@ void main() {
       config.profile,
       OpenAiRealtimeTranslationProfile.dedicatedTranslation,
     );
+    expect(session.keys, ['audio']);
+    expect(audio.keys, ['output']);
+    expect(output.keys, ['language']);
     expect(output['language'], 'fr');
     expect(serialized, isNot(contains('gpt-realtime-2')));
+    expect(serialized, isNot(contains('gpt-realtime-translate')));
+    expect(serialized, isNot(contains('model')));
     expect(serialized, isNot(contains('instructions')));
     expect(serialized, isNot(contains('"sourceLanguageCode"')));
+    expect(serialized, isNot(contains('"source"')));
     expect(serialized, isNot(contains('"input"')));
     expect(serialized, isNot(contains('"language":"en"')));
     expect(
@@ -93,36 +99,46 @@ void main() {
     expect(audio, isA<OpenAiRealtimeAudioDelta>());
     expect((audio! as OpenAiRealtimeAudioDelta).base64Audio, 'base64-audio');
 
+    final dedicatedAudio = OpenAiRealtimeEventParser.parse({
+      'type': 'session.output_audio.delta',
+      'delta': 'base64-translated-audio',
+    });
+    expect(dedicatedAudio, isA<OpenAiRealtimeAudioDelta>());
+    expect(
+      (dedicatedAudio! as OpenAiRealtimeAudioDelta).base64Audio,
+      'base64-translated-audio',
+    );
+
     final source = OpenAiRealtimeEventParser.parse({
       'type': 'session.input_transcript.delta',
       'delta': 'hola',
+      'item_id': 'source-item-1',
     });
     expect(source, isA<OpenAiRealtimeTranscriptDelta>());
-    expect(
-      (source! as OpenAiRealtimeTranscriptDelta).kind,
-      OpenAiRealtimeTranscriptKind.source,
-    );
+    final parsedSource = source! as OpenAiRealtimeTranscriptDelta;
+    expect(parsedSource.kind, OpenAiRealtimeTranscriptKind.source);
+    expect(parsedSource.itemId, 'source-item-1');
 
     final translation = OpenAiRealtimeEventParser.parse({
-      'type': 'response.output_text.delta',
+      'type': 'session.output_transcript.delta',
       'delta': 'hello',
+      'item_id': 'target-item-1',
     });
     expect(translation, isA<OpenAiRealtimeTranscriptDelta>());
-    expect(
-      (translation! as OpenAiRealtimeTranscriptDelta).kind,
-      OpenAiRealtimeTranscriptKind.translation,
-    );
+    final parsedTranslation = translation! as OpenAiRealtimeTranscriptDelta;
+    expect(parsedTranslation.kind, OpenAiRealtimeTranscriptKind.translation);
+    expect(parsedTranslation.itemId, 'target-item-1');
 
     final completed = OpenAiRealtimeEventParser.parse({
-      'type': 'response.output_text.done',
-      'text': 'Hello.',
-      'item_id': 'response-item-1',
+      'type': 'session.output_transcript.done',
+      'transcript': 'Hello.',
+      'item_id': 'target-item-1',
     });
     expect(completed, isA<OpenAiRealtimeTranscriptCompleted>());
     final parsedCompleted = completed! as OpenAiRealtimeTranscriptCompleted;
     expect(parsedCompleted.kind, OpenAiRealtimeTranscriptKind.translation);
     expect(parsedCompleted.transcript, 'Hello.');
-    expect(parsedCompleted.itemId, 'response-item-1');
+    expect(parsedCompleted.itemId, 'target-item-1');
 
     final inputDelta = OpenAiRealtimeEventParser.parse({
       'type': 'conversation.item.input_audio_transcription.delta',
@@ -161,6 +177,10 @@ void main() {
     expect(
       OpenAiRealtimeEventParser.parse({'type': 'session.updated'}),
       isA<OpenAiRealtimeSessionLifecycleEvent>(),
+    );
+    expect(
+      OpenAiRealtimeEventParser.parse({'type': 'session.closed'}),
+      isA<OpenAiRealtimeSessionClosed>(),
     );
 
     final error = OpenAiRealtimeEventParser.parse({
@@ -237,11 +257,20 @@ void main() {
       expect(receivedMessages, hasLength(3));
       expect(receivedMessages.first, contains('session.update'));
       expect(receivedMessages[1], contains('AQIDBA=='));
+      expect(
+        receivedMessages[1],
+        contains('"type":"session.input_audio_buffer.append"'),
+      );
       expect(receivedMessages[2], contains('session.close'));
       expect(
         receivedMessages.join('\n'),
         isNot(contains('placeholder-local-openai-credential')),
       );
+      expect(
+        receivedMessages.join('\n'),
+        isNot(contains('input_audio_buffer.commit')),
+      );
+      expect(receivedMessages.join('\n'), isNot(contains('response.create')));
     },
   );
 

@@ -188,10 +188,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
     expect(realtimeGateway.configs.last.targetLanguageCode, 'en');
+    expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
     expect(
       realtimeGateway.configs.last.profile,
       OpenAiRealtimeTranslationProfile.dedicatedTranslation,
     );
+    final initialRealtimeConfigCount = realtimeGateway.configs.length;
 
     await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
     await tester.pumpAndSettle();
@@ -200,14 +202,25 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('Auto-detect Spanish -> French'), findsOneWidget);
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect Spanish');
+    expect(snapshot.meetings.single.targetLanguageLabel, 'French (FR)');
+
+    await tester.tap(find.bySemanticsLabel('Translate Text on'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.bySemanticsLabel('Translate Text off'), findsOneWidget);
+    expect(
+      realtimeGateway.configs.length,
+      greaterThan(initialRealtimeConfigCount),
+    );
+    expect(realtimeGateway.configs.last.targetLanguageCode, 'fr');
+    expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
     expect(
       realtimeGateway.configs.last.profile,
       OpenAiRealtimeTranslationProfile.dedicatedTranslation,
     );
-
-    await tester.tap(find.bySemanticsLabel('Translate Text on'));
-    await tester.pumpAndSettle();
-    expect(find.bySemanticsLabel('Translate Text off'), findsOneWidget);
+    expect(realtimeGateway.configs.last.translationOutputEnabled, isFalse);
 
     await tester.tap(find.bySemanticsLabel('Read Aloud on'));
     await tester.pumpAndSettle();

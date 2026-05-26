@@ -49,8 +49,8 @@ The revised MVP keeps the visual direction but adapts sign-in affordances into p
 
 ### OpenAI
 
-- Live translation prefers `gpt-realtime-2` for realtime voice/translation.
-- Keep `gpt-realtime-translate` as a dedicated translation fallback/profile; do not assume it is based on the realtime2 model path.
+- Live translation uses `gpt-realtime-translate` on `/v1/realtime/translations` for normal MVP human-speech interpretation.
+- Keep `gpt-realtime-2` only as an explicit compatibility/experimental voice-agent profile.
 - App connects directly to the OpenAI API from the phone.
 - Translation path should support streaming translated audio and transcript deltas.
 - AI chat and summary generation use direct OpenAI calls from the phone.

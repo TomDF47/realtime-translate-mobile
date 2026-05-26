@@ -74,10 +74,16 @@ void main() {
     );
     expect(harness.realtimeGateway.configs.single.targetLanguageCode, 'en');
     expect(
+      harness.realtimeGateway.configs.single.profile,
+      OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+    );
+    expect(
       harness.realtimeGateway.credentials.single,
       'placeholder-credential',
     );
     expect(harness.realtimeGateway.session.appendedChunks.single, [0, 1, 2, 3]);
+    expect(harness.realtimeGateway.session.commitInputAudioBufferCount, 0);
+    expect(harness.realtimeGateway.session.createResponseCount, 0);
   });
 
   test(
@@ -1577,6 +1583,8 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   final List<List<int>> appendedChunks = [];
   int closeGracefullyCount = 0;
   int closeImmediatelyCount = 0;
+  int commitInputAudioBufferCount = 0;
+  int createResponseCount = 0;
 
   @override
   Stream<OpenAiRealtimeEvent> get events => _events.stream;
@@ -1587,10 +1595,14 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   }
 
   @override
-  void commitInputAudioBuffer() {}
+  void commitInputAudioBuffer() {
+    commitInputAudioBufferCount += 1;
+  }
 
   @override
-  void createResponse() {}
+  void createResponse() {
+    createResponseCount += 1;
+  }
 
   @override
   Future<void> closeGracefully() async {
