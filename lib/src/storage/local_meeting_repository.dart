@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'encrypted_local_store.dart';
@@ -9,10 +10,16 @@ class LocalMeetingRepository {
   static const storageKey = 'live_translate_local_storage_v1';
 
   final EncryptedLocalStore store;
+  Future<void> _mutationTail = Future<void>.value();
 
   bool get isEncryptedAtRest => store.isEncryptedAtRest;
 
   Future<LocalStorageSnapshot> loadSnapshot() async {
+    await _mutationTail;
+    return _readSnapshot();
+  }
+
+  Future<LocalStorageSnapshot> _readSnapshot() async {
     final raw = await store.read(key: storageKey);
     if (raw == null || raw.isEmpty) {
       return const LocalStorageSnapshot.empty();
@@ -27,21 +34,53 @@ class LocalMeetingRepository {
   }
 
   Future<void> saveSnapshot(LocalStorageSnapshot snapshot) {
+    return _withMutation(() => _writeSnapshot(snapshot));
+  }
+
+  Future<void> _writeSnapshot(LocalStorageSnapshot snapshot) {
     return store.write(key: storageKey, value: jsonEncode(snapshot.toJson()));
   }
 
-  Future<void> upsertMeeting(StoredMeeting meeting) async {
-    final snapshot = await loadSnapshot();
-    final meetings = [...snapshot.meetings];
-    final existingIndex = meetings.indexWhere((item) => item.id == meeting.id);
-    if (existingIndex == -1) {
-      meetings.add(meeting);
-    } else {
-      meetings[existingIndex] = meeting;
-    }
+  Future<T> _withMutation<T>(Future<T> Function() action) {
+    final previous = _mutationTail;
+    final next = Completer<void>();
+    _mutationTail = next.future;
 
-    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    await saveSnapshot(snapshot.copyWith(meetings: meetings));
+    return previous.then((_) async {
+      try {
+        return await action();
+      } finally {
+        if (!next.isCompleted) {
+          next.complete();
+        }
+      }
+    });
+  }
+
+  Future<T> _updateSnapshot<T>(
+    FutureOr<T> Function(LocalStorageSnapshot snapshot) update,
+  ) {
+    return _withMutation(() async {
+      final snapshot = await _readSnapshot();
+      return update(snapshot);
+    });
+  }
+
+  Future<void> upsertMeeting(StoredMeeting meeting) async {
+    await _updateSnapshot((snapshot) async {
+      final meetings = [...snapshot.meetings];
+      final existingIndex = meetings.indexWhere(
+        (item) => item.id == meeting.id,
+      );
+      if (existingIndex == -1) {
+        meetings.add(meeting);
+      } else {
+        meetings[existingIndex] = meeting;
+      }
+
+      meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _writeSnapshot(snapshot.copyWith(meetings: meetings));
+    });
   }
 
   Future<void> appendTranscriptEntry({
@@ -49,35 +88,37 @@ class LocalMeetingRepository {
     required StoredTranscriptEntry entry,
     required DateTime updatedAt,
   }) async {
-    final snapshot = await loadSnapshot();
-    final meetings = [
-      for (final meeting in snapshot.meetings)
-        if (meeting.id == meetingId)
-          meeting.copyWith(
-            updatedAt: updatedAt,
-            transcriptEntries: [...meeting.transcriptEntries, entry],
-          )
-        else
-          meeting,
-    ];
-    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    await saveSnapshot(snapshot.copyWith(meetings: meetings));
+    await _updateSnapshot((snapshot) async {
+      final meetings = [
+        for (final meeting in snapshot.meetings)
+          if (meeting.id == meetingId)
+            meeting.copyWith(
+              updatedAt: updatedAt,
+              transcriptEntries: [...meeting.transcriptEntries, entry],
+            )
+          else
+            meeting,
+      ];
+      meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _writeSnapshot(snapshot.copyWith(meetings: meetings));
+    });
   }
 
   Future<void> touchMeeting({
     required String meetingId,
     required DateTime updatedAt,
   }) async {
-    final snapshot = await loadSnapshot();
-    final meetings = [
-      for (final meeting in snapshot.meetings)
-        if (meeting.id == meetingId)
-          meeting.copyWith(updatedAt: updatedAt)
-        else
-          meeting,
-    ];
-    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    await saveSnapshot(snapshot.copyWith(meetings: meetings));
+    await _updateSnapshot((snapshot) async {
+      final meetings = [
+        for (final meeting in snapshot.meetings)
+          if (meeting.id == meetingId)
+            meeting.copyWith(updatedAt: updatedAt)
+          else
+            meeting,
+      ];
+      meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _writeSnapshot(snapshot.copyWith(meetings: meetings));
+    });
   }
 
   Future<void> upsertTranscriptEntry({
@@ -85,22 +126,23 @@ class LocalMeetingRepository {
     required StoredTranscriptEntry entry,
     required DateTime updatedAt,
   }) async {
-    final snapshot = await loadSnapshot();
-    final meetings = [
-      for (final meeting in snapshot.meetings)
-        if (meeting.id == meetingId)
-          meeting.copyWith(
-            updatedAt: updatedAt,
-            transcriptEntries: _upsertTranscriptEntry(
-              meeting.transcriptEntries,
-              entry,
-            ),
-          )
-        else
-          meeting,
-    ];
-    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    await saveSnapshot(snapshot.copyWith(meetings: meetings));
+    await _updateSnapshot((snapshot) async {
+      final meetings = [
+        for (final meeting in snapshot.meetings)
+          if (meeting.id == meetingId)
+            meeting.copyWith(
+              updatedAt: updatedAt,
+              transcriptEntries: _upsertTranscriptEntry(
+                meeting.transcriptEntries,
+                entry,
+              ),
+            )
+          else
+            meeting,
+      ];
+      meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _writeSnapshot(snapshot.copyWith(meetings: meetings));
+    });
   }
 
   Future<StoredMeeting?> saveMeetingSummary({
@@ -108,21 +150,22 @@ class LocalMeetingRepository {
     required StoredSummaryMetadata summaryMetadata,
     required DateTime updatedAt,
   }) async {
-    final snapshot = await loadSnapshot();
-    StoredMeeting? updatedMeeting;
-    final meetings = [
-      for (final meeting in snapshot.meetings)
-        if (meeting.id == meetingId)
-          updatedMeeting = meeting.copyWith(
-            updatedAt: updatedAt,
-            summaryMetadata: summaryMetadata,
-          )
-        else
-          meeting,
-    ];
-    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    await saveSnapshot(snapshot.copyWith(meetings: meetings));
-    return updatedMeeting;
+    return _updateSnapshot((snapshot) async {
+      StoredMeeting? updatedMeeting;
+      final meetings = [
+        for (final meeting in snapshot.meetings)
+          if (meeting.id == meetingId)
+            updatedMeeting = meeting.copyWith(
+              updatedAt: updatedAt,
+              summaryMetadata: summaryMetadata,
+            )
+          else
+            meeting,
+      ];
+      meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _writeSnapshot(snapshot.copyWith(meetings: meetings));
+      return updatedMeeting;
+    });
   }
 
   Future<StoredMeeting?> saveGeneratedExport({
@@ -130,88 +173,97 @@ class LocalMeetingRepository {
     required StoredGeneratedExport generatedExport,
     required DateTime updatedAt,
   }) async {
-    final snapshot = await loadSnapshot();
-    StoredMeeting? updatedMeeting;
-    final meetings = [
-      for (final meeting in snapshot.meetings)
-        if (meeting.id == meetingId)
-          updatedMeeting = meeting.copyWith(
-            updatedAt: updatedAt,
-            generatedExports: [
-              generatedExport,
-              for (final existing in meeting.generatedExports)
-                if (existing.id != generatedExport.id) existing,
-            ],
-          )
-        else
-          meeting,
-    ];
-    meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    await saveSnapshot(snapshot.copyWith(meetings: meetings));
-    return updatedMeeting;
+    return _updateSnapshot((snapshot) async {
+      StoredMeeting? updatedMeeting;
+      final meetings = [
+        for (final meeting in snapshot.meetings)
+          if (meeting.id == meetingId)
+            updatedMeeting = meeting.copyWith(
+              updatedAt: updatedAt,
+              generatedExports: [
+                generatedExport,
+                for (final existing in meeting.generatedExports)
+                  if (existing.id != generatedExport.id) existing,
+              ],
+            )
+          else
+            meeting,
+      ];
+      meetings.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _writeSnapshot(snapshot.copyWith(meetings: meetings));
+      return updatedMeeting;
+    });
   }
 
   Future<void> deleteMeeting(String meetingId) async {
-    final snapshot = await loadSnapshot();
-    await saveSnapshot(
-      snapshot.copyWith(
-        meetings: [
-          for (final meeting in snapshot.meetings)
-            if (meeting.id != meetingId) meeting,
-        ],
-      ),
-    );
+    await _updateSnapshot((snapshot) {
+      return _writeSnapshot(
+        snapshot.copyWith(
+          meetings: [
+            for (final meeting in snapshot.meetings)
+              if (meeting.id != meetingId) meeting,
+          ],
+        ),
+      );
+    });
   }
 
   Future<void> clearMeetingHistory() async {
-    final snapshot = await loadSnapshot();
-    await saveSnapshot(snapshot.copyWith(meetings: const []));
+    await _updateSnapshot((snapshot) {
+      return _writeSnapshot(snapshot.copyWith(meetings: const []));
+    });
   }
 
   Future<void> saveRecipientPreferences(
     RecipientPreferences preferences,
   ) async {
-    final snapshot = await loadSnapshot();
-    await saveSnapshot(snapshot.copyWith(recipientPreferences: preferences));
+    await _updateSnapshot((snapshot) {
+      return _writeSnapshot(
+        snapshot.copyWith(recipientPreferences: preferences),
+      );
+    });
   }
 
   Future<void> saveRecentLanguageRoute(LanguageRoutePreference route) async {
-    final snapshot = await loadSnapshot();
-    final routes = [
-      route,
-      for (final existing in snapshot.recentLanguageRoutes)
-        if (existing.sourceLanguageLabel != route.sourceLanguageLabel ||
-            existing.targetLanguageLabel != route.targetLanguageLabel)
-          existing,
-    ].take(8).toList(growable: false);
-    await saveSnapshot(snapshot.copyWith(recentLanguageRoutes: routes));
+    await _updateSnapshot((snapshot) async {
+      final routes = [
+        route,
+        for (final existing in snapshot.recentLanguageRoutes)
+          if (existing.sourceLanguageLabel != route.sourceLanguageLabel ||
+              existing.targetLanguageLabel != route.targetLanguageLabel)
+            existing,
+      ].take(8).toList(growable: false);
+      await _writeSnapshot(snapshot.copyWith(recentLanguageRoutes: routes));
+    });
   }
 
   Future<void> saveSensitivePreference({
     required String key,
     required String value,
   }) async {
-    final snapshot = await loadSnapshot();
-    await saveSnapshot(
-      snapshot.copyWith(
-        sensitivePreferences: {...snapshot.sensitivePreferences, key: value},
-      ),
-    );
+    await _updateSnapshot((snapshot) {
+      return _writeSnapshot(
+        snapshot.copyWith(
+          sensitivePreferences: {...snapshot.sensitivePreferences, key: value},
+        ),
+      );
+    });
   }
 
   Future<void> saveCredentialSessionMaterial({
     required String key,
     required String value,
   }) async {
-    final snapshot = await loadSnapshot();
-    await saveSnapshot(
-      snapshot.copyWith(
-        credentialSessionMaterial: {
-          ...snapshot.credentialSessionMaterial,
-          key: value,
-        },
-      ),
-    );
+    await _updateSnapshot((snapshot) {
+      return _writeSnapshot(
+        snapshot.copyWith(
+          credentialSessionMaterial: {
+            ...snapshot.credentialSessionMaterial,
+            key: value,
+          },
+        ),
+      );
+    });
   }
 
   Future<Map<String, String>> loadCredentialSessionMaterial() async {
@@ -220,19 +272,20 @@ class LocalMeetingRepository {
   }
 
   Future<void> deleteCredentialSessionMaterialKeys(Set<String> keys) async {
-    final snapshot = await loadSnapshot();
-    await saveSnapshot(
-      snapshot.copyWith(
-        credentialSessionMaterial: {
-          for (final entry in snapshot.credentialSessionMaterial.entries)
-            if (!keys.contains(entry.key)) entry.key: entry.value,
-        },
-      ),
-    );
+    await _updateSnapshot((snapshot) {
+      return _writeSnapshot(
+        snapshot.copyWith(
+          credentialSessionMaterial: {
+            for (final entry in snapshot.credentialSessionMaterial.entries)
+              if (!keys.contains(entry.key)) entry.key: entry.value,
+          },
+        ),
+      );
+    });
   }
 
   Future<void> deleteAllLocalData() {
-    return store.delete(key: storageKey);
+    return _withMutation(() => store.delete(key: storageKey));
   }
 }
 

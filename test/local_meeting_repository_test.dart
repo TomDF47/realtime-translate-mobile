@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
@@ -237,6 +239,55 @@ void main() {
   );
 
   test(
+    'serializes delete after concurrent transcript upsert without restoring row',
+    () async {
+      final store = _BlockingMemoryEncryptedLocalStore();
+      final repository = LocalMeetingRepository(store: store);
+      final now = DateTime.utc(2026, 5, 24, 4);
+
+      await repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Delete race',
+          createdAt: now,
+          updatedAt: now,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      store.blockNextWrite();
+      final transcriptWrite = repository.upsertTranscriptEntry(
+        meetingId: 'meeting-1',
+        updatedAt: now.add(const Duration(seconds: 1)),
+        entry: StoredTranscriptEntry(
+          id: 'meeting-1-realtime-1',
+          meetingId: 'meeting-1',
+          languageCode: 'EN',
+          originalText: 'Hola',
+          translatedText: 'Hello',
+          timestamp: now,
+          speakerLabel: null,
+          confidence: null,
+          status: 'partial',
+          playbackState: 'none',
+        ),
+      );
+      await store.waitForBlockedWrite();
+
+      final delete = repository.deleteMeeting('meeting-1');
+      await Future<void>.delayed(Duration.zero);
+      store.releaseBlockedWrite();
+      await Future.wait([transcriptWrite, delete]);
+
+      final snapshot = await repository.loadSnapshot();
+      expect(snapshot.meetings, isEmpty);
+    },
+  );
+
+  test(
     'stores recent language routes and recipient preferences locally',
     () async {
       final repository = LocalMeetingRepository(
@@ -288,4 +339,53 @@ void main() {
     expect(snapshot.sensitivePreferences, isEmpty);
     expect(snapshot.credentialSessionMaterial, isEmpty);
   });
+}
+
+class _BlockingMemoryEncryptedLocalStore implements EncryptedLocalStore {
+  final Map<String, String> _values = {};
+  Completer<void>? _blockedWriteStarted;
+  Completer<void>? _blockedWriteReleased;
+  bool _blockNextWrite = false;
+
+  @override
+  bool get isEncryptedAtRest => true;
+
+  @override
+  String get storageDescription => 'blocking in-memory encrypted test double';
+
+  void blockNextWrite() {
+    _blockNextWrite = true;
+    _blockedWriteStarted = Completer<void>();
+    _blockedWriteReleased = Completer<void>();
+  }
+
+  Future<void> waitForBlockedWrite() {
+    return _blockedWriteStarted!.future;
+  }
+
+  void releaseBlockedWrite() {
+    final blockedWriteReleased = _blockedWriteReleased;
+    if (blockedWriteReleased != null && !blockedWriteReleased.isCompleted) {
+      blockedWriteReleased.complete();
+    }
+  }
+
+  @override
+  Future<String?> read({required String key}) async => _values[key];
+
+  @override
+  Future<void> write({required String key, required String value}) async {
+    if (_blockNextWrite) {
+      _blockNextWrite = false;
+      _blockedWriteStarted?.complete();
+      await _blockedWriteReleased!.future;
+    }
+
+    _values[key] = value;
+  }
+
+  @override
+  Future<void> delete({required String key}) async {
+    _values.remove(key);
+  }
 }

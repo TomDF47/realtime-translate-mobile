@@ -44,16 +44,28 @@ void main() {
     expect(failure.diagnosticCode, 'authentication_error');
   });
 
-  test('classifies websocket upgrade auth failures as credential rejection', () {
+  test(
+    'classifies websocket upgrade auth failures as credential rejection',
+    () {
+      final failure = OpenAiRealtimeFailure.fromSocketError(
+        Exception(
+          'WebSocketException: Connection was not upgraded to websocket, '
+          'HTTP status code: 401',
+        ),
+      );
+
+      expect(failure.kind, OpenAiRealtimeFailureKind.credentialRejected);
+      expect(failure.diagnosticCode, 'socket.http_401');
+    },
+  );
+
+  test('classifies startup exception code directly', () {
     final failure = OpenAiRealtimeFailure.fromSocketError(
-      Exception(
-        'WebSocketException: Connection was not upgraded to websocket, '
-        'HTTP status code: 401',
-      ),
+      const OpenAiRealtimeStartupException('invalid_api_key'),
     );
 
     expect(failure.kind, OpenAiRealtimeFailureKind.credentialRejected);
-    expect(failure.diagnosticCode, 'socket.http_401');
+    expect(failure.diagnosticCode, 'invalid_api_key');
   });
 
   test('plans bounded exponential backoff with deterministic jitter', () {

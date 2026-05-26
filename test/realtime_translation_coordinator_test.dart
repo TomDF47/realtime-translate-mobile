@@ -108,6 +108,32 @@ void main() {
   );
 
   test(
+    'startup failure before session readiness does not start capture',
+    () async {
+      final reconnectDelays = <Duration>[];
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectDelay: (delay) {
+          reconnectDelays.add(delay);
+          return Completer<void>().future;
+        },
+      );
+      harness.realtimeGateway.failNextConnect = true;
+
+      final result = await harness.coordinator.start(config: config);
+      await _drainAsync();
+
+      expect(result, LiveRealtimeStartResult.failed);
+      expect(harness.realtimeGateway.connectCount, 1);
+      expect(reconnectDelays, hasLength(1));
+      expect(harness.captureGateway.startCount, 0);
+      expect(harness.captureGateway.isCapturing, isFalse);
+      expect(harness.playbackGateway.isOpen, isFalse);
+      expect(harness.controller.state.phase, LiveSessionPhase.reconnecting);
+    },
+  );
+
+  test(
     'decodes realtime translated audio deltas into playback queue',
     () async {
       final harness = await _Harness.create(
@@ -322,7 +348,7 @@ void main() {
   );
 
   test(
-    'rolls streaming transcript into readable two-sentence paired blocks',
+    'dedicated translation source and output deltas commit into one paired card',
     () async {
       final harness = await _Harness.create(
         permissionStatus: MicrophonePermissionStatus.granted,
@@ -331,7 +357,7 @@ void main() {
       await harness.repository.upsertMeeting(
         StoredMeeting(
           id: 'meeting-1',
-          title: 'Live smoke',
+          title: 'Dedicated translation smoke',
           createdAt: startedAt,
           updatedAt: startedAt,
           sourceLanguageLabel: 'Auto-detect Spanish',
@@ -341,8 +367,11 @@ void main() {
         ),
       );
 
-      await harness.coordinator.start(
-        config: config,
+      final result = await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'en',
+          profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+        ),
         transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
           repository: harness.repository,
           meetingId: 'meeting-1',
@@ -356,46 +385,107 @@ void main() {
           const OpenAiRealtimeTranscriptDelta(
             type: 'session.input_transcript.delta',
             kind: OpenAiRealtimeTranscriptKind.source,
-            delta: 'Primera frase. Segunda frase.',
+            delta: 'Buenos dias.',
           ),
         )
         ..addEvent(
           const OpenAiRealtimeTranscriptDelta(
             type: 'session.output_transcript.delta',
             kind: OpenAiRealtimeTranscriptKind.translation,
-            delta: 'First sentence. Second sentence.',
-          ),
-        )
-        ..addEvent(
-          const OpenAiRealtimeTranscriptDelta(
-            type: 'session.output_transcript.delta',
-            kind: OpenAiRealtimeTranscriptKind.translation,
-            delta: ' Third sentence.',
-          ),
-        )
-        ..addEvent(
-          const OpenAiRealtimeTranscriptDelta(
-            type: 'session.input_transcript.delta',
-            kind: OpenAiRealtimeTranscriptKind.source,
-            delta: ' Tercera frase.',
+            delta: 'Good morning.',
           ),
         );
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
+      await _drainAsync();
 
       final entries = (await harness.repository.loadSnapshot())
           .meetings
           .single
           .transcriptEntries;
-      expect(entries, hasLength(2));
-      expect(entries.first.originalText, 'Primera frase. Segunda frase.');
-      expect(entries.first.translatedText, 'First sentence. Second sentence.');
-      expect(entries.last.originalText, 'Tercera frase.');
-      expect(entries.last.translatedText, 'Third sentence.');
+      expect(result, LiveRealtimeStartResult.started);
+      expect(
+        harness.realtimeGateway.configs.single.profile,
+        OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+      );
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, 'Buenos dias.');
+      expect(entries.single.translatedText, 'Good morning.');
     },
   );
+
+  test('rolls streaming transcript into one-sentence paired blocks', () async {
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+    );
+    final startedAt = DateTime.utc(2026, 5, 24, 4);
+    await harness.repository.upsertMeeting(
+      StoredMeeting(
+        id: 'meeting-1',
+        title: 'Live smoke',
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        sourceLanguageLabel: 'Auto-detect Spanish',
+        targetLanguageLabel: 'English',
+        transcriptEntries: const [],
+        summaryMetadata: const StoredSummaryMetadata.empty(),
+      ),
+    );
+
+    await harness.coordinator.start(
+      config: config,
+      transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+        repository: harness.repository,
+        meetingId: 'meeting-1',
+        sourceLanguageCode: 'auto',
+        targetLanguageCode: 'en',
+        now: () => startedAt,
+      ),
+    );
+    harness.realtimeGateway.session
+      ..addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'session.input_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'source-1',
+          delta: 'Primera frase.',
+        ),
+      )
+      ..addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'session.output_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          delta: 'First sentence.',
+        ),
+      )
+      ..addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'session.input_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'source-2',
+          delta: 'Segunda frase.',
+        ),
+      )
+      ..addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'session.output_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          delta: 'Second sentence.',
+        ),
+      );
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    final entries = (await harness.repository.loadSnapshot())
+        .meetings
+        .single
+        .transcriptEntries;
+    expect(entries, hasLength(2));
+    expect(entries.first.originalText, 'Primera frase.');
+    expect(entries.first.translatedText, 'First sentence.');
+    expect(entries.last.originalText, 'Segunda frase.');
+    expect(entries.last.translatedText, 'Second sentence.');
+  });
 
   test(
     'keeps delayed source transcript on the same card as translation',
@@ -648,6 +738,61 @@ void main() {
     expect(harness.controller.state.isMicrophoneCaptureOpen, isFalse);
     expect(harness.controller.state.isRealtimeSessionOpen, isFalse);
   });
+
+  test(
+    'discard closes live resources without finalizing partial transcript',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 10);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Discard active meeting',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'session.input_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          delta: 'Hola',
+        ),
+      );
+      await _drainAsync();
+
+      await harness.coordinator.discardActiveSession();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.status, 'partial');
+      expect(harness.captureGateway.isCapturing, isFalse);
+      expect(harness.playbackGateway.isOpen, isFalse);
+      expect(harness.realtimeGateway.session.closeImmediatelyCount, 1);
+      expect(harness.realtimeGateway.session.closeGracefullyCount, 0);
+      expect(harness.controller.state.phase, LiveSessionPhase.localSetup);
+    },
+  );
 
   test('realtime failure closes capture while reconnecting', () async {
     final harness = await _Harness.create(

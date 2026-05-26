@@ -583,16 +583,16 @@ class TranscriptCard extends StatelessWidget {
       child: _Surface(
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.sm,
-          AppSpacing.xs,
+          AppSpacing.xxs,
           AppSpacing.sm,
-          AppSpacing.xs,
+          AppSpacing.xxs,
         ),
         borderColor: accentColor.withValues(alpha: 0.82),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             CircleAvatar(
-              radius: 16,
+              radius: 14,
               backgroundColor: accentColor.withValues(alpha: 0.12),
               foregroundColor: accentColor,
               child: Text(
@@ -600,7 +600,7 @@ class TranscriptCard extends StatelessWidget {
                 style: AppTextStyles.compact(textTheme),
               ),
             ),
-            const SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.xs),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -634,7 +634,7 @@ class TranscriptCard extends StatelessWidget {
                     entry.originalText.isEmpty
                         ? 'Original speech pending'
                         : entry.originalText,
-                    style: AppTextStyles.body(textTheme).copyWith(
+                    style: AppTextStyles.compact(textTheme).copyWith(
                       color: entry.originalText.isEmpty
                           ? AppColors.textTertiary
                           : AppColors.textPrimary,
@@ -651,8 +651,8 @@ class TranscriptCard extends StatelessWidget {
                     entry.translatedText.isEmpty
                         ? 'Translation pending'
                         : entry.translatedText,
-                    style: AppTextStyles.title(textTheme).copyWith(
-                      fontSize: 16,
+                    style: AppTextStyles.label(textTheme).copyWith(
+                      fontSize: 15,
                       color: entry.translatedText.isEmpty
                           ? AppColors.textTertiary
                           : AppColors.textPrimary,

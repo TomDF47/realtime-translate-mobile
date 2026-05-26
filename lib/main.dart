@@ -275,6 +275,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   late final LiveRealtimeTranslationCoordinator _realtimeCoordinator;
   _AppSurface _surface = _AppSurface.setup;
   List<StoredMeeting> _storedMeetings = const [];
+  final Set<String> _deletedMeetingIds = <String>{};
   OpenAiCredentialStatus _openAiCredentialStatus =
       const OpenAiCredentialStatus.missing();
   String? _activeMeetingId;
@@ -357,9 +358,12 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return;
     }
 
-    if (!shouldRun && _recordingStartedAt != null) {
-      _refreshRecordingElapsed();
-      _recordingStartedAt = null;
+    if (!shouldRun) {
+      if (_recordingStartedAt != null) {
+        _refreshRecordingElapsed();
+        _recordingStartedAt = null;
+      }
+      _cancelRecordingTicker();
     }
   }
 
@@ -374,8 +378,14 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   void _resetRecordingTimer() {
+    _cancelRecordingTicker();
     _recordingStartedAt = null;
     _recordingElapsed = Duration.zero;
+  }
+
+  void _cancelRecordingTicker() {
+    _recordingTicker?.cancel();
+    _recordingTicker = null;
   }
 
   String _recordingElapsedLabel() {
@@ -522,26 +532,50 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return;
     }
 
-    setState(() => _storedMeetings = snapshot.meetings);
+    setState(() {
+      _storedMeetings = _deletedMeetingIds.isEmpty
+          ? snapshot.meetings
+          : [
+              for (final meeting in snapshot.meetings)
+                if (!_deletedMeetingIds.contains(meeting.id)) meeting,
+            ];
+    });
   }
 
-  bool _transcriptRefreshQueued = false;
+  bool _transcriptRefreshScheduled = false;
+  bool _transcriptRefreshDirty = false;
 
   void _scheduleTranscriptRefresh() {
-    if (_transcriptRefreshQueued || _activeMeetingId == null || !mounted) {
+    if (_activeMeetingId == null || !mounted) {
       return;
     }
 
-    _transcriptRefreshQueued = true;
+    if (_transcriptRefreshScheduled) {
+      _transcriptRefreshDirty = true;
+      return;
+    }
+
+    _transcriptRefreshScheduled = true;
     unawaited(_refreshTranscriptsAfterCommit());
   }
 
   Future<void> _refreshTranscriptsAfterCommit() async {
     await Future<void>.delayed(const Duration(milliseconds: 120));
     try {
-      await _loadStoredMeetings();
+      while (mounted && _activeMeetingId != null) {
+        _transcriptRefreshDirty = false;
+        await _loadStoredMeetings();
+        if (!_transcriptRefreshDirty) {
+          break;
+        }
+        await Future<void>.delayed(Duration.zero);
+      }
     } finally {
-      _transcriptRefreshQueued = false;
+      _transcriptRefreshScheduled = false;
+      if (_transcriptRefreshDirty && _activeMeetingId != null && mounted) {
+        _transcriptRefreshDirty = false;
+        _scheduleTranscriptRefresh();
+      }
     }
   }
 
@@ -596,10 +630,25 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     return OpenAiRealtimeTranslationConfig(
       sourceLanguageCode: sourceLanguageCode,
       targetLanguageCode: targetLanguageCode,
-      profile: OpenAiRealtimeTranslationProfile.primaryRealtime2,
+      profile: _profileForLiveInterpretation(targetLanguageCode),
       translationOutputEnabled: _translateTextEnabled,
       readAloudOutputEnabled: _readAloudEnabled,
     );
+  }
+
+  OpenAiRealtimeTranslationProfile _profileForLiveInterpretation(
+    String targetLanguageCode,
+  ) {
+    try {
+      final target = LanguageSupport.languageByCode(targetLanguageCode);
+      if (target.supportsRealtimeTarget) {
+        return OpenAiRealtimeTranslationProfile.dedicatedTranslation;
+      }
+    } on ArgumentError {
+      return OpenAiRealtimeTranslationProfile.dedicatedTranslation;
+    }
+
+    return OpenAiRealtimeTranslationProfile.dedicatedTranslation;
   }
 
   String _languageCodeForSourceSelector(LanguageSelectorData data) {
@@ -1055,7 +1104,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       config: OpenAiRealtimeTranslationConfig(
         sourceLanguageCode: _selectedSourceLanguage.code,
         targetLanguageCode: targetLanguageCode,
-        profile: OpenAiRealtimeTranslationProfile.primaryRealtime2,
+        profile: _profileForLiveInterpretation(targetLanguageCode),
         translationOutputEnabled: _translateTextEnabled,
         readAloudOutputEnabled: _readAloudEnabled,
       ),
@@ -1110,29 +1159,96 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   void _showMeetingHistory() {
+    var visibleMeetings = List<StoredMeeting>.of(_storedMeetings);
+    String? statusLabel;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => _MeetingHistorySheet(
-        meetings: _storedMeetings,
-        onOpenAllMeetingsAssistant: () {
-          Navigator.of(context).pop();
-          _showAssistantSheet(AiChatScope.allMeetings);
-        },
-        onOpenMeeting: (meeting) {
-          Navigator.of(context).pop();
-          unawaited(_continueMeeting(meeting));
-        },
-        onDeleteMeeting: (meeting) async {
-          Navigator.of(context).pop();
-          await _meetingRepository.deleteMeeting(meeting.id);
-          await _loadStoredMeetings();
-          if (_activeMeetingId == meeting.id && mounted) {
-            _openSetup();
-          }
-        },
-      ),
+      builder: (_) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return _MeetingHistorySheet(
+              meetings: visibleMeetings,
+              statusLabel: statusLabel,
+              onOpenAllMeetingsAssistant: () {
+                Navigator.of(context).pop();
+                _showAssistantSheet(AiChatScope.allMeetings);
+              },
+              onOpenMeeting: (meeting) {
+                Navigator.of(context).pop();
+                unawaited(_continueMeeting(meeting));
+              },
+              onDeleteMeeting: (meeting) async {
+                void markMeetingDeleted() {
+                  if (!context.mounted) {
+                    return;
+                  }
+                  setSheetState(() {
+                    visibleMeetings = [
+                      for (final item in visibleMeetings)
+                        if (item.id != meeting.id) item,
+                    ];
+                    statusLabel = 'Meeting deleted.';
+                  });
+                }
+
+                await _deleteMeetingFromHistory(
+                  meeting,
+                  onDeleteStarted: markMeetingDeleted,
+                );
+              },
+            );
+          },
+        );
+      },
     );
+  }
+
+  Future<void> _deleteMeetingFromHistory(
+    StoredMeeting meeting, {
+    VoidCallback? onDeleteStarted,
+  }) async {
+    final wasActiveMeeting = _activeMeetingId == meeting.id;
+    _deletedMeetingIds.add(meeting.id);
+    Future<void>? activeTeardownFuture;
+    if (wasActiveMeeting) {
+      _activeMeetingId = null;
+      _transcriptRefreshDirty = false;
+      _resetRecordingTimer();
+      activeTeardownFuture = _realtimeCoordinator.discardActiveSession();
+    }
+    if (mounted) {
+      setState(() {
+        _storedMeetings = [
+          for (final item in _storedMeetings)
+            if (item.id != meeting.id) item,
+        ];
+        if (wasActiveMeeting) {
+          _surface = _AppSurface.setup;
+        }
+      });
+    }
+    onDeleteStarted?.call();
+
+    final deleteMeetingFuture = _meetingRepository.deleteMeeting(meeting.id);
+    if (wasActiveMeeting) {
+      await Future.wait<void>([activeTeardownFuture!, deleteMeetingFuture]);
+    } else {
+      await deleteMeetingFuture;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    await _loadStoredMeetings();
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Meeting deleted.')));
   }
 
   void _showOpenAiSetupSheet() {
@@ -2784,9 +2900,11 @@ class _MeetingHistorySheet extends StatelessWidget {
     required this.onOpenAllMeetingsAssistant,
     required this.onOpenMeeting,
     required this.onDeleteMeeting,
+    this.statusLabel,
   });
 
   final List<StoredMeeting> meetings;
+  final String? statusLabel;
   final VoidCallback onOpenAllMeetingsAssistant;
   final ValueChanged<StoredMeeting> onOpenMeeting;
   final Future<void> Function(StoredMeeting meeting) onDeleteMeeting;
@@ -2809,6 +2927,13 @@ class _MeetingHistorySheet extends StatelessWidget {
             label: 'Ask across meetings',
             onTap: onOpenAllMeetingsAssistant,
           ),
+          if (statusLabel != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              statusLabel!,
+              style: AppTextStyles.compact(Theme.of(context).textTheme),
+            ),
+          ],
           const SizedBox(height: AppSpacing.sm),
           if (meetings.isEmpty)
             Text(
@@ -2841,42 +2966,46 @@ class _MeetingRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: const CircleAvatar(
-        backgroundColor: AppColors.surfacePressed,
-        foregroundColor: AppColors.teal,
-        child: Icon(Icons.forum_outlined),
+    return Semantics(
+      button: true,
+      label: 'Open ${meeting.title}',
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const CircleAvatar(
+          backgroundColor: AppColors.surfacePressed,
+          foregroundColor: AppColors.teal,
+          child: Icon(Icons.forum_outlined),
+        ),
+        title: Text(
+          meeting.title,
+          style: AppTextStyles.label(Theme.of(context).textTheme),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${meeting.sourceLanguageLabel} -> ${meeting.targetLanguageLabel}',
+              style: AppTextStyles.compact(Theme.of(context).textTheme),
+            ),
+            Text(
+              'Created ${_timeLabel(meeting.createdAt)} - Last activity '
+              '${_timeLabel(meeting.updatedAt)}',
+              style: AppTextStyles.compact(Theme.of(context).textTheme),
+            ),
+            Text(
+              '${meeting.transcriptCount} transcript lines - '
+              '${meeting.summaryAvailable ? 'Summary ready' : 'No summary yet'}',
+              style: AppTextStyles.compact(Theme.of(context).textTheme),
+            ),
+          ],
+        ),
+        trailing: IconButton(
+          tooltip: 'Delete ${meeting.title}',
+          onPressed: onDelete,
+          icon: const Icon(Icons.delete_outline_rounded),
+        ),
+        onTap: onTap,
       ),
-      title: Text(
-        meeting.title,
-        style: AppTextStyles.label(Theme.of(context).textTheme),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${meeting.sourceLanguageLabel} -> ${meeting.targetLanguageLabel}',
-            style: AppTextStyles.compact(Theme.of(context).textTheme),
-          ),
-          Text(
-            'Created ${_timeLabel(meeting.createdAt)} - Last activity '
-            '${_timeLabel(meeting.updatedAt)}',
-            style: AppTextStyles.compact(Theme.of(context).textTheme),
-          ),
-          Text(
-            '${meeting.transcriptCount} transcript lines - '
-            '${meeting.summaryAvailable ? 'Summary ready' : 'No summary yet'}',
-            style: AppTextStyles.compact(Theme.of(context).textTheme),
-          ),
-        ],
-      ),
-      trailing: IconButton(
-        tooltip: 'Delete ${meeting.title}',
-        onPressed: onDelete,
-        icon: const Icon(Icons.delete_outline_rounded),
-      ),
-      onTap: onTap,
     );
   }
 }

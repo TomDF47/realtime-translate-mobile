@@ -11,8 +11,8 @@ Decision:
 - Build an Android-first Flutter mobile app while keeping the project iOS-compatible later.
 - Keep the MVP completely phone-only aside from direct OpenAI API calls.
 - Do not include AWS API Gateway, Lambda, a token broker, app backend, cloud identity gate, cloud sync, server mailer, or server-side transcript handling in the MVP.
-- Prefer `gpt-realtime-2` for realtime voice/translation unless endpoint/API testing finds a major blocker.
-- Keep `gpt-realtime-translate` as a dedicated translation fallback/profile.
+- Use the current accepted model-routing decision for live interpretation; as of 2026-05-26, normal MVP live human-speech interpretation uses `gpt-realtime-translate` on `/v1/realtime/translations`.
+- Keep `gpt-realtime-2` as an explicit compatibility/experimental voice-agent profile.
 - Store meetings, transcript/history, summaries, recipient preferences, sensitive preferences, and credential/session material only in encrypted local device storage for the MVP.
 - Add local meeting management: start a new meeting, select an old meeting, and continue from it.
 - Add scoped AI chat over `This meeting` or `All meetings`.
@@ -30,7 +30,7 @@ Rationale:
 Implications:
 
 - Any AWS, backend, cloud identity, or cloud sync proposal is V2/future until the source-of-truth docs and GitHub issues are updated.
-- Implementation must verify endpoint behavior for `gpt-realtime-2` versus `gpt-realtime-translate` and keep GPT-5.5 `xhigh` reasoning for summary intent.
+- Implementation must verify endpoint behavior before changing model routing and keep GPT-5.5 `xhigh` reasoning for summary intent.
 - Logs, diagnostics, analytics, crash reports, screenshots, and tests must avoid transcript, audio, prompt, summary, recipient, and credential/session leakage.
 - Dependency/package hygiene, permission minimization, and supply-chain checks are required acceptance criteria.
 
@@ -45,21 +45,46 @@ Decision:
 - Use user-provided OpenAI credential/session material stored only in encrypted local device storage.
 - Do not commit, bundle, or embed a standard OpenAI API key in mobile code, config, assets, tests, screenshots, or build outputs.
 - Ask Tom for an OpenAI API key only when the app reaches the first real OpenAI network smoke/integration test.
-- Prefer `gpt-realtime-2` for realtime voice/translation unless endpoint/API testing finds a major blocker.
-- Keep `gpt-realtime-translate` as a dedicated translation fallback/profile.
+- Use `gpt-realtime-translate` on `/v1/realtime/translations` for normal MVP live human-speech interpretation.
+- Keep `gpt-realtime-2` as an explicit compatibility/experimental voice-agent profile.
 - Use GPT-5.5 with `xhigh` reasoning intent for transcript summary generation.
 
 Rationale:
 
 - This preserves the phone-only MVP architecture while unblocking non-secret OpenAI integration scaffolding.
-- Official OpenAI docs verified on 2026-05-24 list `gpt-realtime-2` as the most capable realtime voice model and `gpt-realtime-translate` as a dedicated streaming speech-to-speech translation model.
+- Official OpenAI docs verified on 2026-05-26 list `gpt-realtime-2` as the voice-agent Realtime model and `gpt-realtime-translate` as the dedicated continuous streaming speech-translation model.
 - Official Realtime client-secret docs still recommend server-minted ephemeral credentials for browser/mobile clients, but Tom accepted a phone-local user-provided credential path for MVP rather than introducing an app backend.
 
 Implications:
 
 - Credential UX, encrypted storage, redaction, reset/removal, and credential-invalid recovery are MVP implementation requirements.
 - A real OpenAI network smoke test requires Tom to provide a key out-of-band or interactively at that point; no placeholder or real key belongs in the repo.
-- If live endpoint/API testing shows `gpt-realtime-2` cannot meet translation needs, use the dedicated `gpt-realtime-translate` profile without adding backend infrastructure.
+- Future changes that route live interpretation away from `gpt-realtime-translate` need a fresh accepted decision and must not add backend infrastructure.
+
+## 2026-05-26 - Live Interpretation Uses Dedicated Realtime Translation Profile
+
+Status: Accepted
+
+Decision:
+
+- Route normal MVP live meeting interpretation through `gpt-realtime-translate` on `/v1/realtime/translations`.
+- Keep `gpt-realtime-2` configured only as an explicit compatibility/experimental profile for voice-agent or endpoint comparison work.
+- Do not call `response.create` for the dedicated translation path; stream source PCM16 audio with `session.input_audio_buffer.append` and consume source/target transcript deltas as they arrive.
+- Realtime startup must wait for `session.updated` or a sanitized startup error before microphone capture starts.
+- Keep original/source transcript text and translated text in separate local transcript fields.
+
+Rationale:
+
+- Current official OpenAI Realtime guidance identifies `gpt-realtime-translate` and `/v1/realtime/translations` as the continuous human-speech translation architecture.
+- The standard `gpt-realtime-2` session is documented as the voice-agent path, with a different conversation/response lifecycle.
+- Tom's installed-app report showed user-visible assistant-like behavior and missing original speech in the prior default route.
+- Waiting for session readiness prevents early `session.updated` or startup `error` events from being dropped before the coordinator subscribes.
+
+Implications:
+
+- The 2026-05-25 `Runtime Realtime Sessions Prefer GPT Realtime 2` decision is superseded for normal live interpretation.
+- Tests should prove the app default uses `dedicatedTranslation`, startup errors do not start capture, dedicated translation append messages remain credential-free, and source/translation transcript updates stay paired without transcript logging.
+- This decision does not add a backend, token broker, cloud sync, bundled key, or server-side transcript handling.
 
 ## 2026-05-25 - Generated Exports Stay In App Until Copy
 
@@ -110,7 +135,7 @@ Implications:
 
 ## 2026-05-25 - Runtime Realtime Sessions Prefer GPT Realtime 2
 
-Status: Accepted
+Status: Superseded by `2026-05-26 - Live Interpretation Uses Dedicated Realtime Translation Profile`
 
 Decision:
 

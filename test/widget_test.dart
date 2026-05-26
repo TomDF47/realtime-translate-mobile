@@ -188,6 +188,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
     expect(realtimeGateway.configs.last.targetLanguageCode, 'en');
+    expect(
+      realtimeGateway.configs.last.profile,
+      OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+    );
 
     await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
     await tester.pumpAndSettle();
@@ -196,6 +200,10 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('Auto-detect Spanish -> French'), findsOneWidget);
+    expect(
+      realtimeGateway.configs.last.profile,
+      OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+    );
 
     await tester.tap(find.bySemanticsLabel('Translate Text on'));
     await tester.pumpAndSettle();
@@ -330,14 +338,31 @@ void main() {
         const OpenAiRealtimeTranscriptDelta(
           type: 'session.output_transcript.delta',
           kind: OpenAiRealtimeTranscriptKind.translation,
-          delta: 'Hello team.',
+          delta: 'Hello ',
         ),
       )
       ..addEvent(
         const OpenAiRealtimeTranscriptDelta(
           type: 'session.input_transcript.delta',
           kind: OpenAiRealtimeTranscriptKind.source,
-          delta: 'Hola equipo.',
+          delta: 'Hola ',
+        ),
+      );
+
+    await tester.pump(const Duration(milliseconds: 60));
+    realtimeGateway.sessions.last
+      ..addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'session.output_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          delta: 'team.',
+        ),
+      )
+      ..addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'session.input_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          delta: 'equipo.',
         ),
       );
 
@@ -649,22 +674,27 @@ void main() {
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
   });
 
-  testWidgets('persists and deletes local meeting history', (tester) async {
+  testWidgets('delete updates open meeting history and clears active meeting', (
+    tester,
+  ) async {
     final repository = _testRepository();
+    final captureGateway = _FakeMicrophoneCaptureGateway();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
     await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
-        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        microphoneCaptureGateway: captureGateway,
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
-        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+        realtimeTranslationGateway: realtimeGateway,
       ),
     );
 
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
     expect((await repository.loadSnapshot()).meetings, hasLength(1));
+    expect(captureGateway.isCapturing, isTrue);
 
     await tester.tap(find.byTooltip('Open menu'));
     await tester.pumpAndSettle();
@@ -677,7 +707,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect((await repository.loadSnapshot()).meetings, isEmpty);
+    expect(find.text('Live translation meeting'), findsNothing);
+    expect(find.text('No saved meetings yet'), findsOneWidget);
+    expect(find.text('Meeting deleted.'), findsOneWidget);
     expect(find.text('Start new meeting'), findsOneWidget);
+    expect(captureGateway.isCapturing, isFalse);
+    expect(realtimeGateway.sessions.single.closeImmediatelyCount, 1);
+    expect(realtimeGateway.sessions.single.closeGracefullyCount, 0);
   });
 
   testWidgets('selects an old meeting and appends local history', (
@@ -869,6 +905,8 @@ class _ThrowingRealtimeTranslationGateway
 
 class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   final _events = StreamController<OpenAiRealtimeEvent>.broadcast(sync: true);
+  int closeGracefullyCount = 0;
+  int closeImmediatelyCount = 0;
 
   @override
   Stream<OpenAiRealtimeEvent> get events => _events.stream;
@@ -888,11 +926,13 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
 
   @override
   Future<void> closeGracefully() async {
+    closeGracefullyCount += 1;
     unawaited(_events.close());
   }
 
   @override
   Future<void> closeImmediately() async {
+    closeImmediatelyCount += 1;
     unawaited(_events.close());
   }
 

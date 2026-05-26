@@ -255,8 +255,15 @@ class LiveRealtimeTranscriptCommitter {
       return false;
     }
 
-    final text = _translationBuffer.toString().trim();
-    return _sentenceBoundaryCount(text) >= 2 && _endsAtSentenceBoundary(text);
+    final sourceText = _sourceBuffer.toString().trim();
+    final translatedText = _translationBuffer.toString().trim();
+    if (sourceText.length >= _readableBlockCharacterThreshold ||
+        translatedText.length >= _readableBlockCharacterThreshold) {
+      return true;
+    }
+
+    return _sentenceBoundaryCount(translatedText) >= 1 &&
+        _endsAtSentenceBoundary(translatedText);
   }
 
   String _statusForCurrentSegment() {
@@ -297,6 +304,8 @@ class LiveRealtimeTranscriptCommitter {
     };
   }
 }
+
+const _readableBlockCharacterThreshold = 180;
 
 bool _endsAtSentenceBoundary(String text) {
   if (text.isEmpty) {

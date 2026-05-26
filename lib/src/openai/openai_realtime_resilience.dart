@@ -44,6 +44,10 @@ class OpenAiRealtimeFailure {
   }
 
   factory OpenAiRealtimeFailure.fromSocketError(Object error) {
+    if (error is OpenAiRealtimeStartupException) {
+      return OpenAiRealtimeFailure.classifyCode(error.code);
+    }
+
     final diagnosticCode = _socketDiagnosticCode(error);
     final classified = OpenAiRealtimeFailure.classifyCode(diagnosticCode);
     if (classified.kind != OpenAiRealtimeFailureKind.fatal) {
@@ -334,7 +338,15 @@ String _normalizeCode(String? rawCode) {
 
 String _socketDiagnosticCode(Object error) {
   final raw = '${error.runtimeType} $error'.toLowerCase();
-  for (final status in const ['401', '403', '429', '500', '502', '503', '504']) {
+  for (final status in const [
+    '401',
+    '403',
+    '429',
+    '500',
+    '502',
+    '503',
+    '504',
+  ]) {
     if (raw.contains(status)) {
       return 'socket.http_$status';
     }

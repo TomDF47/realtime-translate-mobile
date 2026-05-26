@@ -263,7 +263,13 @@ class OpenAiRealtimeTranslationGateway implements RealtimeTranslationGateway {
       config: config,
       diagnostics: diagnostics,
     );
-    session.sendSessionUpdate();
+    try {
+      session.sendSessionUpdate();
+      await session.waitUntilReady();
+    } catch (error, stackTrace) {
+      _closeStartupSessionNonBlocking(session);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
     diagnostics.info(
       'openai.realtime_connect_succeeded',
       fields: {
@@ -298,12 +304,15 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
   final WebSocket _socket;
   late final StreamSubscription<dynamic> _subscription;
   final StreamController<OpenAiRealtimeEvent> _events =
-      StreamController<OpenAiRealtimeEvent>.broadcast();
+      StreamController<OpenAiRealtimeEvent>();
+  final Completer<void> _ready = Completer<void>();
   bool _closeSent = false;
   bool _isClosed = false;
 
   @override
   Stream<OpenAiRealtimeEvent> get events => _events.stream;
+
+  Future<void> waitUntilReady() => _ready.future;
 
   @override
   void sendSessionUpdate() {
@@ -371,7 +380,7 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
       return;
     }
 
-    _events.add(event);
+    _emitEvent(event);
     if (event is OpenAiRealtimeSessionClosed) {
       unawaited(closeImmediately());
     }
@@ -393,7 +402,7 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
         'result': 'socketError',
       },
     );
-    _events.add(
+    _emitEvent(
       OpenAiRealtimeError(
         type: 'socket.error',
         code: error.runtimeType.toString(),
@@ -410,7 +419,7 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
 
     final closeReason = _socket.closeReason;
     if (closeReason != null && closeReason.isNotEmpty) {
-      _events.add(
+      _emitEvent(
         OpenAiRealtimeError(
           type: 'socket.closed',
           code: closeReason,
@@ -421,7 +430,7 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
     } else {
       final closeCode = _socket.closeCode;
       if (closeCode != null) {
-        _events.add(
+        _emitEvent(
           OpenAiRealtimeError(
             type: 'socket.closed',
             code: 'socket.close_$closeCode',
@@ -432,9 +441,41 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
       }
     }
 
-    _events.add(const OpenAiRealtimeSessionClosed(type: 'socket.closed'));
+    _emitEvent(const OpenAiRealtimeSessionClosed(type: 'socket.closed'));
     unawaited(_events.close());
   }
+
+  void _emitEvent(OpenAiRealtimeEvent event) {
+    if (_events.isClosed) {
+      return;
+    }
+
+    if (!_ready.isCompleted) {
+      switch (event) {
+        case OpenAiRealtimeSessionLifecycleEvent(type: 'session.updated'):
+          _ready.complete();
+        case OpenAiRealtimeError():
+          _ready.completeError(OpenAiRealtimeStartupException.fromError(event));
+        case OpenAiRealtimeSessionClosed():
+          _ready.completeError(
+            const OpenAiRealtimeStartupException('socket.closed'),
+          );
+        default:
+          break;
+      }
+    }
+
+    _events.add(event);
+  }
+}
+
+void _closeStartupSessionNonBlocking(OpenAiRealtimeTranslationSession session) {
+  unawaited(
+    session
+        .closeImmediately()
+        .timeout(const Duration(milliseconds: 250), onTimeout: () {})
+        .catchError((Object error, StackTrace stackTrace) {}),
+  );
 }
 
 enum OpenAiRealtimeTranscriptKind { source, translation }
@@ -497,6 +538,19 @@ class OpenAiRealtimeError extends OpenAiRealtimeEvent {
   final String? param;
 }
 
+class OpenAiRealtimeStartupException implements Exception {
+  const OpenAiRealtimeStartupException(this.code);
+
+  factory OpenAiRealtimeStartupException.fromError(OpenAiRealtimeError error) {
+    return OpenAiRealtimeStartupException(error.code ?? error.type);
+  }
+
+  final String code;
+
+  @override
+  String toString() => 'OpenAiRealtimeStartupException($code)';
+}
+
 class OpenAiRealtimeSessionClosed extends OpenAiRealtimeEvent {
   const OpenAiRealtimeSessionClosed({required super.type});
 }
@@ -552,8 +606,8 @@ abstract final class OpenAiRealtimeEventParser {
       );
     }
 
-    final delta = event['delta'];
-    if (delta is String && delta.isNotEmpty) {
+    final delta = _optionalDelta(event);
+    if (delta != null) {
       if (_isAudioDelta(type)) {
         return OpenAiRealtimeAudioDelta(type: type, base64Audio: delta);
       }
@@ -606,7 +660,8 @@ abstract final class OpenAiRealtimeEventParser {
 
   static bool _isSourceTranscriptDelta(String type) {
     return type == 'session.input_transcript.delta' ||
-        type.contains('input_audio_transcription.delta');
+        type.contains('input_audio_transcription.delta') ||
+        type == 'conversation.item.input_audio_transcription.segment';
   }
 
   static bool _isTranslationTranscriptDelta(String type) {
@@ -634,6 +689,15 @@ abstract final class OpenAiRealtimeEventParser {
     final transcript = event['transcript'] ?? event['text'];
     if (transcript is String && transcript.trim().isNotEmpty) {
       return transcript;
+    }
+
+    return null;
+  }
+
+  static String? _optionalDelta(Map<String, dynamic> event) {
+    final delta = event['delta'] ?? event['text'];
+    if (delta is String && delta.trim().isNotEmpty) {
+      return delta;
     }
 
     return null;

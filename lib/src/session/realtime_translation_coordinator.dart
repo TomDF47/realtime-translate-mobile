@@ -191,6 +191,15 @@ class LiveRealtimeTranslationCoordinator {
     sessionController.stopMeeting();
   }
 
+  Future<void> discardActiveSession() async {
+    _cancelPendingReconnect();
+    _activeConfig = null;
+    _activeTranscriptCommitTarget = null;
+    await _closeRealtimeResources(graceful: false, finishTranscript: false);
+    _transcriptCommitter = null;
+    sessionController.stopMeeting();
+  }
+
   Future<void> pauseReadAloudOutput() {
     _readAloudOutputEnabled = false;
     return playbackGateway.stop(clearQueue: true);
@@ -660,15 +669,19 @@ class LiveRealtimeTranslationCoordinator {
 
     _closingIntentionally = true;
     try {
-      await captureSubscription?.cancel();
+      final Future<void> realtimeCloseFuture;
+      if (realtimeSession == null) {
+        realtimeCloseFuture = Future<void>.value();
+      } else if (graceful) {
+        realtimeCloseFuture = realtimeSession.closeGracefully();
+      } else {
+        realtimeCloseFuture = realtimeSession.closeImmediately();
+      }
       await captureGateway.stop();
+      await captureSubscription?.cancel();
       await playbackGateway.stop(clearQueue: true);
       await realtimeSubscription?.cancel();
-      if (graceful) {
-        await realtimeSession?.closeGracefully();
-      } else {
-        await realtimeSession?.closeImmediately();
-      }
+      await realtimeCloseFuture;
       if (finishTranscript) {
         await transcriptCommitter?.finish(interrupted: !graceful);
       }

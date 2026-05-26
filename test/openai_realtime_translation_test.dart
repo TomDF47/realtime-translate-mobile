@@ -134,6 +134,17 @@ void main() {
     expect(parsedInputCompleted.itemId, 'input-item-1');
     expect(parsedInputCompleted.transcript, "yellow what's going on");
 
+    final inputSegment = OpenAiRealtimeEventParser.parse({
+      'type': 'conversation.item.input_audio_transcription.segment',
+      'item_id': 'input-item-2',
+      'text': 'live source segment',
+    });
+    expect(inputSegment, isA<OpenAiRealtimeTranscriptDelta>());
+    final parsedInputSegment = inputSegment! as OpenAiRealtimeTranscriptDelta;
+    expect(parsedInputSegment.kind, OpenAiRealtimeTranscriptKind.source);
+    expect(parsedInputSegment.itemId, 'input-item-2');
+    expect(parsedInputSegment.delta, 'live source segment');
+
     expect(
       OpenAiRealtimeEventParser.parse({'type': 'session.updated'}),
       isA<OpenAiRealtimeSessionLifecycleEvent>(),
@@ -275,4 +286,178 @@ void main() {
       isNot(contains('placeholder-local-openai-credential')),
     );
   });
+
+  test('connect waits for session.updated before returning', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final sessionUpdatedSent = Completer<void>();
+
+    unawaited(
+      server.first.then((request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        await for (final message in socket) {
+          if ((message as String).contains('session.update')) {
+            await Future<void>.delayed(const Duration(milliseconds: 40));
+            socket.add(jsonEncode({'type': 'session.updated'}));
+            sessionUpdatedSent.complete();
+            break;
+          }
+        }
+      }),
+    );
+
+    final gateway = OpenAiRealtimeTranslationGateway(
+      webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}/v1'),
+    );
+    var connected = false;
+    final connectFuture = gateway
+        .connect(
+          config: const OpenAiRealtimeTranslationConfig(
+            targetLanguageCode: 'es',
+            profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+          ),
+          credential: 'placeholder-local-openai-credential',
+        )
+        .then((session) {
+          connected = true;
+          return session;
+        });
+
+    await Future<void>.delayed(Duration.zero);
+    expect(connected, isFalse);
+
+    await sessionUpdatedSent.future.timeout(const Duration(seconds: 3));
+    final session = await connectFuture.timeout(const Duration(seconds: 3));
+    final updated = await session.events.first.timeout(
+      const Duration(seconds: 3),
+    );
+    await session.closeImmediately();
+    await server.close(force: true);
+
+    expect(connected, isTrue);
+    expect(updated, isA<OpenAiRealtimeSessionLifecycleEvent>());
+  });
+
+  test('connect surfaces startup error after session.update', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+
+    unawaited(
+      server.first.then((request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        await for (final message in socket) {
+          if ((message as String).contains('session.update')) {
+            socket.add(
+              jsonEncode({
+                'type': 'error',
+                'error': {'code': 'invalid_api_key'},
+              }),
+            );
+            break;
+          }
+        }
+      }),
+    );
+
+    final gateway = OpenAiRealtimeTranslationGateway(
+      webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}/v1'),
+    );
+
+    await expectLater(
+      gateway.connect(
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'es',
+          profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+        ),
+        credential: 'placeholder-local-openai-credential',
+      ),
+      throwsA(
+        isA<OpenAiRealtimeStartupException>().having(
+          (error) => error.code,
+          'code',
+          'invalid_api_key',
+        ),
+      ),
+    );
+    await server.close(force: true);
+  });
+
+  test('startup error does not wait for socket cleanup to finish', () async {
+    final socket = _StartupErrorHangingCloseWebSocket('invalid_api_key');
+    final gateway = OpenAiRealtimeTranslationGateway(
+      webSocketFactory: (uri, headers) async => socket,
+    );
+
+    await expectLater(
+      gateway
+          .connect(
+            config: const OpenAiRealtimeTranslationConfig(
+              targetLanguageCode: 'es',
+              profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+            ),
+            credential: 'placeholder-local-openai-credential',
+          )
+          .timeout(const Duration(milliseconds: 500)),
+      throwsA(
+        isA<OpenAiRealtimeStartupException>().having(
+          (error) => error.code,
+          'code',
+          'invalid_api_key',
+        ),
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(socket.closeStarted, isTrue);
+  });
+}
+
+class _StartupErrorHangingCloseWebSocket implements WebSocket {
+  _StartupErrorHangingCloseWebSocket(this.errorCode);
+
+  final String errorCode;
+  final _events = StreamController<dynamic>();
+  bool closeStarted = false;
+
+  @override
+  int? get closeCode => null;
+
+  @override
+  String? get closeReason => null;
+
+  @override
+  void add(dynamic data) {
+    if (data is String && data.contains('session.update')) {
+      scheduleMicrotask(() {
+        _events.add(
+          jsonEncode({
+            'type': 'error',
+            'error': {'code': errorCode},
+          }),
+        );
+      });
+    }
+  }
+
+  @override
+  Future<void> close([int? code, String? reason]) {
+    closeStarted = true;
+    return Completer<void>().future;
+  }
+
+  @override
+  StreamSubscription<dynamic> listen(
+    void Function(dynamic event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    return _events.stream.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
