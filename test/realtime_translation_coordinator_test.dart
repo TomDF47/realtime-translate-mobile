@@ -277,6 +277,54 @@ void main() {
     },
   );
 
+  test('source transcript delta is visible before completion', () async {
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+    );
+    final startedAt = DateTime.utc(2026, 5, 24, 4, 10);
+    await harness.repository.upsertMeeting(
+      StoredMeeting(
+        id: 'meeting-1',
+        title: 'Streaming source smoke',
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        sourceLanguageLabel: 'Auto-detect Spanish',
+        targetLanguageLabel: 'English',
+        transcriptEntries: const [],
+        summaryMetadata: const StoredSummaryMetadata.empty(),
+      ),
+    );
+
+    await harness.coordinator.start(
+      config: config,
+      transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+        repository: harness.repository,
+        meetingId: 'meeting-1',
+        sourceLanguageCode: 'auto',
+        targetLanguageCode: 'en',
+        now: () => startedAt,
+      ),
+    );
+    harness.realtimeGateway.session.addEvent(
+      const OpenAiRealtimeTranscriptDelta(
+        type: 'session.input_transcript.delta',
+        kind: OpenAiRealtimeTranscriptKind.source,
+        itemId: 'source-live-1',
+        delta: 'Estoy hablando',
+      ),
+    );
+    await _drainAsync();
+
+    final entries = (await harness.repository.loadSnapshot())
+        .meetings
+        .single
+        .transcriptEntries;
+    expect(entries, hasLength(1));
+    expect(entries.single.originalText, 'Estoy hablando');
+    expect(entries.single.translatedText, isEmpty);
+    expect(entries.single.status, 'partial');
+  });
+
   test(
     'suppresses translation transcript and read-aloud output when disabled',
     () async {
@@ -343,6 +391,66 @@ void main() {
       expect(entries, hasLength(1));
       expect(entries.single.originalText, 'Hola.');
       expect(entries.single.translatedText, isEmpty);
+      expect(harness.playbackGateway.enqueuedChunks, isEmpty);
+    },
+  );
+
+  test(
+    'read-aloud off keeps translated text but suppresses audio chunks',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 24, 4, 20);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Read aloud toggle smoke',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      final result = await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'en',
+          readAloudOutputEnabled: false,
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Hello.',
+          ),
+        )
+        ..addEvent(
+          OpenAiRealtimeAudioDelta(
+            type: 'session.output_audio.delta',
+            base64Audio: base64Encode([4, 5, 6, 7]),
+          ),
+        );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(result, LiveRealtimeStartResult.started);
+      expect(entries, hasLength(1));
+      expect(entries.single.translatedText, 'Hello.');
       expect(harness.playbackGateway.enqueuedChunks, isEmpty);
     },
   );

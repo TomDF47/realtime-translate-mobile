@@ -484,9 +484,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       translationOutputEnabled: _translateTextEnabled,
       readAloudOutputEnabled: _readAloudEnabled,
     );
-    final sourceLanguageCode = _languageCodeForSourceSelector(
-      session.fromLanguage,
-    );
+    const sourceLanguageCode = 'auto';
     final targetLanguageCode = _languageCodeForSelector(session.toLanguage);
     final result = await _realtimeCoordinator.start(
       config: _realtimeConfigForSession(
@@ -628,7 +626,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     required String targetLanguageCode,
   }) {
     return OpenAiRealtimeTranslationConfig(
-      sourceLanguageCode: sourceLanguageCode,
+      sourceLanguageCode: 'auto',
       targetLanguageCode: targetLanguageCode,
       profile: _profileForLiveInterpretation(targetLanguageCode),
       translationOutputEnabled: _translateTextEnabled,
@@ -649,14 +647,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     return OpenAiRealtimeTranslationProfile.dedicatedTranslation;
-  }
-
-  String _languageCodeForSourceSelector(LanguageSelectorData data) {
-    if (data.primaryLabel.toLowerCase() == 'auto-detect') {
-      return 'auto';
-    }
-
-    return _languageCodeForSelector(data);
   }
 
   String _languageCodeForSelector(LanguageSelectorData data) {
@@ -698,7 +688,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
   LiveSessionViewData _applyLiveControls(LiveSessionViewData base) {
     final source = _selectorForLanguage(
-      _selectedSourceLanguage,
+      LanguageSupport.autoDetectSource,
       fallback: base.fromLanguage,
       isTarget: false,
     );
@@ -798,6 +788,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
             accent: LiveAccent.amber,
             semanticLabel: 'Resume read aloud',
           )
+        else if (control.label == 'Switch Direction')
+          BottomControlActionData(
+            label: control.label,
+            icon: control.icon,
+            accent: control.accent,
+            semanticLabel:
+                'Switch translation direction disabled in live translation',
+            isEnabled: false,
+          )
         else
           control,
     ];
@@ -844,10 +843,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     final nextSurface = _surfaceForMeeting(meeting);
     final session = _baseSessionForSurface(nextSurface);
     _activeMeetingId = meeting.id;
-    _selectedSourceLanguage = _languageFromStoredLabel(
-      meeting.sourceLanguageLabel,
-      fallback: _selectedSourceLanguage,
-    );
+    _selectedSourceLanguage = LanguageSupport.autoDetectSource;
     _selectedTargetLanguage = _languageFromStoredLabel(
       meeting.targetLanguageLabel,
       fallback: _selectedTargetLanguage,
@@ -933,7 +929,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     _sessionController.enterSpeakingPaused();
-    _selectedSourceLanguage = LanguageSupport.languageByCode('en');
+    _selectedSourceLanguage = LanguageSupport.autoDetectSource;
     _selectedTargetLanguage = LanguageSupport.languageByCode('ja');
     setState(() => _surface = _AppSurface.speakingPaused);
   }
@@ -952,7 +948,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     if (action.label == 'Switch Direction') {
-      _switchDirection();
       return;
     }
 
@@ -965,44 +960,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       _setReadAloudEnabled(true);
       _openListening();
     }
-  }
-
-  void _switchDirection() {
-    final previousSource = _swappableSourceLanguage();
-    final previousTarget = _selectedTargetLanguage;
-    setState(() {
-      _selectedSourceLanguage = previousTarget;
-      _selectedTargetLanguage = previousSource;
-      _surface = _surfaceForSelectedRoute();
-    });
-    unawaited(_persistActiveRouteAndRestart());
-  }
-
-  TranslationLanguage _swappableSourceLanguage() {
-    if (_selectedSourceLanguage.code != 'auto') {
-      return _selectedSourceLanguage;
-    }
-
-    final currentSourceLabel = _languageLabel(
-      _sessionForSurface(_surface).fromLanguage,
-    );
-    final normalized = currentSourceLabel.toLowerCase();
-    for (final language in LanguageSupport.sourceLanguages) {
-      if (language.code != 'auto' &&
-          normalized.contains(language.name.toLowerCase())) {
-        return language;
-      }
-    }
-
-    return LanguageSupport.languageByCode('es');
-  }
-
-  _AppSurface _surfaceForSelectedRoute() {
-    if (!_readAloudEnabled) {
-      return _AppSurface.speakingPaused;
-    }
-
-    return _AppSurface.listening;
   }
 
   void _toggleFeature(String label) {
@@ -1046,12 +1003,12 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   void _selectLanguage(TranslationLanguage language, {required bool isTarget}) {
+    if (!isTarget) {
+      return;
+    }
+
     setState(() {
-      if (isTarget) {
-        _selectedTargetLanguage = language;
-      } else {
-        _selectedSourceLanguage = language;
-      }
+      _selectedTargetLanguage = language;
     });
     unawaited(_persistActiveRouteAndRestart());
   }
@@ -1063,7 +1020,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         activeMeeting.copyWith(
           sourceLanguageLabel: _languageLabel(
             _selectorForLanguage(
-              _selectedSourceLanguage,
+              LanguageSupport.autoDetectSource,
               fallback: MockLiveTranslateData.listeningSession.fromLanguage,
               isTarget: false,
             ),
@@ -1102,7 +1059,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
     await _realtimeCoordinator.start(
       config: OpenAiRealtimeTranslationConfig(
-        sourceLanguageCode: _selectedSourceLanguage.code,
+        sourceLanguageCode: 'auto',
         targetLanguageCode: targetLanguageCode,
         profile: _profileForLiveInterpretation(targetLanguageCode),
         translationOutputEnabled: _translateTextEnabled,
@@ -1111,7 +1068,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
         repository: _meetingRepository,
         meetingId: meetingId,
-        sourceLanguageCode: _selectedSourceLanguage.code,
+        sourceLanguageCode: 'auto',
         targetLanguageCode: targetLanguageCode,
         now: DateTime.now,
       ),
@@ -1576,11 +1533,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         sessionState: sessionState,
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
-        onOpenSourceLanguageOptions: () =>
-            _showLanguageOptionsSheet(isTarget: false),
+        onOpenSourceLanguageOptions: null,
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
-        onDirectionSwitch: _switchDirection,
+        onDirectionSwitch: null,
         onRetryLiveSession: _openListening,
         onBottomAction: _handleBottomAction,
         onFeatureToggle: _toggleFeature,
@@ -1599,11 +1555,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         sessionState: sessionState,
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
-        onOpenSourceLanguageOptions: () =>
-            _showLanguageOptionsSheet(isTarget: false),
+        onOpenSourceLanguageOptions: null,
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
-        onDirectionSwitch: _switchDirection,
+        onDirectionSwitch: null,
         onRetryLiveSession: _openSpeakingPaused,
         onBottomAction: _handleBottomAction,
         onFeatureToggle: _toggleFeature,
@@ -2008,9 +1963,9 @@ class LiveSessionScreen extends StatelessWidget {
   final LiveSessionState sessionState;
   final VoidCallback onOpenMenu;
   final VoidCallback onOpenAssistant;
-  final VoidCallback onOpenSourceLanguageOptions;
+  final VoidCallback? onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
-  final VoidCallback onDirectionSwitch;
+  final VoidCallback? onDirectionSwitch;
   final VoidCallback onRetryLiveSession;
   final ValueChanged<BottomControlActionData> onBottomAction;
   final ValueChanged<String> onFeatureToggle;
@@ -2312,8 +2267,8 @@ class _LanguageRouteRow extends StatelessWidget {
   });
 
   final LiveSessionViewData session;
-  final VoidCallback onDirectionSwitch;
-  final VoidCallback onOpenSourceLanguageOptions;
+  final VoidCallback? onDirectionSwitch;
+  final VoidCallback? onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
 
   @override

@@ -75,7 +75,7 @@ class OpenAiRealtimeTranslationConfig {
   const OpenAiRealtimeTranslationConfig({
     required this.targetLanguageCode,
     this.sourceLanguageCode = 'auto',
-    this.profile = OpenAiRealtimeTranslationProfile.primaryRealtime2,
+    this.profile = OpenAiRealtimeTranslationProfile.dedicatedTranslation,
     this.inputAudioRate = 24000,
     this.outputVoice = 'marin',
     this.translationOutputEnabled = true,
@@ -306,6 +306,7 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
   final StreamController<OpenAiRealtimeEvent> _events =
       StreamController<OpenAiRealtimeEvent>();
   final Completer<void> _ready = Completer<void>();
+  final Completer<void> _serverClosed = Completer<void>();
   bool _closeSent = false;
   bool _isClosed = false;
 
@@ -354,6 +355,10 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
     final closeEvent = config.gracefulCloseEvent();
     if (closeEvent != null) {
       _send(closeEvent);
+      await _serverClosed.future.timeout(
+        const Duration(milliseconds: 750),
+        onTimeout: () {},
+      );
     }
     await closeImmediately();
   }
@@ -382,6 +387,9 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
 
     _emitEvent(event);
     if (event is OpenAiRealtimeSessionClosed) {
+      if (!_serverClosed.isCompleted) {
+        _serverClosed.complete();
+      }
       unawaited(closeImmediately());
     }
   }
@@ -442,6 +450,9 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
     }
 
     _emitEvent(const OpenAiRealtimeSessionClosed(type: 'socket.closed'));
+    if (!_serverClosed.isCompleted) {
+      _serverClosed.complete();
+    }
     unawaited(_events.close());
   }
 

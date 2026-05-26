@@ -680,8 +680,8 @@ class LiveRealtimeTranslationCoordinator {
       await captureGateway.stop();
       await captureSubscription?.cancel();
       await playbackGateway.stop(clearQueue: true);
-      await realtimeSubscription?.cancel();
       await realtimeCloseFuture;
+      await realtimeSubscription?.cancel();
       if (finishTranscript) {
         await transcriptCommitter?.finish(interrupted: !graceful);
       }

@@ -8,7 +8,10 @@ import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation
 
 void main() {
   test('builds primary realtime2 websocket session config', () {
-    const config = OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es');
+    const config = OpenAiRealtimeTranslationConfig(
+      targetLanguageCode: 'es',
+      profile: OpenAiRealtimeTranslationProfile.primaryRealtime2,
+    );
 
     final uri = config.webSocketUri();
     final sessionUpdate = config.initialSessionUpdate();
@@ -46,23 +49,33 @@ void main() {
     expect(config.responseCreateEvent(), {'type': 'response.create'});
   });
 
-  test('builds dedicated translation fallback websocket session config', () {
+  test('defaults to dedicated translation websocket session config', () {
     const config = OpenAiRealtimeTranslationConfig(
       targetLanguageCode: 'fr',
-      profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+      sourceLanguageCode: 'en',
     );
 
     final uri = config.webSocketUri();
     final sessionUpdate = config.initialSessionUpdate();
     final serialized = jsonEncode(sessionUpdate);
+    final session = sessionUpdate['session']! as Map<String, Object?>;
+    final audio = session['audio']! as Map<String, Object?>;
+    final output = audio['output']! as Map<String, Object?>;
 
     expect(uri.path, '/v1/realtime/translations');
     expect(uri.queryParameters, {
       'model': OpenAiConfiguration.translationFallbackModel,
     });
-    expect(serialized, contains('"language":"fr"'));
+    expect(
+      config.profile,
+      OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+    );
+    expect(output['language'], 'fr');
     expect(serialized, isNot(contains('gpt-realtime-2')));
     expect(serialized, isNot(contains('instructions')));
+    expect(serialized, isNot(contains('"sourceLanguageCode"')));
+    expect(serialized, isNot(contains('"input"')));
+    expect(serialized, isNot(contains('"language":"en"')));
     expect(
       config.audioAppendEvent([1, 2, 3])['type'],
       'session.input_audio_buffer.append',
@@ -200,10 +213,7 @@ void main() {
         webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}/v1'),
       );
       final session = await gateway.connect(
-        config: const OpenAiRealtimeTranslationConfig(
-          targetLanguageCode: 'es',
-          profile: OpenAiRealtimeTranslationProfile.dedicatedTranslation,
-        ),
+        config: const OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es'),
         credential: 'placeholder-local-openai-credential',
       );
 
@@ -235,6 +245,52 @@ void main() {
     },
   );
 
+  test('graceful close waits briefly for session.closed', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final closeRequested = Completer<void>();
+
+    unawaited(
+      server.first.then((request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        await for (final message in socket) {
+          final text = message as String;
+          if (text.contains('session.update')) {
+            socket.add(jsonEncode({'type': 'session.updated'}));
+          }
+          if (text.contains('session.close')) {
+            closeRequested.complete();
+            await Future<void>.delayed(const Duration(milliseconds: 80));
+            socket.add(jsonEncode({'type': 'session.closed'}));
+            await socket.close();
+            break;
+          }
+        }
+      }),
+    );
+
+    final gateway = OpenAiRealtimeTranslationGateway(
+      webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}/v1'),
+    );
+    final session = await gateway.connect(
+      config: const OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es'),
+      credential: 'placeholder-local-openai-credential',
+    );
+    await session.events.first.timeout(const Duration(seconds: 3));
+
+    var closeFinished = false;
+    final closeFuture = session.closeGracefully().then((_) {
+      closeFinished = true;
+    });
+    await closeRequested.future.timeout(const Duration(seconds: 3));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(closeFinished, isFalse);
+
+    await closeFuture.timeout(const Duration(seconds: 3));
+    await server.close(force: true);
+    expect(closeFinished, isTrue);
+  });
+
   test('sends primary realtime2 append, commit, and response events', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final receivedMessages = <String>[];
@@ -262,7 +318,10 @@ void main() {
       webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}/v1'),
     );
     final session = await gateway.connect(
-      config: const OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es'),
+      config: const OpenAiRealtimeTranslationConfig(
+        targetLanguageCode: 'es',
+        profile: OpenAiRealtimeTranslationProfile.primaryRealtime2,
+      ),
       credential: 'placeholder-local-openai-credential',
     );
 

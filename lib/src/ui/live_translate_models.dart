@@ -158,12 +158,14 @@ class BottomControlActionData {
     required this.icon,
     required this.accent,
     required this.semanticLabel,
+    this.isEnabled = true,
   });
 
   final String label;
   final IconData icon;
   final LiveAccent accent;
   final String semanticLabel;
+  final bool isEnabled;
 }
 
 class PromptChipData {

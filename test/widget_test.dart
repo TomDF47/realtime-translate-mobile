@@ -274,7 +274,7 @@ void main() {
     expect(find.text('Start new meeting'), findsNothing);
   });
 
-  testWidgets('switches direction repeatedly without corrupting languages', (
+  testWidgets('keeps live source auto-detect and disables direction switch', (
     tester,
   ) async {
     final repository = _testRepository();
@@ -293,24 +293,28 @@ void main() {
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
     expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
 
     await tester.tap(find.text('Switch'));
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('English -> Spanish'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
     var snapshot = await repository.loadSnapshot();
-    expect(snapshot.meetings.single.sourceLanguageLabel, 'English (US)');
-    expect(snapshot.meetings.single.targetLanguageLabel, 'Spanish (ES)');
+    expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect Spanish');
+    expect(snapshot.meetings.single.targetLanguageLabel, 'English (US)');
+    expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
 
-    await tester.tap(find.text('Switch'));
-    await tester.pump();
+    await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('French (FR)'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> French'), findsOneWidget);
     snapshot = await repository.loadSnapshot();
-    expect(snapshot.meetings.single.sourceLanguageLabel, 'Spanish (ES)');
-    expect(snapshot.meetings.single.targetLanguageLabel, 'English (US)');
+    expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect Spanish');
+    expect(snapshot.meetings.single.targetLanguageLabel, 'French (FR)');
+    expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
   });
 
   testWidgets('renders live transcript commits on the active screen', (

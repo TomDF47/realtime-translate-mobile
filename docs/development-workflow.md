@@ -52,7 +52,7 @@ Backend/cloud:
 
 OpenAI:
 
-- Preferred realtime voice/translation model: `gpt-realtime-2`; keep `gpt-realtime-translate` as a dedicated translation fallback/profile until endpoint/API testing proves the final route.
+- Preferred realtime voice/translation model: `gpt-realtime-translate` on `/v1/realtime/translations` for normal live translation; keep `gpt-realtime-2` only as an explicit compatibility/experimental voice-agent profile.
 - Direct phone-to-OpenAI API calls only.
 - Verify current Realtime Translation language support, realtime endpoint/model behavior, accepted encrypted local credential UX, and summary model/reasoning support during implementation.
 - Keep AI chat scoped explicitly to `This meeting` or `All meetings`.

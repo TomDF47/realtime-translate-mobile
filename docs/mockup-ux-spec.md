@@ -90,8 +90,8 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - Status pill: `Listening`.
   - Elapsed timer: `00:05:23`.
 - Language controls:
-  - From card: `Auto-detect` / `Spanish`, waveform icon, dropdown affordance.
-  - Center switch button for direction swap.
+  - From card: display-only `Auto-detect` / `Spanish`, waveform icon, no dropdown affordance for MVP live translation.
+  - Center switch button is disabled for MVP live translation so dedicated translation source remains auto-detect.
   - To card: `English (US)`, speaker icon, dropdown affordance.
 - Feature toggles row:
   - `Translate Text` on.
@@ -113,7 +113,7 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
 - Fixed bottom control bar:
   - Large circular `Stop Listening` red button.
   - `Pause Read Aloud` blue button.
-  - `Switch Direction` dark button.
+  - Disabled `Switch Direction` dark button for the dedicated live translation path.
 
 ### Required States
 

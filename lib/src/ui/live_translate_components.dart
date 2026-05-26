@@ -417,7 +417,7 @@ class LanguageSelectorCard extends StatelessWidget {
                 foregroundColor: accentColor,
                 child: Icon(data.icon),
               ),
-              const Icon(Icons.keyboard_arrow_down_rounded),
+              if (onTap != null) const Icon(Icons.keyboard_arrow_down_rounded),
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -450,11 +450,11 @@ class LanguageSelectorCard extends StatelessWidget {
 class DirectionSwitchButton extends StatelessWidget {
   const DirectionSwitchButton({
     super.key,
-    required this.onPressed,
+    this.onPressed,
     this.accent = LiveAccent.teal,
   });
 
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final LiveAccent accent;
 
   @override
@@ -463,6 +463,7 @@ class DirectionSwitchButton extends StatelessWidget {
 
     return Semantics(
       button: true,
+      enabled: onPressed != null,
       label: 'Switch translation direction',
       child: OutlinedButton(
         onPressed: onPressed,
@@ -894,15 +895,16 @@ class _BottomControlButton extends StatelessWidget {
     final isNeutral = action.accent == LiveAccent.neutral;
 
     return Semantics(
-      button: true,
+      button: action.isEnabled,
+      enabled: action.isEnabled,
       container: true,
       excludeSemantics: true,
       label: action.semanticLabel,
-      onTap: onPressed,
+      onTap: action.isEnabled ? onPressed : null,
       child: SizedBox(
         width: 104,
         child: InkWell(
-          onTap: onPressed,
+          onTap: action.isEnabled ? onPressed : null,
           borderRadius: BorderRadius.circular(AppRadii.card),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
@@ -913,12 +915,16 @@ class _BottomControlButton extends StatelessWidget {
                   width: 64,
                   height: 64,
                   decoration: BoxDecoration(
-                    color: isNeutral ? AppColors.surfacePressed : accentColor,
+                    color: action.isEnabled
+                        ? (isNeutral ? AppColors.surfacePressed : accentColor)
+                        : AppColors.surface,
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     action.icon,
-                    color: isNeutral
+                    color: !action.isEnabled
+                        ? AppColors.textTertiary
+                        : isNeutral
                         ? AppColors.textPrimary
                         : AppColors.background,
                   ),

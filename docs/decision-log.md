@@ -70,7 +70,9 @@ Decision:
 - Route normal MVP live meeting interpretation through `gpt-realtime-translate` on `/v1/realtime/translations`.
 - Keep `gpt-realtime-2` configured only as an explicit compatibility/experimental profile for voice-agent or endpoint comparison work.
 - Do not call `response.create` for the dedicated translation path; stream source PCM16 audio with `session.input_audio_buffer.append` and consume source/target transcript deltas as they arrive.
+- Require only target/output language for the dedicated translation path. Keep live source language auto-detected, keep the From card display-only, and disable direction switching so source cannot become a fixed input language.
 - Realtime startup must wait for `session.updated` or a sanitized startup error before microphone capture starts.
+- Graceful stop should send `session.close`, wait briefly for `session.closed`, then fall back to immediate close.
 - Keep original/source transcript text and translated text in separate local transcript fields.
 
 Rationale:
