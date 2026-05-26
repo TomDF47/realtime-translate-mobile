@@ -198,17 +198,33 @@ void main() {
     await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('French (FR)'));
-    await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 1));
+    await _pumpUntilRealtimeConfigCount(
+      tester,
+      realtimeGateway,
+      greaterThan(initialRealtimeConfigCount),
+    );
 
     expect(find.text('Auto-detect Spanish -> French'), findsOneWidget);
     final snapshot = await repository.loadSnapshot();
     expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect Spanish');
     expect(snapshot.meetings.single.targetLanguageLabel, 'French (FR)');
+    expect(
+      realtimeGateway.configs.length,
+      greaterThan(initialRealtimeConfigCount),
+    );
+    expect(realtimeGateway.configs.last.targetLanguageCode, 'fr');
+    expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
+    expect(
+      realtimeGateway.configs.last.profile,
+      OpenAiRealtimeTranslationProfile.dedicatedTranslation,
+    );
 
     await tester.tap(find.bySemanticsLabel('Translate Text on'));
-    await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 1));
+    await _pumpUntilRealtimeConfigCount(
+      tester,
+      realtimeGateway,
+      greaterThan(initialRealtimeConfigCount + 1),
+    );
     expect(find.bySemanticsLabel('Translate Text off'), findsOneWidget);
     expect(
       realtimeGateway.configs.length,
@@ -226,6 +242,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.bySemanticsLabel('Read Aloud off'), findsOneWidget);
     expect(find.text('Read aloud is paused'), findsOneWidget);
+
+    await tester.tap(find.text('Resume Read Aloud'));
+    await _pumpUntilRealtimeConfig(
+      tester,
+      realtimeGateway,
+      (config) => config.targetLanguageCode == 'fr',
+    );
+    expect(find.text('Auto-detect Spanish -> French'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
+    expect(realtimeGateway.configs.last.targetLanguageCode, 'fr');
   });
 
   testWidgets('shows live connecting surface while realtime starts', (
@@ -528,6 +554,7 @@ void main() {
     final aiChatGateway = _FakeAiChatGateway(
       'Across meetings, the timeline was agreed at 10:37 AM.',
     );
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
     await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
@@ -536,7 +563,7 @@ void main() {
         aiChatGateway: aiChatGateway,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
-        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+        realtimeTranslationGateway: realtimeGateway,
       ),
     );
 
@@ -572,6 +599,7 @@ void main() {
   ) async {
     final repository = _testRepository();
     final meetingSummaryGateway = _FakeMeetingSummaryGateway();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
     await _seedCredential(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
@@ -580,7 +608,7 @@ void main() {
         meetingSummaryGateway: meetingSummaryGateway,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
-        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+        realtimeTranslationGateway: realtimeGateway,
       ),
     );
 
@@ -595,6 +623,18 @@ void main() {
     expect(find.text('Read aloud is paused'), findsOneWidget);
     expect(find.text('Resume Read Aloud'), findsOneWidget);
     expect(find.text('Waiting for speech'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Open menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resume read-aloud meeting'));
+    await _pumpUntilRealtimeConfig(
+      tester,
+      realtimeGateway,
+      (config) => config.targetLanguageCode == 'ja',
+    );
+
+    expect(find.text('Auto-detect Spanish -> Japanese'), findsOneWidget);
+    expect(realtimeGateway.configs.last.targetLanguageCode, 'ja');
 
     await tester.tap(find.byTooltip('Open menu'));
     await tester.pumpAndSettle();
@@ -726,7 +766,7 @@ void main() {
     expect((await repository.loadSnapshot()).meetings, isEmpty);
     expect(find.text('Live translation meeting'), findsNothing);
     expect(find.text('No saved meetings yet'), findsOneWidget);
-    expect(find.text('Meeting deleted.'), findsOneWidget);
+    expect(find.text('Meeting deleted.'), findsWidgets);
     expect(find.text('Start new meeting'), findsOneWidget);
     expect(captureGateway.isCapturing, isFalse);
     expect(realtimeGateway.sessions.single.closeImmediatelyCount, 1);
@@ -809,6 +849,45 @@ Future<void> _appendStoredTranscriptLine(
       playbackState: TranscriptPlaybackState.playable.name,
     ),
   );
+}
+
+Future<void> _pumpUntilRealtimeConfigCount(
+  WidgetTester tester,
+  _FakeRealtimeTranslationGateway realtimeGateway,
+  Matcher matcher,
+) async {
+  await _pumpUntil(
+    tester,
+    () => matcher.matches(realtimeGateway.configs.length, <Object, Object>{}),
+  );
+}
+
+Future<void> _pumpUntilRealtimeConfig(
+  WidgetTester tester,
+  _FakeRealtimeTranslationGateway realtimeGateway,
+  bool Function(OpenAiRealtimeTranslationConfig config) matches,
+) async {
+  await _pumpUntil(
+    tester,
+    () =>
+        realtimeGateway.configs.isNotEmpty &&
+        matches(realtimeGateway.configs.last),
+  );
+}
+
+Future<void> _pumpUntil(
+  WidgetTester tester,
+  bool Function() isComplete, {
+  Duration timeout = const Duration(seconds: 3),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!isComplete()) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('Timed out waiting for widget async work to complete.');
+    }
+    await tester.pump(const Duration(milliseconds: 20));
+  }
+  await tester.pumpAndSettle();
 }
 
 Widget _liveSessionHarness(LiveSessionState state) {

@@ -69,6 +69,7 @@ class LiveRealtimeTranslationCoordinator {
   OpenAiRealtimeTranslationConfig? _activeConfig;
   LiveRealtimeTranscriptCommitTarget? _activeTranscriptCommitTarget;
   bool _closingIntentionally = false;
+  bool _processTranscriptsDuringIntentionalClose = false;
   bool _handlingFailure = false;
   bool _isDisposed = false;
   bool _translationOutputEnabled = true;
@@ -344,7 +345,10 @@ class LiveRealtimeTranslationCoordinator {
   }
 
   void _handleRealtimeEvent(OpenAiRealtimeEvent event) {
-    if (_closingIntentionally) {
+    if (_closingIntentionally &&
+        (!_processTranscriptsDuringIntentionalClose ||
+            event is! OpenAiRealtimeTranscriptDelta &&
+                event is! OpenAiRealtimeTranscriptCompleted)) {
       return;
     }
 
@@ -663,30 +667,31 @@ class LiveRealtimeTranslationCoordinator {
     _realtimeSession = null;
     _realtimeSubscription = null;
     _captureSubscription = null;
-    if (finishTranscript) {
-      _transcriptCommitter = null;
-    }
 
     _closingIntentionally = true;
+    _processTranscriptsDuringIntentionalClose = graceful && finishTranscript;
     try {
-      final Future<void> realtimeCloseFuture;
-      if (realtimeSession == null) {
-        realtimeCloseFuture = Future<void>.value();
-      } else if (graceful) {
-        realtimeCloseFuture = realtimeSession.closeGracefully();
-      } else {
-        realtimeCloseFuture = realtimeSession.closeImmediately();
-      }
       await captureGateway.stop();
-      await captureSubscription?.cancel();
+      await _cancelSubscription(captureSubscription);
       await playbackGateway.stop(clearQueue: true);
-      await realtimeCloseFuture;
-      await realtimeSubscription?.cancel();
+      if (realtimeSession == null) {
+        await _cancelSubscription(realtimeSubscription);
+      } else if (graceful) {
+        await realtimeSession.closeGracefully();
+        await realtimeSubscription?.cancel();
+      } else {
+        await _cancelSubscription(realtimeSubscription);
+        await realtimeSession.closeImmediately();
+      }
       if (finishTranscript) {
         await transcriptCommitter?.finish(interrupted: !graceful);
+        if (identical(_transcriptCommitter, transcriptCommitter)) {
+          _transcriptCommitter = null;
+        }
       }
     } finally {
       _closingIntentionally = false;
+      _processTranscriptsDuringIntentionalClose = false;
     }
   }
 
@@ -694,6 +699,17 @@ class LiveRealtimeTranslationCoordinator {
     for (var i = 0; i < 6; i++) {
       await Future<void>.delayed(Duration.zero);
     }
+  }
+
+  Future<void> _cancelSubscription(StreamSubscription<dynamic>? subscription) {
+    if (subscription == null) {
+      return Future<void>.value();
+    }
+
+    return subscription.cancel().timeout(
+      const Duration(milliseconds: 250),
+      onTimeout: () {},
+    );
   }
 }
 

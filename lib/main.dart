@@ -432,6 +432,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
   Future<void> _startMeeting() async {
     _resetRecordingTimer();
+    _selectedSourceLanguage = LanguageSupport.autoDetectSource;
+    _selectedTargetLanguage = LanguageSupport.languageByCode('en');
     final meetingId = 'meeting-${DateTime.now().microsecondsSinceEpoch}';
     _activeMeetingId = meetingId;
     setState(() => _surface = _AppSurface.listening);
@@ -477,7 +479,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   Future<bool> _startRealtimeForSession(
-    LiveSessionViewData session, {
+    LiveSessionViewData _, {
     String? meetingId,
   }) async {
     _realtimeCoordinator.setRuntimeOutputOptions(
@@ -485,13 +487,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       readAloudOutputEnabled: _readAloudEnabled,
     );
     const sourceLanguageCode = 'auto';
-    final targetLanguageCode = _languageCodeForSelector(session.toLanguage);
+    final targetLanguageCode = _selectedTargetLanguage.code;
     final result = await _realtimeCoordinator.start(
-      config: _realtimeConfigForSession(
-        session,
-        sourceLanguageCode: sourceLanguageCode,
-        targetLanguageCode: targetLanguageCode,
-      ),
+      config: _realtimeConfigForTarget(targetLanguageCode),
       transcriptCommitTarget: meetingId == null
           ? null
           : LiveRealtimeTranscriptCommitTarget(
@@ -620,11 +618,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     return _startRealtimeForSession(session, meetingId: _activeMeetingId);
   }
 
-  OpenAiRealtimeTranslationConfig _realtimeConfigForSession(
-    LiveSessionViewData session, {
-    required String sourceLanguageCode,
-    required String targetLanguageCode,
-  }) {
+  OpenAiRealtimeTranslationConfig _realtimeConfigForTarget(
+    String targetLanguageCode,
+  ) {
     return OpenAiRealtimeTranslationConfig(
       sourceLanguageCode: 'auto',
       targetLanguageCode: targetLanguageCode,
@@ -647,17 +643,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     return OpenAiRealtimeTranslationProfile.dedicatedTranslation;
-  }
-
-  String _languageCodeForSelector(LanguageSelectorData data) {
-    final primary = data.primaryLabel.toLowerCase();
-    for (final language in LanguageSupport.languages) {
-      if (language.name.toLowerCase() == primary) {
-        return language.code;
-      }
-    }
-
-    return 'en';
   }
 
   _AppSurface _surfaceForMeeting(StoredMeeting meeting) {
@@ -909,7 +894,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
     _sessionController.resumeListening();
     _selectedSourceLanguage = LanguageSupport.autoDetectSource;
-    _selectedTargetLanguage = LanguageSupport.languageByCode('en');
     setState(() => _surface = _AppSurface.listening);
   }
 
@@ -918,6 +902,16 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   Future<void> _openSpeakingPausedAfterPermission() async {
+    final amberTarget = LanguageSupport.languageByCode('ja');
+    final shouldUpdateTarget = _selectedTargetLanguage.code != amberTarget.code;
+    if (shouldUpdateTarget) {
+      _selectedTargetLanguage = amberTarget;
+      await _persistActiveRouteAndRestart();
+      if (!mounted) {
+        return;
+      }
+    }
+
     if (!_sessionController.state.microphonePermission.isGranted ||
         !_realtimeCoordinator.isStreaming) {
       final isReady = await _ensureLiveSessionReady(
@@ -930,7 +924,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
     _sessionController.enterSpeakingPaused();
     _selectedSourceLanguage = LanguageSupport.autoDetectSource;
-    _selectedTargetLanguage = LanguageSupport.languageByCode('ja');
     setState(() => _surface = _AppSurface.speakingPaused);
   }
 
@@ -1002,7 +995,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
   }
 
-  void _selectLanguage(TranslationLanguage language, {required bool isTarget}) {
+  Future<void> _selectLanguage(
+    TranslationLanguage language, {
+    required bool isTarget,
+  }) async {
     if (!isTarget) {
       return;
     }
@@ -1010,7 +1006,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     setState(() {
       _selectedTargetLanguage = language;
     });
-    unawaited(_persistActiveRouteAndRestart());
+    await _persistActiveRouteAndRestart();
   }
 
   Future<void> _persistActiveRouteAndRestart() async {
@@ -1037,7 +1033,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       );
       await _loadStoredMeetings();
     }
-    unawaited(_restartRealtimeIfActive());
+    await _restartRealtimeIfActive();
   }
 
   Future<void> _restartRealtimeIfActive() async {
@@ -1107,9 +1103,11 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           Navigator.of(context).pop();
           _showGeneratedExportsSheet();
         },
-        onResumeAmberMeeting: () {
-          Navigator.of(context).pop();
-          _openSpeakingPaused();
+        onResumeAmberMeeting: () async {
+          await _openSpeakingPausedAfterPermission();
+          if (context.mounted) {
+            Navigator.of(context).pop();
+          }
         },
       ),
     );
@@ -1428,9 +1426,11 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         selectedLanguage: isTarget
             ? _selectedTargetLanguage
             : _selectedSourceLanguage,
-        onSelected: (language) {
-          Navigator.of(context).pop();
-          _selectLanguage(language, isTarget: isTarget);
+        onSelected: (language) async {
+          await _selectLanguage(language, isTarget: isTarget);
+          if (context.mounted) {
+            Navigator.of(context).pop();
+          }
         },
       ),
     );
@@ -2335,7 +2335,7 @@ class _LanguageOptionsSheet extends StatelessWidget {
 
   final bool isTarget;
   final TranslationLanguage selectedLanguage;
-  final ValueChanged<TranslationLanguage> onSelected;
+  final Future<void> Function(TranslationLanguage language) onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -2408,7 +2408,7 @@ class _LanguageOptionRow extends StatelessWidget {
   final TranslationLanguage language;
   final String statusLabel;
   final bool isSelected;
-  final VoidCallback onTap;
+  final Future<void> Function() onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2430,7 +2430,9 @@ class _LanguageOptionRow extends StatelessWidget {
       trailing: isSelected
           ? const Icon(Icons.check_circle_rounded, color: AppColors.teal)
           : const Icon(Icons.chevron_right_rounded),
-      onTap: onTap,
+      onTap: () async {
+        await onTap();
+      },
     );
   }
 }
@@ -2814,7 +2816,7 @@ class _MeetingMenuSheet extends StatelessWidget {
   final VoidCallback onOpenHistory;
   final VoidCallback onExport;
   final VoidCallback onOpenGeneratedExports;
-  final VoidCallback onResumeAmberMeeting;
+  final Future<void> Function() onResumeAmberMeeting;
 
   @override
   Widget build(BuildContext context) {
@@ -3515,7 +3517,7 @@ class _SheetAction extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final FutureOr<void> Function() onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -3527,7 +3529,9 @@ class _SheetAction extends StatelessWidget {
         style: AppTextStyles.label(Theme.of(context).textTheme),
       ),
       trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: onTap,
+      onTap: () async {
+        await onTap();
+      },
     );
   }
 }

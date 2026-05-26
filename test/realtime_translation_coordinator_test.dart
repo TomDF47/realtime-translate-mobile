@@ -854,6 +854,75 @@ void main() {
   });
 
   test(
+    'graceful stop commits final transcript events before finishing',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 5, 27, 3);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Graceful close transcript',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect Spanish',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptDelta(
+          type: 'session.input_transcript.delta',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          delta: 'Hol',
+        ),
+      );
+      await _drainAsync();
+
+      harness.realtimeGateway.session.eventsOnGracefulClose.addAll(const [
+        OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          transcript: 'Hola final',
+        ),
+        OpenAiRealtimeTranscriptCompleted(
+          type: 'session.output_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          transcript: 'Hello final.',
+        ),
+        OpenAiRealtimeSessionClosed(type: 'session.closed'),
+      ]);
+
+      await harness.coordinator.stop();
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, 'Hola final');
+      expect(entries.single.translatedText, 'Hello final.');
+      expect(entries.single.status, 'final');
+      expect(harness.realtimeGateway.session.closeGracefullyCount, 1);
+      expect(harness.controller.state.phase, LiveSessionPhase.localSetup);
+    },
+  );
+
+  test(
     'discard closes live resources without finalizing partial transcript',
     () async {
       final harness = await _Harness.create(
@@ -1581,6 +1650,7 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   final StreamController<OpenAiRealtimeEvent> _events =
       StreamController<OpenAiRealtimeEvent>.broadcast();
   final List<List<int>> appendedChunks = [];
+  final List<OpenAiRealtimeEvent> eventsOnGracefulClose = [];
   int closeGracefullyCount = 0;
   int closeImmediatelyCount = 0;
   int commitInputAudioBufferCount = 0;
@@ -1607,6 +1677,10 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   @override
   Future<void> closeGracefully() async {
     closeGracefullyCount += 1;
+    for (final event in eventsOnGracefulClose) {
+      _events.add(event);
+    }
+    await Future<void>.delayed(Duration.zero);
   }
 
   @override
