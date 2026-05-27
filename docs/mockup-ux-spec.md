@@ -86,11 +86,11 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - Transcript/chat assistant icon on the right.
 - Session status card:
   - Waveform icon.
-  - Text: `Auto-detect Spanish -> English`.
+  - Text: `Auto-detect -> English`.
   - Status pill: `Listening`.
   - Elapsed timer: `00:05:23`.
 - Language controls:
-  - From card: display-only `Auto-detect` / `Spanish`, waveform icon, no dropdown affordance for MVP live translation.
+  - From card: display-only `Auto-detect`, waveform icon, no dropdown affordance for MVP live translation.
   - Center switch button is disabled for MVP live translation so dedicated translation source remains auto-detect.
   - To card: `English (US)`, speaker icon, dropdown affordance.
 - Feature toggles row:

@@ -29,13 +29,13 @@ abstract final class MockLiveTranslateData {
   ];
 
   static const listeningSession = LiveSessionViewData(
-    routeLabel: 'Auto-detect Spanish -> English',
+    routeLabel: 'Auto-detect -> English',
     elapsedLabel: '00:05:23',
     mode: LiveSessionMode.listening,
     fromLanguage: LanguageSelectorData(
       eyebrow: 'From',
       primaryLabel: 'Auto-detect',
-      secondaryLabel: 'Spanish',
+      secondaryLabel: '',
       icon: Icons.graphic_eq_rounded,
       accent: LiveAccent.teal,
     ),

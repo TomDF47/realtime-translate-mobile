@@ -138,7 +138,7 @@ void main() {
     await tester.pumpAndSettle();
     _expectNoFlutterOverflow(tester);
 
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
     expect(find.text('Waiting for speech'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Open AI chat'));
@@ -152,7 +152,7 @@ void main() {
     await tester.tap(find.text('Pause Read Aloud'));
     await tester.pumpAndSettle();
     _expectNoFlutterOverflow(tester);
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
     expect(find.text('Read aloud is paused'), findsOneWidget);
     expect(find.text('Resume Read Aloud'), findsOneWidget);
 

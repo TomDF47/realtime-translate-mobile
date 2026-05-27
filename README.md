@@ -181,6 +181,7 @@ Closed planning and implementation intake:
 - #21 Add email export for transcripts and summaries
 - #22 Implement dependency and supply-chain cybersecurity controls
 - #23 Decide safe direct OpenAI mobile credential approach
+- #29 Normalize auto-detect source labels in live UI and meeting history
 
 Open MVP/planning work:
 

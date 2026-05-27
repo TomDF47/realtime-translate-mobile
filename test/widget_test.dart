@@ -114,7 +114,8 @@ void main() {
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Listening'), findsOneWidget);
     expect(find.text('Translate Text'), findsOneWidget);
     expect(find.text('Waiting for speech'), findsOneWidget);
@@ -186,7 +187,7 @@ void main() {
 
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
     expect(realtimeGateway.configs.last.targetLanguageCode, 'en');
     expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
     expect(
@@ -204,9 +205,10 @@ void main() {
       greaterThan(initialRealtimeConfigCount),
     );
 
-    expect(find.text('Auto-detect Spanish -> French'), findsOneWidget);
+    expect(find.text('Auto-detect -> French'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> French'), findsNothing);
     final snapshot = await repository.loadSnapshot();
-    expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect Spanish');
+    expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect');
     expect(snapshot.meetings.single.targetLanguageLabel, 'French (FR)');
     expect(
       realtimeGateway.configs.length,
@@ -249,8 +251,9 @@ void main() {
       realtimeGateway,
       (config) => config.targetLanguageCode == 'fr',
     );
-    expect(find.text('Auto-detect Spanish -> French'), findsOneWidget);
-    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
+    expect(find.text('Auto-detect -> French'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsNothing);
+    expect(find.text('Auto-detect Spanish -> French'), findsNothing);
     expect(realtimeGateway.configs.last.targetLanguageCode, 'fr');
   });
 
@@ -274,7 +277,8 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Connecting'), findsOneWidget);
     expect(find.text('Start new meeting'), findsNothing);
 
@@ -302,7 +306,8 @@ void main() {
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Reconnecting to OpenAI'), findsOneWidget);
     expect(
       find.text('Connection interrupted. Reconnecting to OpenAI shortly.'),
@@ -331,16 +336,18 @@ void main() {
 
     await tester.tap(find.text('Start new meeting'));
     await tester.pumpAndSettle();
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
 
     await tester.tap(find.text('Switch'));
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     var snapshot = await repository.loadSnapshot();
-    expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect Spanish');
+    expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect');
     expect(snapshot.meetings.single.targetLanguageLabel, 'English (US)');
     expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
 
@@ -349,9 +356,10 @@ void main() {
     await tester.tap(find.text('French (FR)'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Auto-detect Spanish -> French'), findsOneWidget);
+    expect(find.text('Auto-detect -> French'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> French'), findsNothing);
     snapshot = await repository.loadSnapshot();
-    expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect Spanish');
+    expect(snapshot.meetings.single.sourceLanguageLabel, 'Auto-detect');
     expect(snapshot.meetings.single.targetLanguageLabel, 'French (FR)');
     expect(realtimeGateway.configs.last.sourceLanguageCode, 'auto');
   });
@@ -617,7 +625,8 @@ void main() {
     await tester.tap(find.text('Pause Read Aloud'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Speaking'), findsOneWidget);
     expect(find.text('Speaker Active'), findsOneWidget);
     expect(find.text('Read aloud is paused'), findsOneWidget);
@@ -633,7 +642,8 @@ void main() {
       (config) => config.targetLanguageCode == 'ja',
     );
 
-    expect(find.text('Auto-detect Spanish -> Japanese'), findsOneWidget);
+    expect(find.text('Auto-detect -> Japanese'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> Japanese'), findsNothing);
     expect(realtimeGateway.configs.last.targetLanguageCode, 'ja');
 
     await tester.tap(find.byTooltip('Open menu'));
@@ -728,7 +738,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
+    expect(find.text('Auto-detect -> English'), findsNothing);
   });
 
   testWidgets('delete updates open meeting history and clears active meeting', (
@@ -809,7 +819,49 @@ void main() {
       isTrue,
     );
     expect(find.text('Live translation meeting'), findsNothing);
-    expect(find.text('Auto-detect Spanish -> English'), findsOneWidget);
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
+  });
+
+  testWidgets('normalizes legacy auto-detect source labels in history', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final now = DateTime.utc(2026, 5, 27, 10, 42);
+    await repository.upsertMeeting(
+      StoredMeeting(
+        id: 'legacy-meeting',
+        title: 'Legacy meeting',
+        createdAt: now,
+        updatedAt: now,
+        sourceLanguageLabel: 'Auto-detect Spanish',
+        targetLanguageLabel: 'English (US)',
+        transcriptEntries: const [],
+        summaryMetadata: const StoredSummaryMetadata.empty(),
+      ),
+    );
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+      ),
+    );
+
+    await tester.tap(find.text('Open meeting history'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
+
+    await tester.tap(find.text('Legacy meeting'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
   });
 }
 

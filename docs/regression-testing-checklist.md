@@ -27,10 +27,9 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 ## Language Selection
 
-- Open the `From` language bottom sheet.
-- Select `Auto-detect`, English, Spanish, and French in separate passes and verify the route label updates immediately.
+- Verify the `From` language card is display-only `Auto-detect` and the route label does not show legacy source-language wording such as `Auto-detect Spanish`.
 - Open the `To` language bottom sheet.
-- Select English, Spanish, French, Japanese, German, Portuguese, Chinese, Korean, Arabic, and Hindi in separate passes and verify the route label updates immediately.
+- Select English, Spanish, French, Japanese, German, Portuguese, Chinese, Korean, Arabic, and Hindi in separate passes and verify the route label updates immediately as `Auto-detect -> <target>`.
 - Verify English, Spanish, and French are labeled as realtime output targets.
 - Verify Japanese and other broader app targets are visible and labeled as direct OpenAI fallback targets rather than realtime output targets.
 - While a fake realtime session is active, verify the next realtime start config uses the selected target language code.
@@ -43,8 +42,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - With `Read Aloud` off, verify translated audio chunks are not enqueued for playback.
 - Tap `Pause Read Aloud`; verify the read-aloud paused banner appears and playback is stopped/cleared.
 - Tap `Resume Read Aloud`; verify listening resumes and playback output is allowed again.
-- Tap `Switch Direction` repeatedly; verify the selected source and target swap each time, the route label updates immediately, and the next fake realtime config uses the swapped source and target codes.
-- Starting from `Auto-detect Spanish -> English`, verify the first switch becomes `English -> Spanish` and the second switch becomes `Spanish -> English`; it must not become stuck after one switch or restore `Auto-detect` as a target.
+- Tap disabled `Switch Direction`; verify the source remains `Auto-detect`, the selected target is unchanged, and the next fake realtime config still uses source code `auto`.
 - Tap queue banner `Resume` and `Skip to Live`; verify both move out of the paused read-aloud queue state.
 - Tap `Stop Listening`; verify capture/realtime/playback resources close and the setup screen returns.
 - If `Jump to Live` is visible, tap it and verify the list returns to the latest transcript entry or shows the latest-state confirmation.

@@ -76,6 +76,10 @@ class LiveTranslateApp extends StatelessWidget {
 enum _AppSurface { setup, listening, speakingPaused }
 
 String _languageLabel(LanguageSelectorData data) {
+  if (data.primaryLabel == LanguageSupport.autoDetectSource.name) {
+    return LanguageSupport.autoDetectSource.name;
+  }
+
   return '${data.primaryLabel} ${data.secondaryLabel}'.trim();
 }
 
@@ -149,6 +153,11 @@ TranscriptEntryData _transcriptEntryFromStored(StoredTranscriptEntry entry) {
 
 String _routeEndpointLabel(String label) {
   final trimmed = label.trim();
+  if (trimmed == LanguageSupport.autoDetectSource.name ||
+      trimmed.startsWith('${LanguageSupport.autoDetectSource.name} ')) {
+    return LanguageSupport.autoDetectSource.name;
+  }
+
   final qualifierIndex = trimmed.indexOf(' (');
   if (qualifierIndex > 0 && trimmed.endsWith(')')) {
     return trimmed.substring(0, qualifierIndex);
@@ -166,11 +175,12 @@ LanguageSelectorData _languageSelectorFromStoredLabel({
     return fallback;
   }
 
-  if (trimmed.startsWith('Auto-detect ')) {
+  if (trimmed == LanguageSupport.autoDetectSource.name ||
+      trimmed.startsWith('${LanguageSupport.autoDetectSource.name} ')) {
     return LanguageSelectorData(
       eyebrow: fallback.eyebrow,
-      primaryLabel: 'Auto-detect',
-      secondaryLabel: trimmed.replaceFirst('Auto-detect ', ''),
+      primaryLabel: LanguageSupport.autoDetectSource.name,
+      secondaryLabel: '',
       icon: fallback.icon,
       accent: fallback.accent,
     );
@@ -731,8 +741,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     return LanguageSelectorData(
       eyebrow: isTarget ? 'To' : 'From',
       primaryLabel: language.name,
-      secondaryLabel: language.code == 'auto'
-          ? fallback.secondaryLabel
+      secondaryLabel: language.code == LanguageSupport.autoDetectSource.code
+          ? ''
           : language.regionLabel,
       icon: fallback.icon,
       accent: fallback.accent,
@@ -2935,7 +2945,8 @@ class _MeetingRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${meeting.sourceLanguageLabel} -> ${meeting.targetLanguageLabel}',
+              '${_routeEndpointLabel(meeting.sourceLanguageLabel)} -> '
+              '${_routeEndpointLabel(meeting.targetLanguageLabel)}',
               style: AppTextStyles.compact(Theme.of(context).textTheme),
             ),
             Text(
