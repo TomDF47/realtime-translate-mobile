@@ -35,10 +35,10 @@ void main() {
 
       expect(
         tester.getSemantics(
-          find.widgetWithText(FilledButton, 'Start new meeting'),
+          find.widgetWithText(FilledButton, 'Start interpreter'),
         ),
         matchesSemantics(
-          label: 'Start new meeting',
+          label: 'Start interpreter',
           isButton: true,
           hasTapAction: true,
         ),
@@ -62,52 +62,40 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Start new meeting'));
+      await tester.tap(find.text('Start interpreter'));
       await tester.pumpAndSettle();
       final activeMeeting = (await repository.loadSnapshot()).meetings.single;
       await _appendStoredTranscriptLine(repository, activeMeeting.id);
 
       expect(find.byTooltip('Open menu'), findsOneWidget);
-      expect(find.byTooltip('Open AI chat'), findsOneWidget);
+      expect(find.byTooltip('Open AI chat'), findsNothing);
       expect(
         find.bySemanticsLabel(RegExp('From language selector')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.bySemanticsLabel(RegExp('To language selector')),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(
-        find.bySemanticsLabel(RegExp('Translate Text on')),
-        findsOneWidget,
-      );
-      expect(find.bySemanticsLabel(RegExp('Read Aloud on')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('Translate Text on')), findsNothing);
+      expect(find.bySemanticsLabel(RegExp('Read Aloud on')), findsNothing);
       expect(
         find.bySemanticsLabel(RegExp('Headphones Active active')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(find.bySemanticsLabel('Stop listening'), findsOneWidget);
-      expect(find.bySemanticsLabel('Pause read aloud'), findsOneWidget);
+      expect(find.bySemanticsLabel('Pause read aloud'), findsNothing);
       expect(
         find.bySemanticsLabel('Switch translation direction'),
-        findsWidgets,
+        findsNothing,
       );
 
-      await tester.tap(find.byTooltip('Open AI chat'));
+      await tester.tap(find.byTooltip('Open menu'));
       await tester.pumpAndSettle();
 
-      expect(find.byTooltip('Close AI chat'), findsOneWidget);
-      expect(find.byTooltip('Send AI chat prompt'), findsOneWidget);
-      await tester.enterText(find.byType(TextField).last, 'What changed?');
-      await tester.tap(find.byTooltip('Send AI chat prompt'));
-      await tester.pumpAndSettle();
-
-      expect(find.byTooltip('Helpful'), findsOneWidget);
-      expect(find.byTooltip('Not helpful'), findsOneWidget);
-      expect(
-        find.text('Responses are based on this local meeting only.'),
-        findsOneWidget,
-      );
+      expect(find.text('Meeting history'), findsOneWidget);
+      expect(find.text('Generate export'), findsNothing);
+      expect(find.text('Open generated exports'), findsNothing);
     } finally {
       semanticsHandle.dispose();
     }
@@ -133,44 +121,30 @@ void main() {
     _expectNoFlutterOverflow(tester);
 
     expect(find.text('Live Translate'), findsOneWidget);
-    await tester.ensureVisible(find.text('Start new meeting'));
-    await tester.tap(find.text('Start new meeting'));
+    await tester.ensureVisible(find.text('Start interpreter'));
+    await tester.tap(find.text('Start interpreter'));
     await tester.pumpAndSettle();
     _expectNoFlutterOverflow(tester);
 
-    expect(find.text('Auto-detect -> English'), findsOneWidget);
+    expect(find.text('Listening for languages...'), findsOneWidget);
     expect(find.text('Waiting for speech'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Open AI chat'));
-    await tester.pumpAndSettle();
-    _expectNoFlutterOverflow(tester);
-    expect(find.text('AI Chat'), findsOneWidget);
-    expect(find.text('This meeting'), findsOneWidget);
-    await tester.tap(find.byTooltip('Close AI chat'));
-    await tester.pumpAndSettle();
+    expect(find.byTooltip('Open AI chat'), findsNothing);
 
-    await tester.tap(find.text('Pause Read Aloud'));
-    await tester.pumpAndSettle();
-    _expectNoFlutterOverflow(tester);
-    expect(find.text('Auto-detect -> English'), findsOneWidget);
-    expect(find.text('Read aloud is paused'), findsOneWidget);
-    expect(find.text('Resume Read Aloud'), findsOneWidget);
+    expect(find.text('Pause Read Aloud'), findsNothing);
+    expect(find.text('Read aloud is paused'), findsNothing);
+    expect(find.text('Resume Read Aloud'), findsNothing);
 
     await tester.tap(find.byTooltip('Open menu'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Generate export'));
-    await tester.pumpAndSettle();
     _expectNoFlutterOverflow(tester);
 
-    expect(find.text('Generate export'), findsWidgets);
-    expect(find.text('Transcript'), findsOneWidget);
-    expect(find.text('Summary'), findsOneWidget);
-    expect(find.text('Both'), findsOneWidget);
-    expect(find.text('Open generated exports'), findsOneWidget);
-    expect(
-      find.textContaining('stay encrypted on this device'),
-      findsOneWidget,
-    );
+    expect(find.text('Generate export'), findsNothing);
+    expect(find.text('Transcript'), findsNothing);
+    expect(find.text('Summary'), findsNothing);
+    expect(find.text('Both'), findsNothing);
+    expect(find.text('Open generated exports'), findsNothing);
+    expect(find.textContaining('stay encrypted on this device'), findsNothing);
     expect(find.byTooltip('Add recipient'), findsNothing);
     expect(find.byType(Checkbox), findsNothing);
     expect(find.text('recipient@example.com'), findsNothing);

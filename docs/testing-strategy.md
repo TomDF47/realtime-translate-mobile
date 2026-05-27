@@ -16,6 +16,8 @@ scripts/final_qa_gate.sh
 
 Use [regression-testing-checklist.md](regression-testing-checklist.md) for the concrete manual and installed-app regression pass before publishing APKs. It covers main screen controls, language selection, toggle behavior, realtime session smoke, transcript chunking, elapsed timer behavior, generated exports, and APK release sanity.
 
+Issue #30 adds focused coverage for the revised two-party interpreter default: the start surface says `Start interpreter`, the active live screen hides source/target pickers, direction switching, the `Translate Text` toggle, live-header AI chat, live-screen export controls, and read-aloud claims, language discovery progresses through first-language waiting and pair-lock labels, delayed first-turn translation is backfilled after the second language is known, transcript rows preserve original and translated text separately with pending/delayed/final statuses, fake text interpreter turns translate A-to-B and B-to-A through a direct OpenAI gateway with `store: false`, and diagnostics remain payload-safe.
+
 Optional live OpenAI smoke, only when a credential is supplied through the process environment from an uncommitted local source:
 
 ```bash

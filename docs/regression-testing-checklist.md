@@ -17,33 +17,30 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 ## Main Screen And Navigation
 
 - Start from a clean app data state.
-- Verify the local setup screen shows `Start new meeting`, `Open meeting history`, `OpenAI setup`, and the on-device privacy note.
-- Tap `Start new meeting` without a saved credential and verify `OpenAI setup required` appears before microphone permission.
+- Verify the local setup screen shows `Start interpreter`, `Open meeting history`, `OpenAI setup`, and the on-device privacy note.
+- Tap `Start interpreter` without a saved credential and verify `OpenAI setup required` appears before microphone permission.
 - Save only a placeholder or current test credential through `OpenAI setup`; verify the saved value is not displayed.
-- Start a meeting with fake or valid local credential and granted microphone permission.
-- Verify the live screen shows the current source/target route, live status, elapsed timer, language selectors, feature toggles, transcript area, and bottom controls.
-- Open the menu and verify `Meeting history`, `Generate export`, `Open generated exports`, and `Resume read-aloud meeting` respond.
+- Start an interpreter session with fake or valid local credential and granted microphone permission.
+- Verify the live screen starts with `Listening for languages...`, live status, elapsed timer, transcript area, `Translate Text`, and `Stop Listening`.
+- Verify the active live screen does not show source picker, target picker, direction switch, read-aloud controls, speaker/headphone chips, or `Resume read-aloud meeting`.
+- Feed or fake a first detected language and verify `Heard <language>. Waiting for the other language...`.
+- Feed or fake a second distinct detected language and verify `<A> <-> <B>`.
+- Open the menu and verify `Meeting history`, `Generate export`, and `Open generated exports` respond.
 - Open AI chat from the header and close it with the close button and drag/back dismissal.
 
-## Language Selection
+## Language Discovery
 
-- Verify the `From` language card is display-only `Auto-detect` and the route label does not show legacy source-language wording such as `Auto-detect Spanish`.
-- Open the `To` language bottom sheet.
-- Select English, Spanish, French, Japanese, German, Portuguese, Chinese, Korean, Arabic, and Hindi in separate passes and verify the route label updates immediately as `Auto-detect -> <target>`.
-- Verify English, Spanish, and French are labeled as realtime output targets.
-- Verify Japanese and other broader app targets are visible and labeled as direct OpenAI fallback targets rather than realtime output targets.
-- While a fake realtime session is active, verify the next realtime start config uses the selected target language code.
+- Verify no manual language picker is available in the active interpreter flow.
+- Verify first-language detection does not translate until a second distinct language is known.
+- Verify the first turn can show a delayed translation or detected-language status without leaving a blank transcript card.
+- Verify the second distinct language locks the pair.
+- Verify later A-to-B and B-to-A fake text turns produce translated text and encrypted local transcript rows.
 
 ## Buttons And Toggles
 
 - Tap `Translate Text` off and on; verify visual state and semantics change.
 - With `Translate Text` off, verify translation transcript deltas are ignored and translated output is not stored.
-- Tap `Read Aloud` off and on; verify visual state and semantics change.
-- With `Read Aloud` off, verify translated audio chunks are not enqueued for playback.
-- Tap `Pause Read Aloud`; verify the read-aloud paused banner appears and playback is stopped/cleared.
-- Tap `Resume Read Aloud`; verify listening resumes and playback output is allowed again.
-- Tap disabled `Switch Direction`; verify the source remains `Auto-detect`, the selected target is unchanged, and the next fake realtime config still uses source code `auto`.
-- Tap queue banner `Resume` and `Skip to Live`; verify both move out of the paused read-aloud queue state.
+- Verify read-aloud, pause/resume read-aloud, speaker/headphone state, and switch-direction controls are hidden in the active interpreter flow.
 - Tap `Stop Listening`; verify capture/realtime/playback resources close and the setup screen returns.
 - If `Jump to Live` is visible, tap it and verify the list returns to the latest transcript entry or shows the latest-state confirmation.
 - In AI chat, tap prompt chips, send, helpful, not helpful, regenerate, and close; verify no control is inert.

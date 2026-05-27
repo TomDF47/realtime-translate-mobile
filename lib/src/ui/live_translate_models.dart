@@ -123,6 +123,7 @@ class TranscriptEntryData {
     required this.translatedText,
     required this.timestamp,
     required this.accent,
+    this.statusLabel,
     this.speakerLabel,
     this.playbackState = TranscriptPlaybackState.playable,
   });
@@ -132,6 +133,7 @@ class TranscriptEntryData {
   final String translatedText;
   final String timestamp;
   final LiveAccent accent;
+  final String? statusLabel;
   final String? speakerLabel;
   final TranscriptPlaybackState playbackState;
 }
@@ -187,6 +189,7 @@ class LiveSessionViewData {
     required this.bottomControls,
     this.queueBanner,
     this.isAtLiveEdge = true,
+    this.showLanguageControls = true,
     this.statusLabel,
     this.statusAccent,
   });
@@ -201,6 +204,7 @@ class LiveSessionViewData {
   final List<BottomControlActionData> bottomControls;
   final QueueBannerData? queueBanner;
   final bool isAtLiveEdge;
+  final bool showLanguageControls;
   final String? statusLabel;
   final LiveAccent? statusAccent;
 
@@ -215,6 +219,7 @@ class LiveSessionViewData {
     List<BottomControlActionData>? bottomControls,
     QueueBannerData? queueBanner,
     bool? isAtLiveEdge,
+    bool? showLanguageControls,
     String? statusLabel,
     LiveAccent? statusAccent,
   }) {
@@ -229,6 +234,7 @@ class LiveSessionViewData {
       bottomControls: bottomControls ?? this.bottomControls,
       queueBanner: queueBanner ?? this.queueBanner,
       isAtLiveEdge: isAtLiveEdge ?? this.isAtLiveEdge,
+      showLanguageControls: showLanguageControls ?? this.showLanguageControls,
       statusLabel: statusLabel ?? this.statusLabel,
       statusAccent: statusAccent ?? this.statusAccent,
     );

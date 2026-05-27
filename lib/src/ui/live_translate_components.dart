@@ -47,11 +47,11 @@ class LiveTranslateHeader extends StatelessWidget {
   const LiveTranslateHeader({
     super.key,
     required this.onOpenMenu,
-    required this.onOpenAssistant,
+    this.onOpenAssistant,
   });
 
   final VoidCallback onOpenMenu;
-  final VoidCallback onOpenAssistant;
+  final VoidCallback? onOpenAssistant;
 
   @override
   Widget build(BuildContext context) {
@@ -69,11 +69,14 @@ class LiveTranslateHeader extends StatelessWidget {
             style: AppTextStyles.title(Theme.of(context).textTheme),
           ),
         ),
-        IconButton(
-          tooltip: 'Open AI chat',
-          onPressed: onOpenAssistant,
-          icon: const Icon(Icons.chat_bubble_outline_rounded),
-        ),
+        if (onOpenAssistant == null)
+          const SizedBox(width: 48)
+        else
+          IconButton(
+            tooltip: 'Open AI chat',
+            onPressed: onOpenAssistant,
+            icon: const Icon(Icons.chat_bubble_outline_rounded),
+          ),
       ],
     );
   }
@@ -608,6 +611,15 @@ class TranscriptCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
+                      if (entry.statusLabel != null) ...[
+                        StatusPill(
+                          label: entry.statusLabel!,
+                          accent: entry.statusLabel == 'Translated'
+                              ? LiveAccent.teal
+                              : LiveAccent.amber,
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                      ],
                       if (entry.speakerLabel != null) ...[
                         Text(
                           entry.speakerLabel!,

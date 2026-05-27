@@ -34,6 +34,31 @@ Implications:
 - Logs, diagnostics, analytics, crash reports, screenshots, and tests must avoid transcript, audio, prompt, summary, recipient, and credential/session leakage.
 - Dependency/package hygiene, permission minimization, and supply-chain checks are required acceptance criteria.
 
+## 2026-05-27 - MVP Defaults To Two-Party Text-First Interpreter
+
+Status: Accepted
+
+Decision:
+
+- Redesign the active MVP live flow around a two-party interpreter rather than a user-selected source-to-target route.
+- Phase 1 is text-first: detect the first language, wait for a second distinct language, lock the pair as `<A> <-> <B>`, and translate subsequent A-to-B and B-to-A turns as text.
+- Keep startup gated by encrypted local OpenAI credential availability and microphone permission.
+- Hide source/target pickers, direction switching, read-aloud controls, and speaker/headphone chips in the active live interpreter UI until spoken audio behavior is safely supportable.
+- Hide the `Translate Text` toggle, live-header AI chat launcher, and live-screen export controls from the active live interpreter UI so secondary workflows do not compete with interpretation.
+- Preserve the phone-only direct OpenAI path, encrypted local transcript storage, privacy-safe diagnostics, and no-backend MVP boundary.
+
+Rationale:
+
+- A live interpreter should not require users to preselect direction or manually switch speakers.
+- The app should not imply fully automatic bidirectional spoken audio before real audio support is validated.
+- Text-first interpreter behavior can be tested through fakeable direct OpenAI seams with `store: false` while retaining existing realtime/audio seams for later validation.
+
+Implications:
+
+- Start surface copy uses `Start interpreter`.
+- Live status progresses through `Listening for languages...`, `Heard <language>. Waiting for the other language...`, and `<A> <-> <B>`.
+- Tests and regression checklists should verify no source picker, target picker, direction switch, `Translate Text` toggle, live-header AI chat, live-screen export controls, or read-aloud claims appear in the active interpreter flow.
+
 ## 2026-05-24 - Direct OpenAI Credential And Model Preference
 
 Status: Accepted

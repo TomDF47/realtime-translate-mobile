@@ -60,7 +60,7 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
 - Subtitle: `Live conversation translation for meetings and face-to-face moments`.
 - Teal audio wave graphic spans the middle of the screen.
 - MVP actions are stacked full-width buttons adapted from the mockup:
-  - `Start new meeting`
+  - `Start interpreter`
   - `Open meeting history`
 - If implementation requires a visible OpenAI setup/status action, keep it phone-local and avoid exposing raw credential text.
 - V2 sign-in actions may reuse the same row-button visual treatment later.
@@ -75,7 +75,7 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
 - The screen should not mention backend internals or API keys.
 - Preserve enough bottom padding for Android gesture navigation.
 
-## Screen A: Main Live Translation, Teal Listening Mode
+## Screen A: Main Live Interpreter, Teal Listening Mode
 
 ### Layout
 
@@ -83,20 +83,19 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
 - Header:
   - Hamburger menu on the left.
   - Centered title: `Live Translate`.
-  - Transcript/chat assistant icon on the right.
+  - The mockup's transcript/chat assistant icon is hidden in the active issue #30 live interpreter flow so AI chat does not compete with interpretation.
 - Session status card:
   - Waveform icon.
-  - Text: `Auto-detect -> English`.
+  - Text begins as `Listening for languages...`.
+  - First detected language text: `Heard <language>. Waiting for the other language...`.
+  - Locked pair text: `<A> <-> <B>`.
   - Status pill: `Listening`.
   - Elapsed timer: `00:05:23`.
 - Language controls:
-  - From card: display-only `Auto-detect`, waveform icon, no dropdown affordance for MVP live translation.
-  - Center switch button is disabled for MVP live translation so dedicated translation source remains auto-detect.
-  - To card: `English (US)`, speaker icon, dropdown affordance.
+  - Active issue #30 MVP has no source picker, target picker, or direction switch in the live interpreter flow.
 - Feature toggles row:
-  - `Translate Text` on.
-  - `Read Aloud` on.
-  - `Headphones Active` chip.
+  - Hide `Translate Text` from the active issue #30 live interpreter flow.
+  - Hide read-aloud, speaker, and headphone controls until spoken bidirectional audio is safely supportable.
 - Transcript list:
   - Card per utterance or translation pair.
   - Language badge: `ES` or `EN`.
@@ -112,8 +111,10 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - `Jump to Live` chip.
 - Fixed bottom control bar:
   - Large circular `Stop Listening` red button.
-  - `Pause Read Aloud` blue button.
-  - Disabled `Switch Direction` dark button for the dedicated live translation path.
+  - Do not show read-aloud or switch-direction controls in the active issue #30 interpreter flow.
+- Live menu:
+  - Keep meeting history available.
+  - Do not expose generated export controls from the active live interpreter menu.
 
 ### Required States
 
@@ -165,6 +166,8 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
 - Suggested chips populate the input or send immediately, depending on implementation scope; pick one behavior and keep it consistent.
 
 ## Screen D: Main Live Translation, Amber Speaking / Paused Read-Aloud Mode
+
+This screen remains visual reference for later safely validated audio/read-aloud work. It is not exposed as a default claim in the issue #30 text-first interpreter MVP.
 
 ### Differences From Screen A
 

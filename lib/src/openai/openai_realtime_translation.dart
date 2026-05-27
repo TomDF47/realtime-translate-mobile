@@ -507,11 +507,13 @@ class OpenAiRealtimeTranscriptDelta extends OpenAiRealtimeEvent {
     required this.kind,
     required this.delta,
     this.itemId,
+    this.languageCode,
   });
 
   final OpenAiRealtimeTranscriptKind kind;
   final String delta;
   final String? itemId;
+  final String? languageCode;
 }
 
 class OpenAiRealtimeTranscriptCompleted extends OpenAiRealtimeEvent {
@@ -520,11 +522,13 @@ class OpenAiRealtimeTranscriptCompleted extends OpenAiRealtimeEvent {
     required this.kind,
     required this.transcript,
     this.itemId,
+    this.languageCode,
   });
 
   final OpenAiRealtimeTranscriptKind kind;
   final String? transcript;
   final String? itemId;
+  final String? languageCode;
 }
 
 class OpenAiRealtimeAudioDelta extends OpenAiRealtimeEvent {
@@ -629,6 +633,7 @@ abstract final class OpenAiRealtimeEventParser {
           kind: OpenAiRealtimeTranscriptKind.source,
           delta: delta,
           itemId: _optionalItemId(event),
+          languageCode: _optionalLanguageCode(event),
         );
       }
 
@@ -638,6 +643,7 @@ abstract final class OpenAiRealtimeEventParser {
           kind: OpenAiRealtimeTranscriptKind.translation,
           delta: delta,
           itemId: _optionalItemId(event),
+          languageCode: _optionalLanguageCode(event),
         );
       }
     }
@@ -648,6 +654,7 @@ abstract final class OpenAiRealtimeEventParser {
         kind: OpenAiRealtimeTranscriptKind.source,
         transcript: _optionalTranscript(event),
         itemId: _optionalItemId(event),
+        languageCode: _optionalLanguageCode(event),
       );
     }
 
@@ -657,6 +664,7 @@ abstract final class OpenAiRealtimeEventParser {
         kind: OpenAiRealtimeTranscriptKind.translation,
         transcript: _optionalTranscript(event),
         itemId: _optionalItemId(event),
+        languageCode: _optionalLanguageCode(event),
       );
     }
 
@@ -725,6 +733,23 @@ abstract final class OpenAiRealtimeEventParser {
       final nestedItemId = item['id'];
       if (nestedItemId is String && nestedItemId.trim().isNotEmpty) {
         return nestedItemId;
+      }
+    }
+
+    return null;
+  }
+
+  static String? _optionalLanguageCode(Map<String, dynamic> event) {
+    final language = event['language'] ?? event['language_code'];
+    if (language is String && language.trim().isNotEmpty) {
+      return language.trim().toLowerCase();
+    }
+
+    final item = event['item'];
+    if (item is Map<String, dynamic>) {
+      final nestedLanguage = item['language'] ?? item['language_code'];
+      if (nestedLanguage is String && nestedLanguage.trim().isNotEmpty) {
+        return nestedLanguage.trim().toLowerCase();
       }
     }
 

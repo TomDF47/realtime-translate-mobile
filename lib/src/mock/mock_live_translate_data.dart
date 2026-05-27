@@ -5,9 +5,9 @@ import '../ui/live_translate_models.dart';
 abstract final class MockLiveTranslateData {
   static const localSetupActions = [
     LocalSetupActionData(
-      label: 'Start new meeting',
+      label: 'Start interpreter',
       icon: Icons.add_circle_outline_rounded,
-      semanticLabel: 'Start new meeting',
+      semanticLabel: 'Start interpreter',
       isPrimary: true,
     ),
     LocalSetupActionData(
@@ -29,7 +29,7 @@ abstract final class MockLiveTranslateData {
   ];
 
   static const listeningSession = LiveSessionViewData(
-    routeLabel: 'Auto-detect -> English',
+    routeLabel: 'Listening for languages...',
     elapsedLabel: '00:05:23',
     mode: LiveSessionMode.listening,
     fromLanguage: LanguageSelectorData(
@@ -74,20 +74,9 @@ abstract final class MockLiveTranslateData {
         accent: LiveAccent.red,
         semanticLabel: 'Stop listening',
       ),
-      BottomControlActionData(
-        label: 'Pause Read Aloud',
-        icon: Icons.pause_rounded,
-        accent: LiveAccent.blue,
-        semanticLabel: 'Pause read aloud',
-      ),
-      BottomControlActionData(
-        label: 'Switch Direction',
-        icon: Icons.swap_horiz_rounded,
-        accent: LiveAccent.neutral,
-        semanticLabel: 'Switch translation direction',
-      ),
     ],
     isAtLiveEdge: true,
+    showLanguageControls: false,
   );
 
   static const speakingPausedSession = LiveSessionViewData(

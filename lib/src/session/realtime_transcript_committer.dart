@@ -36,6 +36,7 @@ class LiveRealtimeTranscriptCommitter {
   bool _readyForNextReadableBlock = false;
   String? _sourceItemId;
   String? _translationItemId;
+  String? _detectedSourceLanguageCode;
 
   Future<void> commitDelta(OpenAiRealtimeTranscriptDelta event) {
     return _enqueue(() async {
@@ -43,11 +44,16 @@ class LiveRealtimeTranscriptCommitter {
         return;
       }
 
-      if (_shouldStartNewSegment(event.kind, itemId: event.itemId)) {
+      if (_shouldStartNewSegment(
+        event.kind,
+        itemId: event.itemId,
+        languageCode: event.languageCode,
+      )) {
         _resetSegment();
       }
 
       _seedEntryIdFromItemIfNew(event);
+      _recordDetectedLanguage(event);
       _appendDelta(event);
       await _upsert(status: _statusForCurrentSegment());
       if (_shouldRollReadableBlock()) {
@@ -66,11 +72,13 @@ class LiveRealtimeTranscriptCommitter {
         event.kind,
         isCompletion: true,
         itemId: event.itemId,
+        languageCode: event.languageCode,
       )) {
         _resetSegment();
       }
 
       _seedEntryIdFromItemIfNew(event);
+      _recordDetectedLanguage(event);
       _recordItemId(event.kind, event.itemId);
       if (event.transcript != null) {
         _replaceTranscript(event.kind, event.transcript!);
@@ -118,6 +126,7 @@ class LiveRealtimeTranscriptCommitter {
     _readyForNextReadableBlock = false;
     _sourceItemId = null;
     _translationItemId = null;
+    _detectedSourceLanguageCode = null;
   }
 
   void _appendDelta(OpenAiRealtimeTranscriptDelta event) {
@@ -126,6 +135,7 @@ class LiveRealtimeTranscriptCommitter {
     switch (event.kind) {
       case OpenAiRealtimeTranscriptKind.source:
         _sourceItemId ??= event.itemId;
+        _detectedSourceLanguageCode ??= event.languageCode;
         _sourceBuffer.write(event.delta);
         _sourceCompleted = false;
       case OpenAiRealtimeTranscriptKind.translation:
@@ -187,7 +197,8 @@ class LiveRealtimeTranscriptCommitter {
       entry: StoredTranscriptEntry(
         id: _entryId,
         meetingId: target.meetingId,
-        languageCode: target.targetLanguageCode.toUpperCase(),
+        languageCode: (_detectedSourceLanguageCode ?? target.targetLanguageCode)
+            .toUpperCase(),
         originalText: _sourceBuffer.toString().trim(),
         translatedText: _translationBuffer.toString().trim(),
         timestamp: _timestamp ?? updatedAt,
@@ -203,6 +214,7 @@ class LiveRealtimeTranscriptCommitter {
     OpenAiRealtimeTranscriptKind nextKind, {
     bool isCompletion = false,
     String? itemId,
+    String? languageCode,
   }) {
     if (!_hasTranscript) {
       return false;
@@ -212,6 +224,14 @@ class LiveRealtimeTranscriptCommitter {
         nextKind == OpenAiRealtimeTranscriptKind.source &&
         _sourceItemId != null &&
         _sourceItemId != itemId) {
+      return true;
+    }
+
+    if (nextKind == OpenAiRealtimeTranscriptKind.source &&
+        languageCode != null &&
+        languageCode.isNotEmpty &&
+        _detectedSourceLanguageCode != null &&
+        _detectedSourceLanguageCode != languageCode) {
       return true;
     }
 
@@ -248,6 +268,28 @@ class LiveRealtimeTranscriptCommitter {
     }
 
     _entryId = _newEntryIdForRealtimeItem(target, itemId);
+  }
+
+  void _recordDetectedLanguage(OpenAiRealtimeEvent event) {
+    final OpenAiRealtimeTranscriptKind? kind;
+    final String? languageCode;
+    switch (event) {
+      case OpenAiRealtimeTranscriptDelta():
+        kind = event.kind;
+        languageCode = event.languageCode;
+      case OpenAiRealtimeTranscriptCompleted():
+        kind = event.kind;
+        languageCode = event.languageCode;
+      default:
+        kind = null;
+        languageCode = null;
+    }
+    if (kind != OpenAiRealtimeTranscriptKind.source ||
+        languageCode == null ||
+        languageCode.isEmpty) {
+      return;
+    }
+    _detectedSourceLanguageCode ??= languageCode;
   }
 
   bool _shouldRollReadableBlock() {

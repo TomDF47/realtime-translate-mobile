@@ -146,9 +146,58 @@ TranscriptEntryData _transcriptEntryFromStored(StoredTranscriptEntry entry) {
     translatedText: entry.translatedText,
     timestamp: _timeLabel(entry.timestamp),
     accent: accent,
+    statusLabel: _transcriptStatusLabel(entry.status),
     speakerLabel: entry.speakerLabel,
     playbackState: _playbackStateFromName(entry.playbackState),
   );
+}
+
+String? _transcriptStatusLabel(String status) {
+  return switch (status) {
+    'detecting_language' => 'Detecting language',
+    'language_detected' => 'Language detected',
+    'translating_delayed' => 'Translating first turn...',
+    'delayed_translation' => 'Delayed translation',
+    'translating' || 'partial' => 'Translating...',
+    'interrupted' => 'Interrupted',
+    'final' => 'Translated',
+    _ => null,
+  };
+}
+
+String _languageNameFromCodeValue(String code) {
+  final normalized = code.trim().toLowerCase();
+  if (normalized.isEmpty || normalized == 'auto') {
+    return '';
+  }
+
+  for (final language in LanguageSupport.languages) {
+    if (language.code.toLowerCase() == normalized) {
+      return language.name;
+    }
+  }
+
+  return normalized.toUpperCase();
+}
+
+String _interpreterLabelForTranscriptEntries(
+  List<StoredTranscriptEntry> entries,
+) {
+  final detected = <String, String>{};
+  for (final entry in entries) {
+    final label = _languageNameFromCodeValue(entry.languageCode);
+    if (label.isNotEmpty) {
+      detected[entry.languageCode.toLowerCase()] = label;
+    }
+  }
+  if (detected.length >= 2) {
+    final labels = detected.values.take(2).toList(growable: false);
+    return '${labels[0]} <-> ${labels[1]}';
+  }
+  if (detected.length == 1) {
+    return 'Heard ${detected.values.single}. Waiting for the other language...';
+  }
+  return 'Listening for languages...';
 }
 
 String _routeEndpointLabel(String label) {
@@ -604,7 +653,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         id: meetingId,
         title: session.mode == LiveSessionMode.speaking
             ? 'Live read-aloud meeting'
-            : 'Live translation meeting',
+            : 'Live interpreter meeting',
         session: session,
         now: now,
       ),
@@ -693,9 +742,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       isTarget: true,
     );
     return base.copyWith(
-      routeLabel:
-          '${_routeEndpointLabel(_languageLabel(source))} -> '
-          '${_routeEndpointLabel(_languageLabel(target))}',
+      routeLabel: _interpreterRouteLabel(),
       elapsedLabel: _recordingElapsedLabel(),
       fromLanguage: source,
       toLanguage: target,
@@ -703,6 +750,13 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       bottomControls: _bottomControlsForSession(base),
       statusLabel: _liveStatusLabel(base.mode),
       statusAccent: _liveStatusAccent(base.mode),
+    );
+  }
+
+  String _interpreterRouteLabel() {
+    final activeMeeting = _activeMeeting;
+    return _interpreterLabelForTranscriptEntries(
+      activeMeeting?.transcriptEntries ?? const [],
     );
   }
 
@@ -752,21 +806,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   List<FeatureChipData> _featuresForSession(LiveSessionViewData base) {
     return [
       for (final feature in base.features)
-        if (feature.label == 'Translate Text')
-          FeatureChipData(
-            label: feature.label,
-            icon: feature.icon,
-            accent: feature.accent,
-            isEnabled: _translateTextEnabled,
-          )
-        else if (feature.label == 'Read Aloud')
-          FeatureChipData(
-            label: feature.label,
-            icon: feature.icon,
-            accent: feature.accent,
-            isEnabled: _readAloudEnabled,
-          )
-        else
+        if (feature.label != 'Translate Text' &&
+            feature.label != 'Read Aloud' &&
+            feature.label != 'Headphones Active' &&
+            feature.label != 'Speaker Active')
           feature,
     ];
   }
@@ -1009,6 +1052,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     TranslationLanguage language, {
     required bool isTarget,
   }) async {
+    if (_activeMeetingId != null) {
+      return;
+    }
+
     if (!isTarget) {
       return;
     }
@@ -1105,18 +1152,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           Navigator.of(context).pop();
           _showMeetingHistory();
         },
-        onExport: () {
-          Navigator.of(context).pop();
-          _showExportSheet();
-        },
-        onOpenGeneratedExports: () {
-          Navigator.of(context).pop();
-          _showGeneratedExportsSheet();
-        },
-        onResumeAmberMeeting: () {
-          Navigator.of(context).pop();
-          unawaited(_openSpeakingPausedAfterPermission());
-        },
       ),
     );
   }
@@ -1136,6 +1171,14 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
               onOpenAllMeetingsAssistant: () {
                 Navigator.of(context).pop();
                 _showAssistantSheet(AiChatScope.allMeetings);
+              },
+              onExport: () {
+                Navigator.of(context).pop();
+                _showExportSheet();
+              },
+              onOpenGeneratedExports: () {
+                Navigator.of(context).pop();
+                _showGeneratedExportsSheet();
               },
               onOpenMeeting: (meeting) {
                 Navigator.of(context).pop();
@@ -1538,7 +1581,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         session: _sessionForSurface(_AppSurface.listening),
         sessionState: sessionState,
         onOpenMenu: _showMeetingMenu,
-        onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
+        onOpenAssistant: null,
         onOpenSourceLanguageOptions: null,
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
@@ -1560,7 +1603,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         session: _sessionForSurface(_AppSurface.speakingPaused),
         sessionState: sessionState,
         onOpenMenu: _showMeetingMenu,
-        onOpenAssistant: () => _showAssistantSheet(AiChatScope.thisMeeting),
+        onOpenAssistant: null,
         onOpenSourceLanguageOptions: null,
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
@@ -1968,7 +2011,7 @@ class LiveSessionScreen extends StatelessWidget {
   final LiveSessionViewData session;
   final LiveSessionState sessionState;
   final VoidCallback onOpenMenu;
-  final VoidCallback onOpenAssistant;
+  final VoidCallback? onOpenAssistant;
   final VoidCallback? onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
   final VoidCallback? onDirectionSwitch;
@@ -2005,14 +2048,17 @@ class LiveSessionScreen extends StatelessWidget {
             ),
           ],
           const SizedBox(height: AppSpacing.xs),
-          _LanguageRouteRow(
-            session: session,
-            onDirectionSwitch: onDirectionSwitch,
-            onOpenSourceLanguageOptions: onOpenSourceLanguageOptions,
-            onOpenTargetLanguageOptions: onOpenTargetLanguageOptions,
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          _FeatureRow(features: session.features, onToggle: onFeatureToggle),
+          if (session.showLanguageControls) ...[
+            _LanguageRouteRow(
+              session: session,
+              onDirectionSwitch: onDirectionSwitch,
+              onOpenSourceLanguageOptions: onOpenSourceLanguageOptions,
+              onOpenTargetLanguageOptions: onOpenTargetLanguageOptions,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+          ],
+          if (session.features.isNotEmpty)
+            _FeatureRow(features: session.features, onToggle: onFeatureToggle),
           if (debugHarness != null) ...[
             const SizedBox(height: AppSpacing.xs),
             debugHarness!,
@@ -2810,17 +2856,9 @@ class _ChatBubble extends StatelessWidget {
 }
 
 class _MeetingMenuSheet extends StatelessWidget {
-  const _MeetingMenuSheet({
-    required this.onOpenHistory,
-    required this.onExport,
-    required this.onOpenGeneratedExports,
-    required this.onResumeAmberMeeting,
-  });
+  const _MeetingMenuSheet({required this.onOpenHistory});
 
   final VoidCallback onOpenHistory;
-  final VoidCallback onExport;
-  final VoidCallback onOpenGeneratedExports;
-  final VoidCallback onResumeAmberMeeting;
 
   @override
   Widget build(BuildContext context) {
@@ -2834,21 +2872,6 @@ class _MeetingMenuSheet extends StatelessWidget {
             label: 'Meeting history',
             onTap: onOpenHistory,
           ),
-          _SheetAction(
-            icon: Icons.ios_share_rounded,
-            label: 'Generate export',
-            onTap: onExport,
-          ),
-          _SheetAction(
-            icon: Icons.folder_copy_outlined,
-            label: 'Open generated exports',
-            onTap: onOpenGeneratedExports,
-          ),
-          _SheetAction(
-            icon: Icons.play_circle_outline_rounded,
-            label: 'Resume read-aloud meeting',
-            onTap: onResumeAmberMeeting,
-          ),
         ],
       ),
     );
@@ -2859,6 +2882,8 @@ class _MeetingHistorySheet extends StatelessWidget {
   const _MeetingHistorySheet({
     required this.meetings,
     required this.onOpenAllMeetingsAssistant,
+    required this.onExport,
+    required this.onOpenGeneratedExports,
     required this.onOpenMeeting,
     required this.onDeleteMeeting,
     this.statusLabel,
@@ -2867,6 +2892,8 @@ class _MeetingHistorySheet extends StatelessWidget {
   final List<StoredMeeting> meetings;
   final String? statusLabel;
   final VoidCallback onOpenAllMeetingsAssistant;
+  final VoidCallback onExport;
+  final VoidCallback onOpenGeneratedExports;
   final ValueChanged<StoredMeeting> onOpenMeeting;
   final Future<void> Function(StoredMeeting meeting) onDeleteMeeting;
 
@@ -2887,6 +2914,16 @@ class _MeetingHistorySheet extends StatelessWidget {
             icon: Icons.auto_awesome_rounded,
             label: 'Ask across meetings',
             onTap: onOpenAllMeetingsAssistant,
+          ),
+          _SheetAction(
+            icon: Icons.ios_share_rounded,
+            label: 'Generate export',
+            onTap: onExport,
+          ),
+          _SheetAction(
+            icon: Icons.folder_copy_outlined,
+            label: 'Open generated exports',
+            onTap: onOpenGeneratedExports,
           ),
           if (statusLabel != null) ...[
             const SizedBox(height: AppSpacing.xs),
@@ -2945,8 +2982,7 @@ class _MeetingRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${_routeEndpointLabel(meeting.sourceLanguageLabel)} -> '
-              '${_routeEndpointLabel(meeting.targetLanguageLabel)}',
+              _interpreterLabelForTranscriptEntries(meeting.transcriptEntries),
               style: AppTextStyles.compact(Theme.of(context).textTheme),
             ),
             Text(
