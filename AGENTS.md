@@ -17,6 +17,12 @@ This repo is a planning and implementation workspace for an Android-first Flutte
 4. For any UI, Flutter, design-system, accessibility, or interaction work, read [docs/mockup-ux-spec.md](docs/mockup-ux-spec.md) and inspect every file in [assets/mockups](assets/mockups).
 5. Check the relevant GitHub issues and keep implementation aligned to issue scope and acceptance criteria.
 
+## Reusable Skill Library Gate
+
+Before conducting any non-trivial task, consult `/home/tom/Projects/openclaw-shared-skills/skills` and read the relevant shared `SKILL.md` files. Apply those reusable skills together with this repo contract, the canonical build spec, and the active GitHub issue. For typical implementation work, consider `engineering/planning-and-delivery`, `engineering/development-quality-standards`, `engineering/git-github-workflow`, `engineering/testing-and-verification`, and `engineering/documentation-and-handover`.
+
+If a shared skill conflicts with this repo's source-of-truth docs or Tom's latest instruction, follow the latest repo/Tom instruction and call out the conflict in handoff.
+
 Do not start implementation, refactors, or repo-contract edits until the relevant pre-read is complete.
 
 ## Operating Workflow
