@@ -468,7 +468,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _realtimeCoordinator.handleAppLifecycleState(state);
-    if (_sessionController.state.phase == LiveSessionPhase.readAloudPaused ||
+    if (_sessionController.state.phase == LiveSessionPhase.listeningPaused) {
+      setState(() => _surface = _AppSurface.listening);
+    } else if (_sessionController.state.phase ==
+            LiveSessionPhase.readAloudPaused ||
         _sessionController.state.phase == LiveSessionPhase.reconnecting) {
       setState(() => _surface = _AppSurface.speakingPaused);
     }
@@ -750,10 +753,17 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       bottomControls: _bottomControlsForSession(base),
       statusLabel: _liveStatusLabel(base.mode),
       statusAccent: _liveStatusAccent(base.mode),
+      showLanguageControls: false,
     );
   }
 
   String _interpreterRouteLabel() {
+    if (_sessionController.state.phase == LiveSessionPhase.connecting) {
+      return 'Preparing live interpretation on this phone...';
+    }
+    if (_sessionController.state.phase == LiveSessionPhase.listeningPaused) {
+      return 'Listening paused';
+    }
     final activeMeeting = _activeMeeting;
     return _interpreterLabelForTranscriptEntries(
       activeMeeting?.transcriptEntries ?? const [],
@@ -764,6 +774,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     return switch (_sessionController.state.phase) {
       LiveSessionPhase.requestingMicrophonePermission => 'Mic permission',
       LiveSessionPhase.connecting => 'Connecting',
+      LiveSessionPhase.listeningPaused => 'Paused',
       LiveSessionPhase.reconnecting => 'Reconnecting',
       LiveSessionPhase.offline => 'Offline',
       LiveSessionPhase.error => 'Needs attention',
@@ -779,6 +790,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       LiveSessionPhase.requestingMicrophonePermission ||
       LiveSessionPhase.connecting ||
       LiveSessionPhase.reconnecting => LiveAccent.amber,
+      LiveSessionPhase.listeningPaused => LiveAccent.amber,
       LiveSessionPhase.offline || LiveSessionPhase.error => LiveAccent.red,
       LiveSessionPhase.listening => LiveAccent.teal,
       LiveSessionPhase.speaking ||
@@ -818,7 +830,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     LiveSessionViewData base,
   ) {
     return [
-      for (final control in base.bottomControls)
+      for (final control in _activeListeningControls(base.bottomControls))
         if (control.label == 'Pause Read Aloud' && !_readAloudEnabled)
           const BottomControlActionData(
             label: 'Resume Read Aloud',
@@ -837,6 +849,31 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           )
         else
           control,
+    ];
+  }
+
+  List<BottomControlActionData> _activeListeningControls(
+    List<BottomControlActionData> controls,
+  ) {
+    final stopControl = controls.firstWhere(
+      (control) => control.label == 'Stop Listening',
+      orElse: () => const BottomControlActionData(
+        label: 'Stop Listening',
+        icon: Icons.stop_rounded,
+        accent: LiveAccent.red,
+        semanticLabel: 'Stop listening',
+      ),
+    );
+    final isPaused =
+        _sessionController.state.phase == LiveSessionPhase.listeningPaused;
+    return [
+      stopControl,
+      BottomControlActionData(
+        label: isPaused ? 'Resume Listening' : 'Pause Listening',
+        icon: isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+        accent: isPaused ? LiveAccent.teal : LiveAccent.amber,
+        semanticLabel: isPaused ? 'Resume listening' : 'Pause listening',
+      ),
     ];
   }
 
@@ -993,6 +1030,16 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return;
     }
 
+    if (action.label == 'Pause Listening') {
+      unawaited(_pauseLiveListening());
+      return;
+    }
+
+    if (action.label == 'Resume Listening') {
+      unawaited(_resumeLiveListening());
+      return;
+    }
+
     if (action.label == 'Switch Direction') {
       return;
     }
@@ -1005,6 +1052,26 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     if (action.label == 'Resume Read Aloud') {
       _setReadAloudEnabled(true);
       _openListening();
+    }
+  }
+
+  Future<void> _pauseLiveListening() async {
+    await _realtimeCoordinator.pauseListening();
+    if (!mounted) {
+      return;
+    }
+    setState(() => _surface = _AppSurface.listening);
+  }
+
+  Future<void> _resumeLiveListening() async {
+    final result = await _realtimeCoordinator.resumeListening();
+    if (!mounted) {
+      return;
+    }
+    if (result == LiveRealtimeStartResult.started) {
+      setState(() => _surface = _AppSurface.listening);
+    } else {
+      setState(() {});
     }
   }
 
@@ -2039,6 +2106,10 @@ class LiveSessionScreen extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           SessionStatusCard(session: session),
+          if (_LiveStateNoticeBanner.shouldShow(sessionState)) ...[
+            const SizedBox(height: AppSpacing.xs),
+            _LiveStateNoticeBanner(state: sessionState),
+          ],
           if (_RealtimeRecoveryBanner.shouldShow(sessionState)) ...[
             const SizedBox(height: AppSpacing.xs),
             _RealtimeRecoveryBanner(
@@ -2091,6 +2162,77 @@ class LiveSessionScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LiveStateNoticeBanner extends StatelessWidget {
+  const _LiveStateNoticeBanner({required this.state});
+
+  final LiveSessionState state;
+
+  static bool shouldShow(LiveSessionState state) {
+    return switch (state.phase) {
+      LiveSessionPhase.connecting || LiveSessionPhase.listeningPaused => true,
+      _ => false,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final isConnecting = state.phase == LiveSessionPhase.connecting;
+    final accent = isConnecting ? LiveAccent.teal : LiveAccent.amber;
+    final accentColor = AppColors.forAccent(accent);
+    final title = isConnecting ? 'Connecting to OpenAI' : 'Listening paused';
+    final body = isConnecting
+        ? 'Preparing live interpretation on this phone. Recording starts after the secure realtime session is ready.'
+        : 'Microphone capture, realtime streaming, and translated audio are stopped. Transcript history stays on this device.';
+
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: title,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: accentColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: accentColor.withValues(alpha: 0.72)),
+        ),
+        child: Row(
+          children: [
+            if (isConnecting)
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: accentColor,
+                ),
+              )
+            else
+              Icon(Icons.pause_circle_outline_rounded, color: accentColor),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTextStyles.label(
+                      textTheme,
+                    ).copyWith(color: accentColor),
+                  ),
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(body, style: AppTextStyles.compact(textTheme)),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

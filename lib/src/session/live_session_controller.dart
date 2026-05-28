@@ -9,6 +9,7 @@ enum LiveSessionPhase {
   requestingMicrophonePermission,
   connecting,
   listening,
+  listeningPaused,
   speaking,
   readAloudPaused,
   reconnecting,
@@ -252,6 +253,28 @@ class LiveSessionController extends ChangeNotifier {
     );
   }
 
+  void pauseListening() {
+    if (!_state.microphonePermission.isGranted) {
+      return;
+    }
+
+    _pausedByLifecycle = false;
+    _setState(
+      _state.copyWith(
+        phase: LiveSessionPhase.listeningPaused,
+        isMicrophoneCaptureOpen: false,
+        isRealtimeSessionOpen: false,
+        isPlaybackQueueOpen: false,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
+        notice:
+            'Listening is paused. Microphone capture and OpenAI realtime are stopped until you resume.',
+      ),
+    );
+  }
+
   void markRealtimeStarted() {
     if (!_state.microphonePermission.isGranted) {
       return;
@@ -299,7 +322,7 @@ class LiveSessionController extends ChangeNotifier {
           _pausedByLifecycle = true;
           _setState(
             _state.copyWith(
-              phase: LiveSessionPhase.readAloudPaused,
+              phase: LiveSessionPhase.listeningPaused,
               isMicrophoneCaptureOpen: false,
               isRealtimeSessionOpen: false,
               isPlaybackQueueOpen: false,
@@ -314,7 +337,7 @@ class LiveSessionController extends ChangeNotifier {
         }
       case AppLifecycleState.resumed:
         if (_pausedByLifecycle &&
-            _state.phase == LiveSessionPhase.readAloudPaused) {
+            _state.phase == LiveSessionPhase.listeningPaused) {
           _pausedByLifecycle = false;
           _setState(
             _state.copyWith(

@@ -740,20 +740,47 @@ abstract final class OpenAiRealtimeEventParser {
   }
 
   static String? _optionalLanguageCode(Map<String, dynamic> event) {
-    final language = event['language'] ?? event['language_code'];
+    final language =
+        event['language'] ??
+        event['language_code'] ??
+        event['languageCode'] ??
+        _nestedString(event, const ['transcript', 'language']) ??
+        _nestedString(event, const ['transcript', 'language_code']) ??
+        _nestedString(event, const ['audio', 'language']) ??
+        _nestedString(event, const ['audio', 'input', 'language']) ??
+        _nestedString(event, const ['input_audio_transcription', 'language']) ??
+        _nestedString(event, const ['metadata', 'language']) ??
+        _nestedString(event, const ['metadata', 'language_code']);
     if (language is String && language.trim().isNotEmpty) {
       return language.trim().toLowerCase();
     }
 
     final item = event['item'];
     if (item is Map<String, dynamic>) {
-      final nestedLanguage = item['language'] ?? item['language_code'];
+      final nestedLanguage =
+          item['language'] ??
+          item['language_code'] ??
+          item['languageCode'] ??
+          _nestedString(item, const ['content', 'language']) ??
+          _nestedString(item, const ['metadata', 'language']) ??
+          _nestedString(item, const ['metadata', 'language_code']);
       if (nestedLanguage is String && nestedLanguage.trim().isNotEmpty) {
         return nestedLanguage.trim().toLowerCase();
       }
     }
 
     return null;
+  }
+
+  static String? _nestedString(Map<String, dynamic> source, List<String> path) {
+    Object? current = source;
+    for (final segment in path) {
+      if (current is! Map<String, dynamic>) {
+        return null;
+      }
+      current = current[segment];
+    }
+    return current is String && current.trim().isNotEmpty ? current : null;
   }
 }
 

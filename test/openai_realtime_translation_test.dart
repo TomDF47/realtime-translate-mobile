@@ -174,6 +174,20 @@ void main() {
     expect(parsedInputSegment.itemId, 'input-item-2');
     expect(parsedInputSegment.delta, 'live source segment');
 
+    final nestedLanguage = OpenAiRealtimeEventParser.parse({
+      'type': 'conversation.item.input_audio_transcription.completed',
+      'item': {
+        'id': 'input-item-it',
+        'metadata': {'language': 'it'},
+      },
+      'transcript': 'Ciao, grazie.',
+    });
+    expect(nestedLanguage, isA<OpenAiRealtimeTranscriptCompleted>());
+    final parsedNestedLanguage =
+        nestedLanguage! as OpenAiRealtimeTranscriptCompleted;
+    expect(parsedNestedLanguage.itemId, 'input-item-it');
+    expect(parsedNestedLanguage.languageCode, 'it');
+
     expect(
       OpenAiRealtimeEventParser.parse({'type': 'session.updated'}),
       isA<OpenAiRealtimeSessionLifecycleEvent>(),

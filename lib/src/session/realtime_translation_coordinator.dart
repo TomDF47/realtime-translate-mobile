@@ -45,7 +45,7 @@ class LiveRealtimeTranslationCoordinator {
     TranslatedAudioPlaybackGateway? playbackGateway,
     this.reconnectPolicy = const OpenAiRealtimeReconnectPolicy(),
     this.reconnectDelay,
-    this.connectionTimeout = const Duration(seconds: 12),
+    this.connectionTimeout = const Duration(seconds: 20),
     this.diagnostics = const PrivacySafeDiagnostics(),
     this.onTranscriptCommitted,
   }) : playbackGateway =
@@ -190,6 +190,24 @@ class LiveRealtimeTranslationCoordinator {
     _activeTranscriptCommitTarget = null;
     await _closeRealtimeResources(graceful: true, finishTranscript: true);
     sessionController.stopMeeting();
+  }
+
+  Future<void> pauseListening() async {
+    _cancelPendingReconnect();
+    await _closeRealtimeResources(graceful: true, finishTranscript: true);
+    sessionController.pauseListening();
+  }
+
+  Future<LiveRealtimeStartResult> resumeListening() async {
+    final config = _activeConfig;
+    if (config == null) {
+      return LiveRealtimeStartResult.failed;
+    }
+
+    return start(
+      config: config,
+      transcriptCommitTarget: _activeTranscriptCommitTarget,
+    );
   }
 
   Future<void> discardActiveSession() async {

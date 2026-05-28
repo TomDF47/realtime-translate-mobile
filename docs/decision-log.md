@@ -59,6 +59,29 @@ Implications:
 - Live status progresses through `Listening for languages...`, `Heard <language>. Waiting for the other language...`, and `<A> <-> <B>`.
 - Tests and regression checklists should verify no source picker, target picker, direction switch, `Translate Text` toggle, live-header AI chat, live-screen export controls, or read-aloud claims appear in the active interpreter flow.
 
+## 2026-05-28 - Live Listening Pause Is Privacy-First
+
+Status: Accepted
+
+Decision:
+
+- Add a `listeningPaused` state separate from `readAloudPaused`.
+- `Pause Listening` stops microphone capture, the direct OpenAI realtime session, and translated-audio playback.
+- Pausing preserves the active encrypted local meeting, transcript rows, detected language state, and resume target.
+- `Resume Listening` reconnects with the active realtime config and transcript commit target.
+- Startup must show a clear `Connecting to OpenAI` indicator before microphone capture starts.
+
+Rationale:
+
+- Users need a direct way to stop live capture without ending or deleting the meeting.
+- Reusing read-aloud pause would imply only speaker output is paused while capture may continue, which is wrong for the privacy expectation.
+- Slow realtime startup must not look like active recording before the phone has connected to OpenAI.
+
+Implications:
+
+- Tests should cover pause/resume resource teardown, transcript preservation, accessible pause/resume controls, and no regression of the simplified issue #30 interpreter UI.
+- Paused listening must not add a backend, token broker, cloud sync, live smoke requirement, or logging of transcript/audio/credential material.
+
 ## 2026-05-24 - Direct OpenAI Credential And Model Preference
 
 Status: Accepted

@@ -44,17 +44,20 @@ class LiveRealtimeTranscriptCommitter {
         return;
       }
 
+      final nextLanguageCode = event.kind == OpenAiRealtimeTranscriptKind.source
+          ? event.languageCode ?? _detectLanguageCode(event.delta)
+          : event.languageCode;
       if (_shouldStartNewSegment(
         event.kind,
         itemId: event.itemId,
-        languageCode: event.languageCode,
+        languageCode: nextLanguageCode,
       )) {
         _resetSegment();
       }
 
       _seedEntryIdFromItemIfNew(event);
-      _recordDetectedLanguage(event);
       _appendDelta(event);
+      _recordDetectedLanguage(event);
       await _upsert(status: _statusForCurrentSegment());
       if (_shouldRollReadableBlock()) {
         _readyForNextReadableBlock = true;
@@ -68,21 +71,27 @@ class LiveRealtimeTranscriptCommitter {
         return Future<void>.value();
       }
 
+      final nextLanguageCode = event.kind == OpenAiRealtimeTranscriptKind.source
+          ? event.languageCode ??
+                (event.transcript == null
+                    ? null
+                    : _detectLanguageCode(event.transcript!))
+          : event.languageCode;
       if (_shouldStartNewSegment(
         event.kind,
         isCompletion: true,
         itemId: event.itemId,
-        languageCode: event.languageCode,
+        languageCode: nextLanguageCode,
       )) {
         _resetSegment();
       }
 
       _seedEntryIdFromItemIfNew(event);
-      _recordDetectedLanguage(event);
       _recordItemId(event.kind, event.itemId);
       if (event.transcript != null) {
         _replaceTranscript(event.kind, event.transcript!);
       }
+      _recordDetectedLanguage(event);
       _markCompleted(event.kind);
 
       if (_translationCompleted && _hasSourceText) {
@@ -100,6 +109,10 @@ class LiveRealtimeTranscriptCommitter {
     return _enqueue(() {
       if (!_hasTranscript || _isFinal) {
         return Future<void>.value();
+      }
+
+      if (!_hasSourceText) {
+        return _upsert(status: interrupted ? 'interrupted' : 'partial');
       }
 
       _isFinal = true;
@@ -284,12 +297,16 @@ class LiveRealtimeTranscriptCommitter {
         kind = null;
         languageCode = null;
     }
-    if (kind != OpenAiRealtimeTranscriptKind.source ||
-        languageCode == null ||
-        languageCode.isEmpty) {
+    if (kind != OpenAiRealtimeTranscriptKind.source) {
       return;
     }
-    _detectedSourceLanguageCode ??= languageCode;
+
+    final resolvedLanguageCode =
+        languageCode ?? _detectLanguageCode(_sourceBuffer.toString());
+    if (resolvedLanguageCode == null || resolvedLanguageCode.isEmpty) {
+      return;
+    }
+    _detectedSourceLanguageCode ??= resolvedLanguageCode;
   }
 
   bool _shouldRollReadableBlock() {
@@ -309,7 +326,9 @@ class LiveRealtimeTranscriptCommitter {
   }
 
   String _statusForCurrentSegment() {
-    return _isFinal || _translationCompleted ? 'final' : 'partial';
+    return _isFinal || (_translationCompleted && _hasSourceText)
+        ? 'final'
+        : 'partial';
   }
 
   bool get _hasSourceText => _sourceBuffer.toString().trim().isNotEmpty;
@@ -348,6 +367,99 @@ class LiveRealtimeTranscriptCommitter {
 }
 
 const _readableBlockCharacterThreshold = 180;
+
+String? _detectLanguageCode(String text) {
+  final normalized = text.toLowerCase();
+  if (normalized.trim().isEmpty) {
+    return null;
+  }
+
+  final scores = <String, int>{
+    'en': _languageScore(normalized, const [
+      'the',
+      'and',
+      'you',
+      'what',
+      'going',
+      'hello',
+      'thank',
+      'thanks',
+      'meeting',
+      'timeline',
+      'please',
+    ]),
+    'it': _languageScore(normalized, const [
+      'ciao',
+      'grazie',
+      'buongiorno',
+      'buonasera',
+      'allora',
+      'cosa',
+      'perche',
+      'perchè',
+      'sono',
+      'siamo',
+      'questo',
+      'questa',
+      'quello',
+      'quella',
+      'parlo',
+      'italiano',
+    ]),
+    'es': _languageScore(normalized, const [
+      'hola',
+      'gracias',
+      'buenos',
+      'dias',
+      'estas',
+      'esta',
+      'que',
+      'por',
+      'favor',
+      'hablo',
+      'espanol',
+      'español',
+    ]),
+    'fr': _languageScore(normalized, const [
+      'bonjour',
+      'merci',
+      'salut',
+      'avec',
+      'pourquoi',
+      'parle',
+      'francais',
+      'français',
+      'nous',
+      'vous',
+      'etre',
+      'être',
+    ]),
+  };
+
+  var bestCode = '';
+  var bestScore = 0;
+  for (final entry in scores.entries) {
+    if (entry.value > bestScore) {
+      bestCode = entry.key;
+      bestScore = entry.value;
+    }
+  }
+
+  return bestScore <= 0 ? null : bestCode;
+}
+
+int _languageScore(String text, List<String> markers) {
+  var score = 0;
+  for (final marker in markers) {
+    if (RegExp(
+      '(^|[^a-zà-ÿ])${RegExp.escape(marker)}([^a-zà-ÿ]|\$)',
+      unicode: true,
+    ).hasMatch(text)) {
+      score += 1;
+    }
+  }
+  return score;
+}
 
 bool _endsAtSentenceBoundary(String text) {
   if (text.isEmpty) {

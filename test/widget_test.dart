@@ -111,6 +111,8 @@ void main() {
     expect(find.text('Listening for languages...'), findsOneWidget);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Listening'), findsOneWidget);
+    expect(find.text('Pause Listening'), findsOneWidget);
+    expect(find.bySemanticsLabel('Pause listening'), findsOneWidget);
     expect(find.text('Translate Text'), findsNothing);
     expect(find.text('Waiting for speech'), findsOneWidget);
     expect(
@@ -174,6 +176,7 @@ void main() {
     expect(find.text('Switch'), findsNothing);
     expect(find.text('Read Aloud'), findsNothing);
     expect(find.text('Pause Read Aloud'), findsNothing);
+    expect(find.text('Pause Listening'), findsOneWidget);
     expect(find.bySemanticsLabel('Translate Text on'), findsNothing);
     expect(realtimeGateway.configs.length, initialRealtimeConfigCount);
   });
@@ -201,12 +204,63 @@ void main() {
     expect(find.text('Listening for languages...'), findsOneWidget);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Connecting'), findsOneWidget);
+    expect(find.text('Connecting to OpenAI'), findsOneWidget);
+    expect(
+      find.text(
+        'Preparing live interpretation on this phone. Recording starts after the secure realtime session is ready.',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Start interpreter'), findsNothing);
 
     realtimeGateway.completeConnect();
     await tester.pumpAndSettle();
 
     expect(find.text('Listening'), findsOneWidget);
+  });
+
+  testWidgets('pause and resume listening controls keep meeting transcript', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+      ),
+    );
+
+    await tester.tap(find.text('Start interpreter'));
+    await tester.pumpAndSettle();
+    final meetingId = (await repository.loadSnapshot()).meetings.single.id;
+    await _appendStoredTranscriptLine(repository, meetingId);
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.bySemanticsLabel('Pause listening'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Listening paused'), findsWidgets);
+    expect(find.text('Resume Listening'), findsOneWidget);
+    expect(find.bySemanticsLabel('Resume listening'), findsOneWidget);
+    expect(
+      find.text('They agreed to meet on Tuesday at 10 AM.'),
+      findsOneWidget,
+    );
+    expect(realtimeGateway.sessions.first.closeGracefullyCount, 1);
+
+    await tester.tap(find.bySemanticsLabel('Resume listening'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pause Listening'), findsOneWidget);
+    expect(find.text('Resume Listening'), findsNothing);
+    expect(realtimeGateway.sessions, hasLength(2));
+    expect((await repository.loadSnapshot()).meetings.single.id, meetingId);
   });
 
   testWidgets('keeps startup failure on live surface with recovery banner', (

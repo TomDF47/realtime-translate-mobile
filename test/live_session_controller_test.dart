@@ -81,7 +81,7 @@ void main() {
     expect(controller.state.isPlaybackQueueOpen, isFalse);
   });
 
-  test('background lifecycle pauses all live resources', () async {
+  test('background lifecycle pauses listening resources', () async {
     final controller = LiveSessionController(
       permissionGateway: _FixedPermissionGateway(
         MicrophonePermissionStatus.granted,
@@ -92,11 +92,37 @@ void main() {
     controller.markRealtimeStarted();
     controller.handleAppLifecycleState(AppLifecycleState.paused);
 
-    expect(controller.state.phase, LiveSessionPhase.readAloudPaused);
+    expect(controller.state.phase, LiveSessionPhase.listeningPaused);
     expect(controller.state.isMicrophoneCaptureOpen, isFalse);
     expect(controller.state.isRealtimeSessionOpen, isFalse);
     expect(controller.state.isPlaybackQueueOpen, isFalse);
   });
+
+  test(
+    'manual listening pause keeps transcript state but closes resources',
+    () async {
+      final controller = LiveSessionController(
+        permissionGateway: _FixedPermissionGateway(
+          MicrophonePermissionStatus.granted,
+        ),
+      );
+
+      await controller.startMeeting();
+      controller.markRealtimeStarted();
+      controller.pauseListening();
+
+      expect(controller.state.phase, LiveSessionPhase.listeningPaused);
+      expect(controller.state.isMicrophoneCaptureOpen, isFalse);
+      expect(controller.state.isRealtimeSessionOpen, isFalse);
+      expect(controller.state.isPlaybackQueueOpen, isFalse);
+
+      controller.resumeListening();
+
+      expect(controller.state.phase, LiveSessionPhase.listening);
+      expect(controller.state.isMicrophoneCaptureOpen, isTrue);
+      expect(controller.state.isRealtimeSessionOpen, isTrue);
+    },
+  );
 
   test('manual read-aloud pause is not converted into reconnecting', () async {
     final controller = LiveSessionController(

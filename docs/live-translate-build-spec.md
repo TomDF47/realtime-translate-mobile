@@ -70,6 +70,7 @@ Supplied mockups:
   - `meetingSelection`
   - `connecting`
   - `listening`
+  - `listeningPaused`
   - `speaking`
   - `readAloudPaused`
   - `reconnecting`
@@ -127,6 +128,8 @@ The MVP must not include an app backend.
 - Store credential/session material only in encrypted local storage, redact it from logs/screenshots/test output, and provide a clear removal/reset path.
 
 Current implementation note: issue #30 changed the default MVP surface from route translation to a two-party live interpreter. The Flutter app now opens with `Start interpreter`, keeps the credential and microphone gates, shows `Listening for languages...`, then derives `Heard <language>. Waiting for the other language...` and `<A> <-> <B>` labels from detected transcript language codes. The active live UI hides source/target pickers, direction switching, the `Translate Text` toggle, live-header AI chat, live-screen export controls, read-aloud controls, and speaker/headphone chips so it does not claim fully automatic bidirectional spoken audio or make secondary workflows compete with interpretation. A fakeable direct OpenAI text interpreter gateway exists for Phase 1 text turns and builds Responses requests with `store: false`; tests cover first-language discovery, delayed first-turn backfill after the second language is discovered, pair lock, and A-to-B/B-to-A fake translation. Existing realtime, microphone, playback, encrypted storage, AI chat, generated export, and privacy-safe diagnostics seams remain in place for follow-up validation outside the active live interpreter loop, with credential material still confined to encrypted local storage and OpenAI Authorization headers.
+
+Current implementation note: issue #31 adds a live listening pause separate from read-aloud pause. Pausing listening stops microphone capture, the realtime session, and translated-audio playback while preserving the active encrypted local meeting and transcript state; resuming reconnects with the active realtime config and transcript commit target. The live interpreter now shows a clear `Connecting to OpenAI` startup indicator before capture starts, parses common nested realtime language metadata, falls back to deterministic local English/Italian/Spanish/French source-language detection when realtime language metadata is missing, stores the resolved source language on transcript entries, and rolls transcript blocks on source item/language changes or a new source after a completed source+translation pair.
 
 ## Language Support And Fallback
 
