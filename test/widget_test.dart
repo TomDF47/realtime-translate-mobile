@@ -201,7 +201,11 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Listening for languages...'), findsOneWidget);
+    expect(
+      find.text('Preparing live interpretation on this phone...'),
+      findsOneWidget,
+    );
+    expect(find.text('Listening for languages...'), findsNothing);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Connecting'), findsOneWidget);
     expect(find.text('Connecting to OpenAI'), findsOneWidget);
@@ -239,10 +243,12 @@ void main() {
     await tester.pumpAndSettle();
     final meetingId = (await repository.loadSnapshot()).meetings.single.id;
     await _appendStoredTranscriptLine(repository, meetingId);
+    realtimeGateway.sessions.first.delayGracefulClose();
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pumpAndSettle();
 
     await tester.tap(find.bySemanticsLabel('Pause listening'));
+    await tester.pump();
     await tester.pumpAndSettle();
 
     expect(find.text('Listening paused'), findsWidgets);
@@ -253,6 +259,9 @@ void main() {
       findsOneWidget,
     );
     expect(realtimeGateway.sessions.first.closeGracefullyCount, 1);
+
+    realtimeGateway.sessions.first.completeGracefulClose();
+    await tester.pumpAndSettle();
 
     await tester.tap(find.bySemanticsLabel('Resume listening'));
     await tester.pumpAndSettle();
@@ -935,6 +944,7 @@ class _ThrowingRealtimeTranslationGateway
 
 class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   final _events = StreamController<OpenAiRealtimeEvent>.broadcast(sync: true);
+  Completer<void>? _gracefulCloseCompleter;
   int closeGracefullyCount = 0;
   int closeImmediatelyCount = 0;
 
@@ -957,6 +967,7 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   @override
   Future<void> closeGracefully() async {
     closeGracefullyCount += 1;
+    await _gracefulCloseCompleter?.future;
     unawaited(_events.close());
   }
 
@@ -968,6 +979,18 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
 
   @override
   void sendSessionUpdate() {}
+
+  void delayGracefulClose() {
+    _gracefulCloseCompleter = Completer<void>();
+  }
+
+  void completeGracefulClose() {
+    final completer = _gracefulCloseCompleter;
+    _gracefulCloseCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+  }
 }
 
 class _FakeAiChatGateway implements AiChatGateway {

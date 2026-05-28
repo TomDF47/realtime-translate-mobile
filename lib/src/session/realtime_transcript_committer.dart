@@ -438,15 +438,23 @@ String? _detectLanguageCode(String text) {
 
   var bestCode = '';
   var bestScore = 0;
+  var tiedBestScore = false;
   for (final entry in scores.entries) {
     if (entry.value > bestScore) {
       bestCode = entry.key;
       bestScore = entry.value;
+      tiedBestScore = false;
+    } else if (entry.value == bestScore && entry.value > 0) {
+      tiedBestScore = true;
     }
   }
 
-  return bestScore <= 0 ? null : bestCode;
+  return bestScore < _minimumLocalLanguageScore || tiedBestScore
+      ? null
+      : bestCode;
 }
+
+const _minimumLocalLanguageScore = 2;
 
 int _languageScore(String text, List<String> markers) {
   var score = 0;

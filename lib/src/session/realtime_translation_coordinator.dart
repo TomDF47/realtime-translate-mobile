@@ -74,6 +74,7 @@ class LiveRealtimeTranslationCoordinator {
   bool _isDisposed = false;
   bool _translationOutputEnabled = true;
   bool _readAloudOutputEnabled = true;
+  int _startGeneration = 0;
   int _reconnectGeneration = 0;
   Timer? _pendingReconnectTimer;
   Completer<void>? _pendingReconnectDelay;
@@ -87,18 +88,28 @@ class LiveRealtimeTranslationCoordinator {
     LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
   }) async {
     _isDisposed = false;
+    final startGeneration = ++_startGeneration;
     _cancelPendingReconnect();
     _activeConfig = config;
     _activeTranscriptCommitTarget = transcriptCommitTarget;
     await _closeRealtimeResources(graceful: false, finishTranscript: true);
+    if (!_isCurrentStart(startGeneration)) {
+      return LiveRealtimeStartResult.failed;
+    }
 
     final credential = await credentialStore.readCredentialForNetworkUse();
+    if (!_isCurrentStart(startGeneration)) {
+      return LiveRealtimeStartResult.failed;
+    }
     if (credential == null || credential.isEmpty) {
       sessionController.markCredentialInvalid();
       return LiveRealtimeStartResult.missingCredential;
     }
 
     await sessionController.startMeeting();
+    if (!_isCurrentStart(startGeneration)) {
+      return LiveRealtimeStartResult.failed;
+    }
     if (sessionController.state.microphonePermission !=
         MicrophonePermissionStatus.granted) {
       return LiveRealtimeStartResult.permissionNotGranted;
@@ -110,11 +121,20 @@ class LiveRealtimeTranslationCoordinator {
         config: config,
         credential: credential,
       );
+      if (!_isCurrentStart(startGeneration)) {
+        await realtimeSession.closeImmediately();
+        return LiveRealtimeStartResult.failed;
+      }
       await playbackGateway.start(
         TranslatedAudioPlaybackConfig.openAiRealtime(
           sampleRateHz: config.inputAudioRate,
         ),
       );
+      if (!_isCurrentStart(startGeneration)) {
+        await playbackGateway.stop(clearQueue: true);
+        await realtimeSession.closeImmediately();
+        return LiveRealtimeStartResult.failed;
+      }
       _bindRealtimeSession(
         realtimeSession,
         transcriptCommitTarget: transcriptCommitTarget,
@@ -126,6 +146,10 @@ class LiveRealtimeTranslationCoordinator {
           sampleRateHz: config.inputAudioRate,
         ),
       );
+      if (!_isCurrentStart(startGeneration)) {
+        await _closeRealtimeResources(graceful: false, finishTranscript: false);
+        return LiveRealtimeStartResult.failed;
+      }
       sessionController.markRealtimeStarted();
       diagnostics.info(
         'live_realtime.streaming_started',
@@ -141,6 +165,9 @@ class LiveRealtimeTranslationCoordinator {
     } catch (error) {
       await realtimeSession?.closeImmediately();
       await _closeRealtimeResources(graceful: false, finishTranscript: true);
+      if (!_isCurrentStart(startGeneration)) {
+        return LiveRealtimeStartResult.failed;
+      }
       final decision = reconnectPolicy.plan(
         failure: OpenAiRealtimeFailure.fromSocketError(error),
         retryAttempt: sessionController.state.realtimeRetryAttempt + 1,
@@ -160,6 +187,7 @@ class LiveRealtimeTranslationCoordinator {
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
+        _startGeneration += 1;
         _cancelPendingReconnect();
         unawaited(
           _closeRealtimeResources(graceful: false, finishTranscript: true),
@@ -185,6 +213,7 @@ class LiveRealtimeTranslationCoordinator {
   }
 
   Future<void> stop() async {
+    _startGeneration += 1;
     _cancelPendingReconnect();
     _activeConfig = null;
     _activeTranscriptCommitTarget = null;
@@ -193,9 +222,10 @@ class LiveRealtimeTranslationCoordinator {
   }
 
   Future<void> pauseListening() async {
+    _startGeneration += 1;
     _cancelPendingReconnect();
-    await _closeRealtimeResources(graceful: true, finishTranscript: true);
     sessionController.pauseListening();
+    await _closeRealtimeResources(graceful: true, finishTranscript: true);
   }
 
   Future<LiveRealtimeStartResult> resumeListening() async {
@@ -211,6 +241,7 @@ class LiveRealtimeTranslationCoordinator {
   }
 
   Future<void> discardActiveSession() async {
+    _startGeneration += 1;
     _cancelPendingReconnect();
     _activeConfig = null;
     _activeTranscriptCommitTarget = null;
@@ -314,6 +345,7 @@ class LiveRealtimeTranslationCoordinator {
 
   void dispose() {
     _isDisposed = true;
+    _startGeneration += 1;
     _cancelPendingReconnect();
     _activeConfig = null;
     _activeTranscriptCommitTarget = null;
@@ -539,6 +571,10 @@ class LiveRealtimeTranslationCoordinator {
         transcriptCommitTarget: transcriptCommitTarget,
       ),
     );
+  }
+
+  bool _isCurrentStart(int generation) {
+    return !_isDisposed && generation == _startGeneration;
   }
 
   Future<void> _reconnectAfterBackoff({

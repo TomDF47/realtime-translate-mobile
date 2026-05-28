@@ -279,7 +279,7 @@ void main() {
       entries = snapshot.meetings.single.transcriptEntries;
       expect(entries, hasLength(2));
       expect(entries.last.translatedText, 'Second segment.');
-      expect(entries.last.status, 'final');
+      expect(entries.last.status, 'partial');
     },
   );
 
@@ -1040,6 +1040,30 @@ void main() {
     );
   });
 
+  test('pause during realtime startup prevents late listening state', () async {
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+    );
+    harness.realtimeGateway.delayNextConnect = true;
+
+    final startFuture = harness.coordinator.start(config: config);
+    await _drainAsync();
+
+    expect(harness.controller.state.phase, LiveSessionPhase.connecting);
+
+    await harness.coordinator.pauseListening();
+    expect(harness.controller.state.phase, LiveSessionPhase.listeningPaused);
+    expect(harness.captureGateway.isCapturing, isFalse);
+    expect(harness.playbackGateway.isOpen, isFalse);
+
+    harness.realtimeGateway.completeDelayedConnect();
+    expect(await startFuture, LiveRealtimeStartResult.failed);
+    expect(harness.controller.state.phase, LiveSessionPhase.listeningPaused);
+    expect(harness.captureGateway.isCapturing, isFalse);
+    expect(harness.playbackGateway.isOpen, isFalse);
+    expect(harness.realtimeGateway.session.closeImmediatelyCount, 1);
+  });
+
   test('stop closes capture, realtime, and controller resources', () async {
     final harness = await _Harness.create(
       permissionStatus: MicrophonePermissionStatus.granted,
@@ -1632,7 +1656,7 @@ void main() {
     harness.coordinator.handleAppLifecycleState(AppLifecycleState.paused);
     await Future<void>.delayed(Duration.zero);
 
-    expect(harness.controller.state.phase, LiveSessionPhase.readAloudPaused);
+    expect(harness.controller.state.phase, LiveSessionPhase.listeningPaused);
     expect(harness.controller.state.isMicrophoneCaptureOpen, isFalse);
     expect(harness.captureGateway.isCapturing, isFalse);
     expect(harness.playbackGateway.isOpen, isFalse);
@@ -1825,6 +1849,8 @@ class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
   int connectCount = 0;
   bool failNextConnect = false;
   bool hangNextConnect = false;
+  bool delayNextConnect = false;
+  Completer<RealtimeTranslationSession>? _delayedConnect;
 
   _FakeRealtimeTranslationSession get session => sessions.last;
 
@@ -1847,7 +1873,21 @@ class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
     sessions.add(session);
     configs.add(config);
     credentials.add(credential);
+    if (delayNextConnect) {
+      delayNextConnect = false;
+      final completer = Completer<RealtimeTranslationSession>();
+      _delayedConnect = completer;
+      return completer.future;
+    }
     return session;
+  }
+
+  void completeDelayedConnect() {
+    final completer = _delayedConnect;
+    _delayedConnect = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(session);
+    }
   }
 }
 

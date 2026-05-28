@@ -1056,10 +1056,23 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   Future<void> _pauseLiveListening() async {
-    await _realtimeCoordinator.pauseListening();
+    final pauseFuture = _realtimeCoordinator.pauseListening();
+    await _loadStoredMeetings();
     if (!mounted) {
       return;
     }
+
+    setState(() => _surface = _AppSurface.listening);
+    await pauseFuture;
+    if (!mounted) {
+      return;
+    }
+
+    await _loadStoredMeetings();
+    if (!mounted) {
+      return;
+    }
+
     setState(() => _surface = _AppSurface.listening);
   }
 
