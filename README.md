@@ -166,7 +166,7 @@ For local Android release-signing experiments, copy [android/key.properties.exam
 
 ## GitHub Issue Map
 
-The current debug pre-release is `debug-20260531-35642aa`; the latest merged PR (#47) was test/docs only, so no new APK was cut. No PRs are open.
+The current debug pre-release is `debug-20260531-35642aa`. Documentation- and test-only changes do not cut a new APK; a fresh debug release is published only when app or runtime code changes.
 
 Closed planning and implementation intake:
 
