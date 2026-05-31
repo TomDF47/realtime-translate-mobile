@@ -17,13 +17,14 @@ USE_LIVE_CREDENTIAL=0
 RUN_DEBUG_LIVE_EVENTS=0
 VERIFY_CREDENTIAL_RESET=0
 VERIFY_INVALID_CREDENTIAL_RECOVERY=0
+VERIFY_OFFLINE_STARTUP=0
 REQUIRE_DEVICE_AUDIO=0
 AUDIO_PREFLIGHT_ONLY=0
 SHOULD_CLEANUP_APP_DATA=0
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--debug-live-events] [--verify-credential-reset] [--verify-invalid-credential-recovery] [--require-device-audio] [--audio-preflight-only] [--apk PATH]
+Usage: scripts/android_emulator_e2e.sh [--with-live-credential] [--debug-live-events] [--verify-credential-reset] [--verify-invalid-credential-recovery] [--verify-offline-startup] [--require-device-audio] [--audio-preflight-only] [--apk PATH]
 
 Installs the debug APK on Pixel_9_API_36_Play or an already-connected Android
 emulator, drives the phone-local setup flow with UIAutomator/adb, writes
@@ -33,6 +34,7 @@ Options:
   --with-live-credential  Read the OpenAI credential from the local secret file
                           and drive the setup -> permission -> live surface flow.
                           The credential is never printed. App data is cleared.
+                          Makes a live OpenAI request.
   --debug-live-events     After reaching the live surface, drive the opt-in
                           debug-only generated-event proof, restart the app,
                           and verify persisted meeting history / AI context.
@@ -41,12 +43,21 @@ Options:
   --verify-credential-reset
                           Save a non-secret placeholder credential through the
                           setup UI, remove it, and verify live start returns to
-                          the setup-required gate. Does not read live secrets.
+                          the setup-required gate. Does not read live secrets and
+                          makes no OpenAI request.
   --verify-invalid-credential-recovery
                           Save a non-secret invalid placeholder credential,
                           grant microphone permission, and verify a direct
                           OpenAI auth rejection fails closed to setup-required.
-                          Does not read live secrets.
+                          Does not read live secrets, but DOES make a live
+                          OpenAI auth-rejection network request with the
+                          placeholder credential. Not part of the offline path.
+  --verify-offline-startup
+                          Offline bounded-state proof: with no credential saved,
+                          start the interpreter and verify it reaches the
+                          "OpenAI setup required" gate and never remains on
+                          "Preparing live session". Reads no credential, grants
+                          no permission, and makes no OpenAI request.
   --require-device-audio  Before installed-app validation, fail if the selected
                           emulator/device is known not to have usable audio.
                           This rejects emulators launched with -no-audio and
@@ -76,6 +87,10 @@ while (($#)); do
       ;;
     --verify-invalid-credential-recovery)
       VERIFY_INVALID_CREDENTIAL_RECOVERY=1
+      shift
+      ;;
+    --verify-offline-startup)
+      VERIFY_OFFLINE_STARTUP=1
       shift
       ;;
     --require-device-audio)
@@ -117,7 +132,12 @@ if ((USE_LIVE_CREDENTIAL)) && ((VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
   exit 2
 fi
 
-if ((AUDIO_PREFLIGHT_ONLY)) && ((USE_LIVE_CREDENTIAL || RUN_DEBUG_LIVE_EVENTS || VERIFY_CREDENTIAL_RESET || VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
+if ((VERIFY_OFFLINE_STARTUP)) && ((USE_LIVE_CREDENTIAL || RUN_DEBUG_LIVE_EVENTS || VERIFY_CREDENTIAL_RESET || VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
+  echo "--verify-offline-startup is the offline path and cannot be combined with credential or live options" >&2
+  exit 2
+fi
+
+if ((AUDIO_PREFLIGHT_ONLY)) && ((USE_LIVE_CREDENTIAL || RUN_DEBUG_LIVE_EVENTS || VERIFY_CREDENTIAL_RESET || VERIFY_INVALID_CREDENTIAL_RECOVERY || VERIFY_OFFLINE_STARTUP)); then
   echo "--audio-preflight-only cannot be combined with app-flow validation options" >&2
   exit 2
 fi
@@ -126,6 +146,11 @@ export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
 export JAVA_HOME="${JAVA_HOME:-$HOME/.local/share/jdks/temurin-21}"
 export PATH="/home/tom/.local/share/flutter/bin:$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+# Shared resilient cold-boot helper (#39). Replaces the previous single-shot
+# launch + unbounded `adb wait-for-device` with bounded retries and a watchdog.
+# shellcheck source=scripts/lib/android_emulator_boot.sh
+source "$SCRIPT_DIR/lib/android_emulator_boot.sh"
 
 mkdir -p "$ARTIFACT_DIR"
 
@@ -142,11 +167,11 @@ fail() {
   exit 1
 }
 
-first_device() {
-  adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }'
-}
-
-ADB_SERIAL=""
+# Device discovery and cold-boot live in scripts/lib/android_emulator_boot.sh.
+# A caller (for example scripts/android_release_smoke.sh) may export ADB_SERIAL
+# for a device it already booted so this driver reuses the exact same device and
+# result attribution stays tight; otherwise it is resolved by the boot helper.
+ADB_SERIAL="${ADB_SERIAL:-}"
 
 adb_cmd() {
   if [[ -n "$ADB_SERIAL" ]]; then
@@ -157,46 +182,23 @@ adb_cmd() {
 }
 
 ensure_emulator() {
-  ADB_SERIAL="$(first_device)"
-  if [[ -n "$ADB_SERIAL" ]]; then
-    log "Reusing Android device $ADB_SERIAL"
-    return
+  # Reuse a device a caller already booted (tight serial propagation #39) when it
+  # is still online and fully booted, so the explicit boot step in the release
+  # smoke maps directly to the installed-app proof.
+  if [[ -n "$ADB_SERIAL" ]] &&
+    [[ "$(adb -s "$ADB_SERIAL" get-state 2>/dev/null | tr -d '\r')" == "device" ]] &&
+    [[ "$(adb -s "$ADB_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
+    log "Reusing pre-booted device $ADB_SERIAL"
+    return 0
   fi
-
-  log "Starting Pixel_9_API_36_Play in the background; emulator log: $EMULATOR_LOG"
-  if ((REQUIRE_DEVICE_AUDIO)) && [[ -x "$AUDIO_EMULATOR_LAUNCHER" ]]; then
-    nohup "$AUDIO_EMULATOR_LAUNCHER" >"$EMULATOR_LOG" 2>&1 &
-  elif command -v android-pixel9-headless >/dev/null 2>&1; then
-    nohup android-pixel9-headless >"$EMULATOR_LOG" 2>&1 &
-  else
-    nohup "$ANDROID_HOME/emulator/emulator" \
-      -avd Pixel_9_API_36_Play \
-      -qt-hide-window \
-      -no-audio \
-      -gpu host \
-      -no-snapshot \
-      -no-metrics \
-      >"$EMULATOR_LOG" 2>&1 &
-  fi
-
-  adb wait-for-device
-  ADB_SERIAL="$(first_device)"
-  if [[ -z "$ADB_SERIAL" ]]; then
-    fail "adb reported no connected device after emulator startup"
-  fi
-}
-
-wait_for_boot() {
-  log "Waiting for Android boot_completed=1 on $ADB_SERIAL"
-  for _ in $(seq 1 180); do
-    if [[ "$(adb_cmd shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
-      adb_cmd shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
-      adb_cmd shell wm dismiss-keyguard >/dev/null 2>&1 || true
-      return
-    fi
-    sleep 1
-  done
-  fail "emulator did not report boot_completed=1"
+  # Resilient cold boot (#39): reuse an online device or cold-boot the AVD with
+  # bounded retries and a process watchdog, setting ADB_SERIAL. emu_resilient_boot
+  # exits non-zero instead of hanging when no booted device can be obtained.
+  EMU_LOG="$EMULATOR_LOG"
+  EMU_ARTIFACT_DIR="$ARTIFACT_DIR"
+  EMU_REQUIRE_DEVICE_AUDIO="$REQUIRE_DEVICE_AUDIO"
+  EMU_AUDIO_LAUNCHER="$AUDIO_EMULATOR_LAUNCHER"
+  emu_resilient_boot
 }
 
 selected_device_is_emulator() {
@@ -438,7 +440,6 @@ else
 fi
 
 ensure_emulator
-wait_for_boot
 
 if ((REQUIRE_DEVICE_AUDIO)); then
   run_audio_preflight
@@ -466,6 +467,20 @@ tap_ui "Start interpreter"
 wait_for_ui "OpenAI setup required" 30
 screencap_to "$ARTIFACT_DIR/02-setup-required.png"
 dump_ui_to "$ARTIFACT_DIR/02-setup-required.xml"
+
+if ((VERIFY_OFFLINE_STARTUP)); then
+  # Truly offline bounded-state proof (#39): with no credential saved, the live
+  # coordinator returns missingCredential before reading the network, requesting
+  # microphone permission, or contacting OpenAI, so startup short-circuits to the
+  # setup-required gate and must never sit on "Preparing live session". No
+  # credential is read or saved, no permission is granted, and no OpenAI request
+  # is made on this path.
+  log "Verifying offline bounded startup state (no credential, no OpenAI request)"
+  assert_ui_contains "OpenAI setup required"
+  assert_ui_absent "Preparing live session"
+  screencap_to "$ARTIFACT_DIR/03-offline-bounded-state.png"
+  dump_ui_to "$ARTIFACT_DIR/03-offline-bounded-state.xml"
+fi
 
 if ((VERIFY_CREDENTIAL_RESET)); then
   log "Verifying credential reset UX with a non-secret placeholder"
@@ -525,8 +540,13 @@ if ((VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
   adb_cmd shell pm grant "$PACKAGE_NAME" android.permission.RECORD_AUDIO \
     >/dev/null 2>&1 || true
   tap_ui "Start interpreter"
-  wait_for_ui "OpenAI credential expired or was rejected" 90
+  # Startup must reach a bounded recovery state instead of hanging on the
+  # connecting screen. #37 bounds the initial realtime connect to ~12s, so this
+  # is the no-secret proof (#39) that startup never stays on the
+  # "Preparing live session" surface indefinitely.
+  wait_for_ui "OpenAI credential expired or was rejected" 45
   wait_for_ui "OpenAI setup required" 5
+  assert_ui_absent "Preparing live session"
   screencap_to "$ARTIFACT_DIR/04-invalid-credential-recovery.png"
   dump_ui_to "$ARTIFACT_DIR/04-invalid-credential-recovery.xml"
 fi
