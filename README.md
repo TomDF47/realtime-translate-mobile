@@ -201,6 +201,7 @@ Open MVP/planning work:
 - #37 Bound live-session startup so it cannot hang indefinitely in `Preparing live session` (fix implemented on a PR branch pending max solution-architect review)
 - #39 Add repeatable Android release smoke validation (resilient emulator boot, APK metadata/signing preflight, and no-secret bounded-state proof implemented on a PR branch pending max solution-architect review)
 - #41 Add `android.permission.INTERNET` to release builds so direct phone-to-OpenAI calls work in store/release APKs (fix implemented on a PR branch pending max solution-architect review; release creation still deferred)
+- #44 Make `OpenAiRealtimeTranslationSession.closeImmediately()` not hang when the events stream was never listened to (low-priority latent foot-gun found while repairing the #6 live smoke harness; production path is currently bounded by a 250 ms timeout)
 
 Deferred V2/future work:
 
