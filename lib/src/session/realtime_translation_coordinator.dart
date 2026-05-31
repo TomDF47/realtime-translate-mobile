@@ -50,6 +50,7 @@ class LiveRealtimeTranslationCoordinator {
     this.reconnectPolicy = const OpenAiRealtimeReconnectPolicy(),
     this.reconnectDelay,
     this.connectionTimeout = const Duration(seconds: 20),
+    this.startupStepTimeout = const Duration(seconds: 10),
     this.diagnostics = const PrivacySafeDiagnostics(),
     TextInterpreterGateway? textInterpreterGateway,
     this.onTranscriptCommitted,
@@ -66,6 +67,13 @@ class LiveRealtimeTranslationCoordinator {
   final OpenAiRealtimeReconnectPolicy reconnectPolicy;
   final LiveRealtimeReconnectDelay? reconnectDelay;
   final Duration connectionTimeout;
+
+  /// Upper bound for each post-connect bring-up step (translated-audio
+  /// playback start and microphone capture start). These steps are platform
+  /// channel calls that can otherwise hang indefinitely and pin the session in
+  /// [LiveSessionPhase.connecting] with no user-visible recovery.
+  final Duration startupStepTimeout;
+
   final PrivacySafeDiagnostics diagnostics;
   final TextInterpreterGateway textInterpreterGateway;
   final LiveRealtimeTranscriptCommitted? onTranscriptCommitted;
@@ -142,11 +150,7 @@ class LiveRealtimeTranslationCoordinator {
         await realtimeSession.closeImmediately();
         return LiveRealtimeStartResult.failed;
       }
-      await playbackGateway.start(
-        TranslatedAudioPlaybackConfig.openAiRealtime(
-          sampleRateHz: config.inputAudioRate,
-        ),
-      );
+      await _startPlaybackQueue(config);
       if (!_isCurrentStart(startGeneration)) {
         await playbackGateway.stop(clearQueue: true);
         await realtimeSession.closeImmediately();
@@ -158,11 +162,7 @@ class LiveRealtimeTranslationCoordinator {
         resetTranscriptCommitter: true,
       );
       realtimeSession = null;
-      await captureGateway.start(
-        MicrophoneCaptureConfig.openAiRealtime(
-          sampleRateHz: config.inputAudioRate,
-        ),
-      );
+      await _startMicrophoneCapture(config);
       if (!_isCurrentStart(startGeneration)) {
         await _closeRealtimeResources(graceful: false, finishTranscript: false);
         return LiveRealtimeStartResult.failed;
@@ -850,11 +850,7 @@ class LiveRealtimeTranslationCoordinator {
         return;
       }
 
-      await playbackGateway.start(
-        TranslatedAudioPlaybackConfig.openAiRealtime(
-          sampleRateHz: config.inputAudioRate,
-        ),
-      );
+      await _startPlaybackQueue(config);
       if (_isDisposed || generation != _reconnectGeneration) {
         await playbackGateway.stop(clearQueue: true);
         await realtimeSession.closeImmediately();
@@ -867,11 +863,7 @@ class LiveRealtimeTranslationCoordinator {
         resetTranscriptCommitter: false,
       );
       realtimeSession = null;
-      await captureGateway.start(
-        MicrophoneCaptureConfig.openAiRealtime(
-          sampleRateHz: config.inputAudioRate,
-        ),
-      );
+      await _startMicrophoneCapture(config);
       sessionController.markRealtimeRecovered();
       diagnostics.info(
         'live_realtime.reconnect_succeeded',
@@ -949,6 +941,40 @@ class LiveRealtimeTranslationCoordinator {
         );
   }
 
+  Future<void> _startPlaybackQueue(OpenAiRealtimeTranslationConfig config) {
+    return playbackGateway
+        .start(
+          TranslatedAudioPlaybackConfig.openAiRealtime(
+            sampleRateHz: config.inputAudioRate,
+          ),
+        )
+        .timeout(
+          startupStepTimeout,
+          onTimeout: () {
+            throw const LiveRealtimeStartupTimeoutException(
+              'translatedPlayback.start',
+            );
+          },
+        );
+  }
+
+  Future<void> _startMicrophoneCapture(OpenAiRealtimeTranslationConfig config) {
+    return captureGateway
+        .start(
+          MicrophoneCaptureConfig.openAiRealtime(
+            sampleRateHz: config.inputAudioRate,
+          ),
+        )
+        .timeout(
+          startupStepTimeout,
+          onTimeout: () {
+            throw const LiveRealtimeStartupTimeoutException(
+              'microphone.capture.start',
+            );
+          },
+        );
+  }
+
   Future<void> _closeRealtimeResources({
     required bool graceful,
     required bool finishTranscript,
@@ -1008,6 +1034,24 @@ class LiveRealtimeTranslationCoordinator {
 
 class LiveRealtimeConnectTimeoutException implements Exception {
   const LiveRealtimeConnectTimeoutException();
+}
+
+/// Thrown when a post-connect live-session bring-up step (translated-audio
+/// playback start or microphone capture start) exceeds [startupStepTimeout].
+///
+/// The [step] string is a sanitized operation name only; it never carries
+/// credential, transcript, audio, or translation content. The message contains
+/// the word "timeout" so it classifies as a retryable network-style failure via
+/// [OpenAiRealtimeFailure.fromSocketError], routing the session into the
+/// existing bounded reconnect/offline recovery path instead of an indefinite
+/// `connecting` stall.
+class LiveRealtimeStartupTimeoutException implements Exception {
+  const LiveRealtimeStartupTimeoutException(this.step);
+
+  final String step;
+
+  @override
+  String toString() => 'LiveRealtimeStartupTimeoutException($step)';
 }
 
 class _RealtimeSourceTurn {

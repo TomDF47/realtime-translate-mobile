@@ -116,6 +116,97 @@ void main() {
   );
 
   test(
+    'hung microphone capture startup leaves connecting for bounded recovery',
+    () async {
+      final reconnectDelays = <Duration>[];
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectDelay: (delay) {
+          reconnectDelays.add(delay);
+          return Completer<void>().future;
+        },
+        startupStepTimeout: const Duration(milliseconds: 1),
+      );
+      harness.captureGateway.hangStart = true;
+
+      final result = await harness.coordinator.start(config: config);
+      await _drainAsync();
+
+      // The connect succeeded; only the post-connect microphone bring-up hung.
+      // The session must not stay pinned in connecting / "Preparing live
+      // session"; it transitions into the bounded recovery state machine.
+      expect(result, LiveRealtimeStartResult.failed);
+      expect(harness.realtimeGateway.connectCount, 1);
+      expect(harness.captureGateway.startCount, 1);
+      expect(harness.captureGateway.isCapturing, isFalse);
+      expect(harness.controller.state.phase, LiveSessionPhase.reconnecting);
+      expect(harness.controller.state.realtimeRetryAttempt, 1);
+      expect(reconnectDelays, hasLength(1));
+    },
+  );
+
+  test(
+    'hung translated-audio playback startup leaves connecting for bounded recovery',
+    () async {
+      final reconnectDelays = <Duration>[];
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectDelay: (delay) {
+          reconnectDelays.add(delay);
+          return Completer<void>().future;
+        },
+        startupStepTimeout: const Duration(milliseconds: 1),
+      );
+      harness.playbackGateway.hangStart = true;
+
+      final result = await harness.coordinator.start(config: config);
+      await _drainAsync();
+
+      expect(result, LiveRealtimeStartResult.failed);
+      expect(harness.realtimeGateway.connectCount, 1);
+      expect(harness.playbackGateway.startCount, 1);
+      // Microphone capture must never open if playback bring-up never finished.
+      expect(harness.captureGateway.startCount, 0);
+      expect(harness.captureGateway.isCapturing, isFalse);
+      expect(harness.controller.state.phase, LiveSessionPhase.reconnecting);
+    },
+  );
+
+  test(
+    'persistently hung startup is bounded and ends in a terminal recovery state',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectPolicy: const OpenAiRealtimeReconnectPolicy(
+          maxAttempts: 1,
+          initialDelay: Duration.zero,
+          maxDelay: Duration.zero,
+          jitterRatio: 0,
+        ),
+        reconnectDelay: (_) => Future<void>.value(),
+        startupStepTimeout: const Duration(milliseconds: 1),
+      );
+      harness.captureGateway.hangStart = true;
+
+      final result = await harness.coordinator.start(config: config);
+      // Bounded poll: every startup attempt hangs, so the coordinator must
+      // exhaust its retries and settle in a terminal recovery state rather than
+      // stalling on connecting forever.
+      for (var i = 0;
+          i < 40 &&
+              harness.controller.state.phase != LiveSessionPhase.offline &&
+              harness.controller.state.phase != LiveSessionPhase.error;
+          i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+
+      expect(result, LiveRealtimeStartResult.failed);
+      expect(harness.controller.state.phase, LiveSessionPhase.offline);
+      expect(harness.captureGateway.isCapturing, isFalse);
+    },
+  );
+
+  test(
     'startup failure before session readiness does not start capture',
     () async {
       final reconnectDelays = <Duration>[];
@@ -1999,6 +2090,7 @@ class _Harness {
         const OpenAiRealtimeReconnectPolicy(),
     LiveRealtimeReconnectDelay? reconnectDelay,
     Duration connectionTimeout = const Duration(seconds: 12),
+    Duration startupStepTimeout = const Duration(seconds: 12),
     TextInterpreterGateway? textInterpreterGateway,
   }) async {
     final harness = _Harness._(permissionStatus: permissionStatus);
@@ -2011,6 +2103,7 @@ class _Harness {
       reconnectPolicy: reconnectPolicy,
       reconnectDelay: reconnectDelay ?? (_) => Future<void>.value(),
       connectionTimeout: connectionTimeout,
+      startupStepTimeout: startupStepTimeout,
       textInterpreterGateway: textInterpreterGateway,
     );
     if (seedCredential) {
@@ -2056,6 +2149,7 @@ class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
   bool _isCapturing = false;
   int startCount = 0;
   int stopCount = 0;
+  bool hangStart = false;
   MicrophoneCaptureConfig? lastConfig;
 
   @override
@@ -2068,6 +2162,10 @@ class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
   Future<void> start(MicrophoneCaptureConfig config) async {
     startCount += 1;
     lastConfig = config;
+    if (hangStart) {
+      await Completer<void>().future;
+      return;
+    }
     _isCapturing = true;
   }
 
@@ -2094,6 +2192,7 @@ class _FakeTranslatedAudioPlaybackGateway
   bool _isOpen = false;
   int startCount = 0;
   int stopCount = 0;
+  bool hangStart = false;
   TranslatedAudioPlaybackConfig? lastConfig;
   final List<TranslatedAudioPcm16Chunk> enqueuedChunks = [];
 
@@ -2104,6 +2203,10 @@ class _FakeTranslatedAudioPlaybackGateway
   Future<void> start(TranslatedAudioPlaybackConfig config) async {
     startCount += 1;
     lastConfig = config;
+    if (hangStart) {
+      await Completer<void>().future;
+      return;
+    }
     _isOpen = true;
   }
 
