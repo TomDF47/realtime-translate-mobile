@@ -5,11 +5,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_OUTPUT_DIR="/tmp"
 OUTPUT_DIR="${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}"
 RUN_EMULATOR_SMOKE=0
+RUN_RELEASE_SMOKE=0
 REQUIRE_STORE_SIGNING=0
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/final_qa_gate.sh [--emulator-smoke] [--require-store-signing] [--output-dir DIR]
+Usage: scripts/final_qa_gate.sh [--emulator-smoke] [--release-smoke] [--require-store-signing] [--output-dir DIR]
 
 Runs the non-live final QA gate for local handoff:
   - flutter pub get
@@ -29,6 +30,11 @@ Options:
   --emulator-smoke  Install the fresh release artifact and verify the
                     no-credential setup-required gate. This makes no live
                     OpenAI request and does not read the local secret file.
+  --release-smoke   Run the repeatable release smoke against the fresh release
+                    artifact: APK metadata + signing preflight, resilient
+                    emulator boot, install, and a no-secret bounded-state proof
+                    via scripts/android_release_smoke.sh. Makes no live OpenAI
+                    request and does not read the local secret file.
   --require-store-signing
                     Require local release-signing config before building the
                     release artifact, then verify the release APK is not
@@ -42,6 +48,10 @@ while (($#)); do
   case "$1" in
     --emulator-smoke)
       RUN_EMULATOR_SMOKE=1
+      shift
+      ;;
+    --release-smoke)
+      RUN_RELEASE_SMOKE=1
       shift
       ;;
     --require-store-signing)
@@ -98,6 +108,9 @@ run_step bash scripts/check-docs.sh
 run_step bash scripts/check-supply-chain.sh
 run_step bash -n scripts/build_debug_apk_artifact.sh
 run_step bash -n scripts/android_emulator_e2e.sh
+run_step bash -n scripts/lib/android_emulator_boot.sh
+run_step bash -n scripts/check_apk_metadata.sh
+run_step bash -n scripts/android_release_smoke.sh
 run_step bash -n scripts/check-docs.sh
 run_step bash -n scripts/check-supply-chain.sh
 run_step bash -n scripts/check_android_release_signing.sh
@@ -130,6 +143,12 @@ if ((RUN_EMULATOR_SMOKE)); then
   log "Running no-live installed-app smoke against the release artifact"
   ARTIFACT_DIR="${ARTIFACT_DIR:-/tmp/realtime-translate-mobile-e2e-final-qa}" \
     scripts/android_emulator_e2e.sh --apk "$release_apk"
+fi
+
+if ((RUN_RELEASE_SMOKE)); then
+  log "Running repeatable release smoke against the release artifact"
+  scripts/android_release_smoke.sh --apk "$release_apk" \
+    --artifact-dir "${RELEASE_SMOKE_DIR:-/tmp/realtime-translate-mobile-release-smoke-final-qa}"
 fi
 
 log "Final QA gate passed"

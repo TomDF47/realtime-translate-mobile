@@ -127,6 +127,11 @@ export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
 export JAVA_HOME="${JAVA_HOME:-$HOME/.local/share/jdks/temurin-21}"
 export PATH="/home/tom/.local/share/flutter/bin:$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 
+# Shared resilient cold-boot helper (#39). Replaces the previous single-shot
+# launch + unbounded `adb wait-for-device` with bounded retries and a watchdog.
+# shellcheck source=scripts/lib/android_emulator_boot.sh
+source "$SCRIPT_DIR/lib/android_emulator_boot.sh"
+
 mkdir -p "$ARTIFACT_DIR"
 
 log() {
@@ -142,10 +147,7 @@ fail() {
   exit 1
 }
 
-first_device() {
-  adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }'
-}
-
+# Device discovery and cold-boot live in scripts/lib/android_emulator_boot.sh.
 ADB_SERIAL=""
 
 adb_cmd() {
@@ -157,46 +159,14 @@ adb_cmd() {
 }
 
 ensure_emulator() {
-  ADB_SERIAL="$(first_device)"
-  if [[ -n "$ADB_SERIAL" ]]; then
-    log "Reusing Android device $ADB_SERIAL"
-    return
-  fi
-
-  log "Starting Pixel_9_API_36_Play in the background; emulator log: $EMULATOR_LOG"
-  if ((REQUIRE_DEVICE_AUDIO)) && [[ -x "$AUDIO_EMULATOR_LAUNCHER" ]]; then
-    nohup "$AUDIO_EMULATOR_LAUNCHER" >"$EMULATOR_LOG" 2>&1 &
-  elif command -v android-pixel9-headless >/dev/null 2>&1; then
-    nohup android-pixel9-headless >"$EMULATOR_LOG" 2>&1 &
-  else
-    nohup "$ANDROID_HOME/emulator/emulator" \
-      -avd Pixel_9_API_36_Play \
-      -qt-hide-window \
-      -no-audio \
-      -gpu host \
-      -no-snapshot \
-      -no-metrics \
-      >"$EMULATOR_LOG" 2>&1 &
-  fi
-
-  adb wait-for-device
-  ADB_SERIAL="$(first_device)"
-  if [[ -z "$ADB_SERIAL" ]]; then
-    fail "adb reported no connected device after emulator startup"
-  fi
-}
-
-wait_for_boot() {
-  log "Waiting for Android boot_completed=1 on $ADB_SERIAL"
-  for _ in $(seq 1 180); do
-    if [[ "$(adb_cmd shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
-      adb_cmd shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
-      adb_cmd shell wm dismiss-keyguard >/dev/null 2>&1 || true
-      return
-    fi
-    sleep 1
-  done
-  fail "emulator did not report boot_completed=1"
+  # Resilient cold boot (#39): reuse an online device or cold-boot the AVD with
+  # bounded retries and a process watchdog, setting ADB_SERIAL. emu_resilient_boot
+  # exits non-zero instead of hanging when no booted device can be obtained.
+  EMU_LOG="$EMULATOR_LOG"
+  EMU_ARTIFACT_DIR="$ARTIFACT_DIR"
+  EMU_REQUIRE_DEVICE_AUDIO="$REQUIRE_DEVICE_AUDIO"
+  EMU_AUDIO_LAUNCHER="$AUDIO_EMULATOR_LAUNCHER"
+  emu_resilient_boot
 }
 
 selected_device_is_emulator() {
@@ -438,7 +408,6 @@ else
 fi
 
 ensure_emulator
-wait_for_boot
 
 if ((REQUIRE_DEVICE_AUDIO)); then
   run_audio_preflight
@@ -525,8 +494,13 @@ if ((VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
   adb_cmd shell pm grant "$PACKAGE_NAME" android.permission.RECORD_AUDIO \
     >/dev/null 2>&1 || true
   tap_ui "Start interpreter"
-  wait_for_ui "OpenAI credential expired or was rejected" 90
+  # Startup must reach a bounded recovery state instead of hanging on the
+  # connecting screen. #37 bounds the initial realtime connect to ~12s, so this
+  # is the no-secret proof (#39) that startup never stays on the
+  # "Preparing live session" surface indefinitely.
+  wait_for_ui "OpenAI credential expired or was rejected" 45
   wait_for_ui "OpenAI setup required" 5
+  assert_ui_absent "Preparing live session"
   screencap_to "$ARTIFACT_DIR/04-invalid-credential-recovery.png"
   dump_ui_to "$ARTIFACT_DIR/04-invalid-credential-recovery.xml"
 fi

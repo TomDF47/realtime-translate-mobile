@@ -78,9 +78,12 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 ## APK Release Sanity
 
-- Build a fresh debug artifact with `scripts/build_debug_apk_artifact.sh`.
-- Verify the APK installs and reaches the no-credential setup gate with `scripts/android_emulator_e2e.sh --apk /tmp/<debug-apk>.apk`.
+- Run the repeatable, no-secret release smoke with `scripts/android_release_smoke.sh` (or `scripts/android_release_smoke.sh --apk /tmp/<apk>.apk` for an already-built artifact). This verifies APK metadata and signing before install, cold-boots the emulator resiliently, installs the APK, clears app state, launches it, and asserts startup reaches a bounded state and does not remain on `Preparing live session`.
+- Confirm the printed result block under `/tmp/realtime-translate-mobile-release-smoke/release-smoke-result.md` shows each check as `pass`.
+- If the emulator cannot cold-boot on this host, confirm the smoke fails fast with a captured log tail under the artifact directory rather than hanging, then retry or attach a physical device.
+- For a metadata/signing-only check without an emulator, run `scripts/check_apk_metadata.sh --apk /tmp/<apk>.apk`.
 - If publishing a debug APK to GitHub Releases, use a unique tag such as `debug-YYYYMMDD-HHMMSS-<shortsha>`.
 - Upload the APK and `.sha256` sidecar.
 - Verify the release asset URL opens.
+- Record the validation result in the release notes or an issue comment. The smoke can do this with `--record-to-release <tag>` or `--record-to-issue <number>` (sanitized block, secret-pattern guarded), or paste the printed block manually.
 - Run `git status --short --branch` and confirm only intentional committed changes remain.

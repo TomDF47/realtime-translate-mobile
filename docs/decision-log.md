@@ -477,3 +477,30 @@ Implications:
 
 - Passing `--require-device-audio --audio-preflight-only` proves target readiness only. It does not prove microphone capture, translated-audio audibility, installed-app live transcript persistence, or realtime reconnect behavior.
 - If the host-audio emulator cannot produce usable microphone/speaker evidence in practice, #6/#14 should use a physical Android device or a documented controllable virtual audio route rather than weakening the guard.
+
+## 2026-05-31 - Repeatable Local Android Release Smoke (#39)
+
+Status: Accepted
+
+Decision:
+
+- Add `scripts/android_release_smoke.sh` as the repeatable Android release smoke entrypoint: build/locate a debug APK, run an APK metadata + signing preflight, cold-boot the emulator resiliently, install, clear app state, launch, and prove startup reaches a bounded state without a real OpenAI credential.
+- Extract the emulator cold boot into a shared helper `scripts/lib/android_emulator_boot.sh` with reuse-online-device, bounded retries, an AVD-scoped process watchdog, `adb` device-state checks, conservative stale-lock cleanup, and per-attempt log tails. Source it from `scripts/android_emulator_e2e.sh`, replacing the previous single-shot launch plus unbounded `adb wait-for-device`.
+- Add `scripts/check_apk_metadata.sh` to verify SHA-256 sidecar, package id, version metadata, and a least-privilege permission allowlist, and to report debug vs release signing without failing a debug release.
+- Prove the bounded startup state with the existing no-secret `--verify-invalid-credential-recovery` path plus an explicit assertion that the UI never remains on `Preparing live session`.
+- Keep Android emulator smoke local-only. CI stays Flutter-only (`flutter pub get`, `flutter analyze`, `flutter test`, supply-chain), and docs (`bash scripts/check-docs.sh`).
+- Make GitHub result recording opt-in: print a sanitized result block by default, and post to a release (`--record-to-release`) or issue (`--record-to-issue`) via `gh` only when asked, after a secret-pattern guard.
+
+Rationale:
+
+- The 2026-05-31 debug release could not complete install/run validation because `Pixel_9_API_36_Play` repeatedly died during cold boot before stable `adb`, and the single-shot boot path either hung or failed without a repeatable outcome.
+- A flaky cold boot should not block every release. Bounded retries plus a watchdog convert a hang into a fast, deterministic pass or fail.
+- Validating an APK should not require a live OpenAI key; the invalid-credential recovery path already exercises the connecting phase and, with the #37 connect bound, reaches a bounded recovery state.
+- A GitHub-hosted emulator job (for example `reactivecircus/android-emulator-runner`) was considered and rejected for the MVP: it is historically flaky, adds CI surface, and contradicts the existing local/manual emulator stance.
+
+Implications:
+
+- Releases should run `scripts/android_release_smoke.sh` (or `scripts/final_qa_gate.sh --release-smoke`) and record the sanitized result in release notes or an issue comment.
+- If the emulator cannot cold-boot on the host, the smoke fails fast with a captured log tail; fall back to a physical device or an attached emulator rather than weakening the boot checks.
+- The default smoke path must never read a real OpenAI credential, make a live OpenAI request, or print credential/transcript/audio/summary/export payloads.
+- The boot helper must only stop emulator processes whose arguments name `Pixel_9_API_36_Play`, and must continue to avoid `emulator -no-window` on this Fedora/Wayland host.

@@ -135,7 +135,21 @@ For physical microphone or audible speaker validation, run `scripts/android_emul
 
 For APK handoff without live OpenAI quota, `scripts/build_debug_apk_artifact.sh` produces `/tmp/realtime-translate-mobile-<mode>-<commit>-<timestamp>.apk` plus a `.sha256` sidecar. Debug is the default, `--debug-live-events` produces the matching debug-only E2E proof build artifact, and `--release` produces a release-mode APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback; debug-signed release artifacts are not store-ready. The script does not read the local OpenAI secret file.
 
-For a one-command non-live pre-handoff gate, `scripts/final_qa_gate.sh` runs Flutter analysis/tests, docs and supply-chain checks, shell syntax checks, `git diff --check`, and fresh debug plus release APK artifact builds. `scripts/final_qa_gate.sh --emulator-smoke` also installs the fresh release artifact and verifies the missing-credential setup gate without reading the live OpenAI secret or making a live OpenAI request. `scripts/final_qa_gate.sh --require-store-signing` requires local uncommitted release signing config before release build and verifies the fresh release APK is not Android debug-signed afterward.
+For a one-command non-live pre-handoff gate, `scripts/final_qa_gate.sh` runs Flutter analysis/tests, docs and supply-chain checks, shell syntax checks, `git diff --check`, and fresh debug plus release APK artifact builds. `scripts/final_qa_gate.sh --emulator-smoke` also installs the fresh release artifact and verifies the missing-credential setup gate without reading the live OpenAI secret or making a live OpenAI request. `scripts/final_qa_gate.sh --release-smoke` runs the repeatable release smoke against the fresh release artifact. `scripts/final_qa_gate.sh --require-store-signing` requires local uncommitted release signing config before release build and verifies the fresh release APK is not Android debug-signed afterward.
+
+### Android Release Smoke Validation (#39)
+
+`scripts/android_release_smoke.sh` is the repeatable, no-secret release smoke. It exists because publishing a release should not depend on a hand-driven emulator session that can die during cold boot before stable `adb`.
+
+The flow is:
+
+1. Locate `--apk PATH` or build a debug APK artifact (with a SHA-256 sidecar).
+2. `scripts/check_apk_metadata.sh` verifies the SHA-256 sidecar (when present), the package id `com.tomdf47.realtime_translate_mobile`, version metadata, and that requested permissions stay within the least-privilege allowlist (`RECORD_AUDIO`, `INTERNET`, and the AndroidX `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`), then reports debug vs release signing without failing a debug release.
+3. `scripts/lib/android_emulator_boot.sh` cold-boots `Pixel_9_API_36_Play` with bounded retries, a process watchdog, and `adb` device-state checks, replacing the previous single-shot launch and unbounded `adb wait-for-device`. A dying cold boot now fails fast with a captured log tail instead of hanging.
+4. `scripts/android_emulator_e2e.sh --verify-invalid-credential-recovery` installs the APK, clears app state, launches it, verifies the missing-credential gate, and asserts startup reaches a bounded recovery state and never remains on `Preparing live session`. This proof uses only a non-secret invalid placeholder credential.
+5. The script prints a sanitized result block and writes it to `/tmp/realtime-translate-mobile-release-smoke/release-smoke-result.md`. `--record-to-release <tag>` and `--record-to-issue <number>` post that block via `gh` after a secret-pattern guard (default print-only).
+
+The default path reads no OpenAI credential and makes no live OpenAI request. Live realtime validation stays opt-in through `--with-live-credential`, which reads the local secret file only when explicitly requested. Boot resilience is local-only by design; Android emulator smoke stays out of CI (see CI Gates below).
 
 For focused store-signing validation, run `scripts/check_android_release_signing.sh` before building and `scripts/check_android_release_signing.sh --apk /tmp/<release-apk>.apk` after building. In a checkout without local signing material, `scripts/check_android_release_signing.sh` must fail clearly while the normal non-live final QA gate can still pass.
 
