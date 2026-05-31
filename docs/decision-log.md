@@ -107,6 +107,28 @@ Implications:
 - Future agents may widen Italian to realtime output only after source-of-truth docs or redacted live validation prove `gpt-realtime-translate` target support for Italian.
 - This is a text-first fallback boundary; it does not prove bidirectional spoken audio or audible Italian output.
 
+## 2026-05-31 - Live-Session Startup Is Fully Time-Bounded
+
+Status: Accepted
+
+Decision:
+
+- Bound every post-connect live-session bring-up step in `LiveRealtimeTranslationCoordinator` (translated-audio playback start and microphone capture start) with a `startupStepTimeout`, in addition to the existing WebSocket `connectionTimeout`.
+- Apply the same bound on the reconnect bring-up path, not only the first start.
+- On a startup-step timeout, raise a sanitized `LiveRealtimeStartupTimeoutException` that flows through the existing realtime failure classification and bounded reconnect/backoff recovery, so the session leaves `connecting` for a visible `reconnecting`/`offline` state instead of stalling on `Preparing live session`.
+- Keep the 2026-05-26 rule that startup still waits for `session.updated` or a sanitized startup error (within the connection timeout) before microphone capture starts.
+
+Rationale:
+
+- The post-connect playback and microphone starts were unbounded platform-channel calls. A hung native audio/microphone init could pin the session in `connecting` indefinitely with no recovery, error, or credential-invalid transition, which matched the #25 installed-app `Preparing live session` stall.
+- The build spec requires bounded reconnect/backoff behavior and clear user-facing state during connecting/reconnecting/credential-invalid/error.
+
+Implications:
+
+- This is robustness hardening only. It does not prove live microphone translation, audible output, or accepted realtime auth, and it does not close #25 (accepted-credential blocker) or the #6 wired live-path proof.
+- The startup-step timeout exception carries only a sanitized operation name; it never includes credential, transcript, audio, or translation content.
+- Tests must prove a hung playback/microphone start leaves `connecting` for a bounded recovery state and that a persistently hung start terminates in a recovery state rather than stalling.
+
 ## 2026-05-24 - Direct OpenAI Credential And Model Preference
 
 Status: Accepted
