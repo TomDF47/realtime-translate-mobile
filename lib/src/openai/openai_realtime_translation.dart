@@ -372,7 +372,28 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
     _isClosed = true;
     await _subscription.cancel();
     await _socket.close();
-    await _events.close();
+    await _closeEventStream();
+  }
+
+  /// Closes the event controller without awaiting a listener that may never
+  /// exist.
+  ///
+  /// `_events` is single-subscription, so its `close()` future only completes
+  /// once the done event is delivered to a listener. Awaiting it when nothing
+  /// ever listened to [events] hangs the close path forever. Fire-and-forget in
+  /// that case so close stays prompt, while listeners still observe the done
+  /// event and keep their existing await-until-flushed behavior.
+  Future<void> _closeEventStream() async {
+    if (_events.isClosed) {
+      return;
+    }
+
+    if (_events.hasListener) {
+      await _events.close();
+      return;
+    }
+
+    unawaited(_events.close());
   }
 
   void _send(Map<String, Object?> event) {

@@ -510,6 +510,77 @@ void main() {
 
     expect(socket.closeStarted, isTrue);
   });
+
+  test('closeImmediately completes without listening to events', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    unawaited(
+      server.first.then((request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        await for (final message in socket) {
+          if ((message as String).contains('session.update')) {
+            socket.add(jsonEncode({'type': 'session.updated'}));
+          }
+        }
+      }),
+    );
+
+    final gateway = OpenAiRealtimeTranslationGateway(
+      webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}/v1'),
+    );
+    final session = await gateway.connect(
+      config: const OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es'),
+      credential: 'placeholder-local-openai-credential',
+    );
+
+    // Intentionally never listen to session.events. The single-subscription
+    // controller previously left closeImmediately() awaiting a done event that
+    // could never be delivered, hanging the close path forever.
+    await session.closeImmediately().timeout(
+      const Duration(seconds: 2),
+      onTimeout: () =>
+          fail('closeImmediately hung when events stream had no listener'),
+    );
+  });
+
+  test('closeGracefully completes without listening to events', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    unawaited(
+      server.first.then((request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        await for (final message in socket) {
+          final text = message as String;
+          if (text.contains('session.update')) {
+            socket.add(jsonEncode({'type': 'session.updated'}));
+          }
+          if (text.contains('session.close')) {
+            socket.add(jsonEncode({'type': 'session.closed'}));
+            await socket.close();
+            break;
+          }
+        }
+      }),
+    );
+
+    final gateway = OpenAiRealtimeTranslationGateway(
+      webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}/v1'),
+    );
+    final session = await gateway.connect(
+      config: const OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es'),
+      credential: 'placeholder-local-openai-credential',
+    );
+
+    // The graceful path delegates to closeImmediately(); it must also complete
+    // promptly when nothing ever listened to session.events.
+    await session.closeGracefully().timeout(
+      const Duration(seconds: 2),
+      onTimeout: () =>
+          fail('closeGracefully hung when events stream had no listener'),
+    );
+  });
 }
 
 class _StartupErrorHangingCloseWebSocket implements WebSocket {
