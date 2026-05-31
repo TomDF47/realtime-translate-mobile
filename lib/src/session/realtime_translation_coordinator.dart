@@ -429,7 +429,14 @@ class LiveRealtimeTranslationCoordinator {
         if (_shouldSuppressRealtimeTranslationForFallback(event)) {
           return;
         }
-        _commitTranscript(_transcriptCommitter?.commitDelta(event));
+        _commitTranscript(
+          _transcriptCommitter?.commitDelta(
+            event,
+            forceNewSegment: _shouldStartNewRealtimeTranslationAfterFallback(
+              event,
+            ),
+          ),
+        );
       case OpenAiRealtimeTranscriptCompleted():
         if (!_shouldHandleTranscript(event.kind)) {
           return;
@@ -441,7 +448,14 @@ class LiveRealtimeTranslationCoordinator {
         if (_shouldSuppressRealtimeTranslationForFallback(event)) {
           return;
         }
-        _commitTranscript(_transcriptCommitter?.commitCompleted(event));
+        _commitTranscript(
+          _transcriptCommitter?.commitCompleted(
+            event,
+            forceNewSegment: _shouldStartNewRealtimeTranslationAfterFallback(
+              event,
+            ),
+          ),
+        );
       case OpenAiRealtimeAudioDelta():
         if (!_shouldHandleTranslatedAudio()) {
           return;
@@ -599,17 +613,33 @@ class LiveRealtimeTranslationCoordinator {
         itemId,
       _ => null,
     };
-    final committer = _transcriptCommitter;
-    if (itemId != null && itemId.isNotEmpty && committer != null) {
-      final entryId = committer.entryIdForRealtimeItem(itemId);
-      if (_fallbackAuthoritativeEntryIds.contains(entryId)) {
-        return true;
-      }
+    if (itemId == null || itemId.isEmpty) {
+      return false;
     }
 
-    // Direct-fallback rows own their visible translatedText; realtime output is
-    // still from the single configured target session and must not overwrite it.
-    final currentEntryId = committer?.currentEntryId;
+    final entryId = _transcriptCommitter?.entryIdForRealtimeItem(itemId);
+    return _fallbackAuthoritativeEntryIds.contains(entryId);
+  }
+
+  bool _shouldStartNewRealtimeTranslationAfterFallback(
+    OpenAiRealtimeEvent event,
+  ) {
+    final isTranslation = switch (event) {
+      OpenAiRealtimeTranscriptDelta(
+        kind: OpenAiRealtimeTranscriptKind.translation,
+      ) =>
+        true,
+      OpenAiRealtimeTranscriptCompleted(
+        kind: OpenAiRealtimeTranscriptKind.translation,
+      ) =>
+        true,
+      _ => false,
+    };
+    if (!isTranslation) {
+      return false;
+    }
+
+    final currentEntryId = _transcriptCommitter?.currentEntryId;
     return currentEntryId != null &&
         _fallbackAuthoritativeEntryIds.contains(currentEntryId);
   }

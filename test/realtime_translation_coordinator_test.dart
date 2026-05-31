@@ -1091,6 +1091,109 @@ void main() {
   );
 
   test(
+    'Italian realtime translation before source survives after English fallback',
+    () async {
+      final textGateway = _FakeTextInterpreterGateway();
+      textGateway.results.add(
+        const TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Possiamo confermare il piano.',
+        ),
+      );
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        textInterpreterGateway: textGateway,
+      );
+      final startedAt = DateTime.utc(2026, 5, 31, 1, 30);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Realtime after fallback',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'source-it-1',
+            languageCode: 'it',
+            transcript: 'Possiamo iniziare.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'source-en-1',
+            languageCode: 'en',
+            transcript: 'We can confirm the plan.',
+          ),
+        );
+      await _drainAsync();
+
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.output_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          itemId: 'source-it-2',
+          transcript: 'We can begin.',
+        ),
+      );
+      await _drainAsync();
+
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'source-it-2',
+          languageCode: 'it',
+          transcript: 'Possiamo cominciare.',
+        ),
+      );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(3));
+      expect(entries[0].languageCode, 'IT');
+      expect(entries[0].originalText, 'Possiamo iniziare.');
+      expect(entries[1].languageCode, 'EN');
+      expect(entries[1].originalText, 'We can confirm the plan.');
+      expect(entries[1].translatedText, 'Possiamo confermare il piano.');
+      expect(entries[2].languageCode, 'IT');
+      expect(entries[2].originalText, 'Possiamo cominciare.');
+      expect(entries[2].translatedText, 'We can begin.');
+      expect(entries[2].status, 'final');
+      expect(textGateway.requests, hasLength(1));
+      expect(
+        textGateway.requests.single.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
+    },
+  );
+
+  test(
     'translation-first final stays partial until original speech backfills',
     () async {
       final harness = await _Harness.create(

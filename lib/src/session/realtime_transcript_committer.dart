@@ -45,9 +45,13 @@ class LiveRealtimeTranscriptCommitter {
   }
 
   Future<StoredTranscriptEntry?> commitDelta(
-    OpenAiRealtimeTranscriptDelta event,
-  ) {
+    OpenAiRealtimeTranscriptDelta event, {
+    bool forceNewSegment = false,
+  }) {
     return _enqueue(() async {
+      if (forceNewSegment && _hasTranscript) {
+        _resetSegment();
+      }
       if (_isDuplicateFinalItem(event.kind, event.itemId)) {
         return null;
       }
@@ -75,9 +79,13 @@ class LiveRealtimeTranscriptCommitter {
   }
 
   Future<StoredTranscriptEntry?> commitCompleted(
-    OpenAiRealtimeTranscriptCompleted event,
-  ) {
+    OpenAiRealtimeTranscriptCompleted event, {
+    bool forceNewSegment = false,
+  }) {
     return _enqueue(() async {
+      if (forceNewSegment && _hasTranscript) {
+        _resetSegment();
+      }
       if (_isDuplicateCompletion(event)) {
         return null;
       }
