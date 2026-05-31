@@ -145,7 +145,8 @@ class OpenAiResponsesTextInterpreterGateway implements TextInterpreterGateway {
                   'source_language_code': request.sourceLanguageCode,
                 if (request.targetLanguageCode != null)
                   'target_language_code': request.targetLanguageCode,
-                if (request.routeType != null)
+                if (request.routeType ==
+                    TranslationRouteType.directOpenAiFallback)
                   'route_type': request.routeType!.name,
                 'text': request.text,
               }),

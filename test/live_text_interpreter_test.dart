@@ -16,7 +16,7 @@ void main() {
         knownLanguageCodes: ['es', 'en'],
         sourceLanguageCode: 'es',
         targetLanguageCode: 'en',
-        routeType: TranslationRouteType.realtime,
+        routeType: TranslationRouteType.directOpenAiFallback,
       ),
     );
     final serialized = body.toString();
@@ -212,7 +212,7 @@ void main() {
       final italianDirection = harness.gateway.requests[4];
       expect(italianDirection.sourceLanguageCode, 'it');
       expect(italianDirection.targetLanguageCode, 'en');
-      expect(italianDirection.routeType, TranslationRouteType.realtime);
+      expect(italianDirection.routeType, isNull);
 
       final entries = (await harness.repository.loadSnapshot())
           .meetings

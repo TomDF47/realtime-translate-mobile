@@ -5,9 +5,13 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 
 import '../diagnostics/privacy_safe_diagnostics.dart';
+import '../language/language_support.dart';
 import '../openai/openai_credential_store.dart';
 import '../openai/openai_realtime_resilience.dart';
 import '../openai/openai_realtime_translation.dart';
+import '../openai/openai_text_interpreter.dart';
+import '../storage/local_storage_models.dart';
+import 'bidirectional_interpreter_routing.dart';
 import 'live_session_controller.dart';
 import 'microphone_capture.dart';
 import 'microphone_permission.dart';
@@ -47,9 +51,12 @@ class LiveRealtimeTranslationCoordinator {
     this.reconnectDelay,
     this.connectionTimeout = const Duration(seconds: 20),
     this.diagnostics = const PrivacySafeDiagnostics(),
+    TextInterpreterGateway? textInterpreterGateway,
     this.onTranscriptCommitted,
   }) : playbackGateway =
-           playbackGateway ?? NoopTranslatedAudioPlaybackGateway();
+           playbackGateway ?? NoopTranslatedAudioPlaybackGateway(),
+       textInterpreterGateway =
+           textInterpreterGateway ?? OpenAiResponsesTextInterpreterGateway();
 
   final LiveSessionController sessionController;
   final OpenAiCredentialStore credentialStore;
@@ -60,6 +67,7 @@ class LiveRealtimeTranslationCoordinator {
   final LiveRealtimeReconnectDelay? reconnectDelay;
   final Duration connectionTimeout;
   final PrivacySafeDiagnostics diagnostics;
+  final TextInterpreterGateway textInterpreterGateway;
   final LiveRealtimeTranscriptCommitted? onTranscriptCommitted;
 
   RealtimeTranslationSession? _realtimeSession;
@@ -68,6 +76,13 @@ class LiveRealtimeTranslationCoordinator {
   LiveRealtimeTranscriptCommitter? _transcriptCommitter;
   OpenAiRealtimeTranslationConfig? _activeConfig;
   LiveRealtimeTranscriptCommitTarget? _activeTranscriptCommitTarget;
+  String? _activeInterpreterMeetingId;
+  BidirectionalInterpreterRuntime _bidirectionalRuntime =
+      BidirectionalInterpreterRuntime();
+  final List<_RealtimeSourceTurn> _completedSourceTurns =
+      <_RealtimeSourceTurn>[];
+  final Set<String> _fallbackInFlightEntryIds = <String>{};
+  final Set<String> _fallbackCompletedEntryIds = <String>{};
   bool _closingIntentionally = false;
   bool _processTranscriptsDuringIntentionalClose = false;
   bool _handlingFailure = false;
@@ -90,6 +105,7 @@ class LiveRealtimeTranslationCoordinator {
     _isDisposed = false;
     final startGeneration = ++_startGeneration;
     _cancelPendingReconnect();
+    _resetInterpreterRuntimeIfNeeded(transcriptCommitTarget?.meetingId);
     _activeConfig = config;
     _activeTranscriptCommitTarget = transcriptCommitTarget;
     await _closeRealtimeResources(graceful: false, finishTranscript: true);
@@ -217,6 +233,7 @@ class LiveRealtimeTranslationCoordinator {
     _cancelPendingReconnect();
     _activeConfig = null;
     _activeTranscriptCommitTarget = null;
+    _resetInterpreterRuntimeIfNeeded(null);
     await _closeRealtimeResources(graceful: true, finishTranscript: true);
     sessionController.stopMeeting();
   }
@@ -245,6 +262,7 @@ class LiveRealtimeTranslationCoordinator {
     _cancelPendingReconnect();
     _activeConfig = null;
     _activeTranscriptCommitTarget = null;
+    _resetInterpreterRuntimeIfNeeded(null);
     await _closeRealtimeResources(graceful: false, finishTranscript: false);
     _transcriptCommitter = null;
     sessionController.stopMeeting();
@@ -412,6 +430,10 @@ class LiveRealtimeTranslationCoordinator {
         if (!_shouldHandleTranscript(event.kind)) {
           return;
         }
+        if (event.kind == OpenAiRealtimeTranscriptKind.source) {
+          _commitSourceTranscriptAndMaybeFallback(event);
+          return;
+        }
         _commitTranscript(_transcriptCommitter?.commitCompleted(event));
       case OpenAiRealtimeAudioDelta():
         if (!_shouldHandleTranslatedAudio()) {
@@ -458,7 +480,7 @@ class LiveRealtimeTranslationCoordinator {
         config.readAloudOutputEnabled;
   }
 
-  void _commitTranscript(Future<void>? commit) {
+  void _commitTranscript(Future<StoredTranscriptEntry?>? commit) {
     if (commit == null) {
       return;
     }
@@ -479,6 +501,154 @@ class LiveRealtimeTranslationCoordinator {
             );
           }),
     );
+  }
+
+  void _commitSourceTranscriptAndMaybeFallback(
+    OpenAiRealtimeTranscriptCompleted event,
+  ) {
+    final commit = _transcriptCommitter?.commitCompleted(event);
+    if (commit == null) {
+      return;
+    }
+
+    unawaited(
+      commit
+          .then((entry) {
+            onTranscriptCommitted?.call();
+            if (entry == null) {
+              return;
+            }
+            _trackSourceTurnForFallback(entry);
+          })
+          .catchError((Object error, StackTrace stackTrace) {
+            diagnostics.warning(
+              'live_realtime.transcript_commit_failed',
+              fields: {
+                'operation': 'realtime.transcript.commit',
+                'result': 'failed',
+                'errorCode': error.runtimeType.toString(),
+              },
+            );
+          }),
+    );
+  }
+
+  void _trackSourceTurnForFallback(StoredTranscriptEntry entry) {
+    final sourceCode = entry.languageCode.trim().toLowerCase();
+    if (sourceCode.isEmpty ||
+        sourceCode == 'auto' ||
+        entry.originalText.trim().isEmpty) {
+      return;
+    }
+
+    _bidirectionalRuntime.recordDetectedLanguage(
+      code: sourceCode,
+      label: _languageLabelForCode(sourceCode),
+    );
+    _completedSourceTurns.add(
+      _RealtimeSourceTurn(entry: entry, sourceLanguageCode: sourceCode),
+    );
+    if (!_bidirectionalRuntime.isPairLocked) {
+      return;
+    }
+
+    for (final turn in List<_RealtimeSourceTurn>.of(_completedSourceTurns)) {
+      _requestDirectFallbackIfNeeded(turn);
+    }
+  }
+
+  void _requestDirectFallbackIfNeeded(_RealtimeSourceTurn turn) {
+    if (turn.entry.translatedText.trim().isNotEmpty ||
+        _fallbackInFlightEntryIds.contains(turn.entry.id) ||
+        _fallbackCompletedEntryIds.contains(turn.entry.id)) {
+      return;
+    }
+
+    final direction = _bidirectionalRuntime.directionForSource(
+      turn.sourceLanguageCode,
+    );
+    if (direction == null ||
+        direction.routePlan.type != TranslationRouteType.directOpenAiFallback) {
+      return;
+    }
+
+    _fallbackInFlightEntryIds.add(turn.entry.id);
+    unawaited(_translateTextFallbackTurn(turn, direction));
+  }
+
+  Future<void> _translateTextFallbackTurn(
+    _RealtimeSourceTurn turn,
+    BidirectionalInterpreterDirection direction,
+  ) async {
+    try {
+      final credential = await credentialStore.readCredentialForNetworkUse();
+      if (credential == null || credential.isEmpty) {
+        sessionController.markCredentialInvalid();
+        return;
+      }
+      final result = await textInterpreterGateway.interpretTurn(
+        request: TextInterpreterTurnRequest(
+          text: turn.entry.originalText,
+          knownLanguageCodes: _bidirectionalRuntime.languageCodes,
+          sourceLanguageCode: direction.sourceLanguageCode,
+          targetLanguageCode: direction.targetLanguageCode,
+          routeType: TranslationRouteType.directOpenAiFallback,
+        ),
+        credential: credential,
+      );
+      final translatedText = result.translatedText?.trim();
+      if (translatedText == null || translatedText.isEmpty) {
+        return;
+      }
+
+      final target = _activeTranscriptCommitTarget;
+      if (target == null || turn.entry.meetingId.isEmpty) {
+        return;
+      }
+      await target.repository.upsertTranscriptEntry(
+        meetingId: turn.entry.meetingId,
+        updatedAt: target.now().toUtc(),
+        entry: turn.entry.copyWith(
+          translatedText: translatedText,
+          status: 'final',
+        ),
+      );
+      _fallbackCompletedEntryIds.add(turn.entry.id);
+      onTranscriptCommitted?.call();
+    } on TextInterpreterCredentialException {
+      sessionController.markCredentialInvalid();
+    } catch (error) {
+      diagnostics.warning(
+        'live_realtime.text_fallback_failed',
+        fields: {
+          'operation': 'textInterpreter.interpretTurn',
+          'result': 'failed',
+          'errorCode': error.runtimeType.toString(),
+        },
+      );
+    } finally {
+      _fallbackInFlightEntryIds.remove(turn.entry.id);
+    }
+  }
+
+  void _resetInterpreterRuntimeIfNeeded(String? meetingId) {
+    if (_activeInterpreterMeetingId == meetingId) {
+      return;
+    }
+
+    _activeInterpreterMeetingId = meetingId;
+    _bidirectionalRuntime = BidirectionalInterpreterRuntime();
+    _completedSourceTurns.clear();
+    _fallbackInFlightEntryIds.clear();
+    _fallbackCompletedEntryIds.clear();
+  }
+
+  String _languageLabelForCode(String code) {
+    try {
+      return LanguageSupport.languageByCode(code).name;
+    } on ArgumentError {
+      return code.toUpperCase();
+    }
   }
 
   void _enqueueTranslatedAudio(OpenAiRealtimeAudioDelta event) {
@@ -769,4 +939,14 @@ class LiveRealtimeTranslationCoordinator {
 
 class LiveRealtimeConnectTimeoutException implements Exception {
   const LiveRealtimeConnectTimeoutException();
+}
+
+class _RealtimeSourceTurn {
+  const _RealtimeSourceTurn({
+    required this.entry,
+    required this.sourceLanguageCode,
+  });
+
+  final StoredTranscriptEntry entry;
+  final String sourceLanguageCode;
 }

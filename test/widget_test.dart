@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
+import 'package:realtime_translate_mobile/src/language/language_support.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_text_interpreter.dart';
 import 'package:realtime_translate_mobile/src/mock/mock_live_translate_data.dart';
 import 'package:realtime_translate_mobile/src/session/live_session_controller.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
@@ -425,6 +427,93 @@ void main() {
 
     expect(find.text('Spanish <-> English'), findsOneWidget);
   });
+
+  testWidgets(
+    'active realtime path uses English Italian text fallback direction',
+    (tester) async {
+      final repository = _testRepository();
+      final realtimeGateway = _FakeRealtimeTranslationGateway();
+      final textGateway = _FakeTextInterpreterGateway();
+      textGateway.results.add(
+        const TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Possiamo confermare il piano.',
+        ),
+      );
+      await _seedCredential(repository);
+      await tester.pumpWidget(
+        LiveTranslateApp(
+          permissionGateway: _FakePermissionGateway.granted(),
+          meetingRepository: repository,
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+          realtimeTranslationGateway: realtimeGateway,
+          textInterpreterGateway: textGateway,
+        ),
+      );
+
+      await tester.tap(find.text('Start interpreter'));
+      await tester.pumpAndSettle();
+      expect(realtimeGateway.configs.last.targetLanguageCode, 'en');
+
+      realtimeGateway.sessions.last.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'source-en-1',
+          languageCode: 'en',
+          transcript: 'We can confirm the plan.',
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+
+      realtimeGateway.sessions.last
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'source-it-1',
+            languageCode: 'it',
+            transcript: 'Possiamo iniziare.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            itemId: 'source-it-1',
+            transcript: 'We can begin.',
+          ),
+        );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      final entries =
+          (await repository.loadSnapshot()).meetings.single.transcriptEntries;
+      expect(entries, hasLength(2));
+      expect(entries.first.languageCode, 'EN');
+      expect(entries.first.originalText, 'We can confirm the plan.');
+      expect(entries.first.translatedText, 'Possiamo confermare il piano.');
+      expect(entries.last.languageCode, 'IT');
+      expect(entries.last.originalText, 'Possiamo iniziare.');
+      expect(entries.last.translatedText, 'We can begin.');
+      expect(find.text('English <-> Italian'), findsOneWidget);
+      expect(find.text('Possiamo confermare il piano.'), findsOneWidget);
+      expect(find.text('We can begin.'), findsOneWidget);
+
+      expect(textGateway.requests, hasLength(1));
+      final request = textGateway.requests.single;
+      expect(request.sourceLanguageCode, 'en');
+      expect(request.targetLanguageCode, 'it');
+      expect(request.routeType, TranslationRouteType.directOpenAiFallback);
+      expect(request.knownLanguageCodes, ['en', 'it']);
+      expect(
+        textGateway.credentials.single,
+        'placeholder-local-openai-credential',
+      );
+    },
+  );
 
   testWidgets('shows reconnecting realtime recovery state on live surface', (
     tester,
@@ -1010,5 +1099,21 @@ class _FakeAiChatGateway implements AiChatGateway {
       text: answer,
       generatedAt: DateTime(2026, 5, 24, 2, 42),
     );
+  }
+}
+
+class _FakeTextInterpreterGateway implements TextInterpreterGateway {
+  final List<TextInterpreterTurnRequest> requests = [];
+  final List<TextInterpreterTurnResult> results = [];
+  final List<String> credentials = [];
+
+  @override
+  Future<TextInterpreterTurnResult> interpretTurn({
+    required TextInterpreterTurnRequest request,
+    required String credential,
+  }) async {
+    requests.add(request);
+    credentials.add(credential);
+    return results.removeAt(0);
   }
 }

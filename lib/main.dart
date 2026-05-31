@@ -13,6 +13,7 @@ import 'src/openai/openai_credential_store.dart';
 import 'src/openai/openai_meeting_summary.dart';
 import 'src/openai/openai_realtime_resilience.dart';
 import 'src/openai/openai_realtime_translation.dart';
+import 'src/openai/openai_text_interpreter.dart';
 import 'src/session/live_session_controller.dart';
 import 'src/session/microphone_capture.dart';
 import 'src/session/microphone_permission.dart';
@@ -44,6 +45,7 @@ class LiveTranslateApp extends StatelessWidget {
     this.microphoneCaptureGateway,
     this.translatedAudioPlaybackGateway,
     this.realtimeTranslationGateway,
+    this.textInterpreterGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
@@ -53,6 +55,7 @@ class LiveTranslateApp extends StatelessWidget {
   final MicrophoneCaptureGateway? microphoneCaptureGateway;
   final TranslatedAudioPlaybackGateway? translatedAudioPlaybackGateway;
   final RealtimeTranslationGateway? realtimeTranslationGateway;
+  final TextInterpreterGateway? textInterpreterGateway;
 
   @override
   Widget build(BuildContext context) {
@@ -68,6 +71,7 @@ class LiveTranslateApp extends StatelessWidget {
         microphoneCaptureGateway: microphoneCaptureGateway,
         translatedAudioPlaybackGateway: translatedAudioPlaybackGateway,
         realtimeTranslationGateway: realtimeTranslationGateway,
+        textInterpreterGateway: textInterpreterGateway,
       ),
     );
   }
@@ -310,6 +314,7 @@ class LiveTranslateHome extends StatefulWidget {
     this.microphoneCaptureGateway,
     this.translatedAudioPlaybackGateway,
     this.realtimeTranslationGateway,
+    this.textInterpreterGateway,
   });
 
   final MicrophonePermissionGateway? permissionGateway;
@@ -319,6 +324,7 @@ class LiveTranslateHome extends StatefulWidget {
   final MicrophoneCaptureGateway? microphoneCaptureGateway;
   final TranslatedAudioPlaybackGateway? translatedAudioPlaybackGateway;
   final RealtimeTranslationGateway? realtimeTranslationGateway;
+  final TextInterpreterGateway? textInterpreterGateway;
 
   @override
   State<LiveTranslateHome> createState() => _LiveTranslateHomeState();
@@ -380,6 +386,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       realtimeGateway:
           widget.realtimeTranslationGateway ??
           OpenAiRealtimeTranslationGateway(),
+      textInterpreterGateway: widget.textInterpreterGateway,
       onTranscriptCommitted: _scheduleTranscriptRefresh,
     );
     unawaited(_loadStoredMeetings());

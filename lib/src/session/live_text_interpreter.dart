@@ -1,3 +1,4 @@
+import '../language/language_support.dart';
 import '../openai/openai_text_interpreter.dart';
 import '../storage/local_meeting_repository.dart';
 import '../storage/local_storage_models.dart';
@@ -182,12 +183,15 @@ class LiveTextInterpreter {
     final direction = resolvedSourceLanguageCode == null
         ? null
         : _runtime.directionForSource(resolvedSourceLanguageCode);
+    final routeType = direction?.routePlan.type;
     return TextInterpreterTurnRequest(
       text: text,
       knownLanguageCodes: knownLanguageCodes,
       sourceLanguageCode: direction?.sourceLanguageCode,
       targetLanguageCode: direction?.targetLanguageCode,
-      routeType: direction?.routePlan.type,
+      routeType: routeType == TranslationRouteType.directOpenAiFallback
+          ? routeType
+          : null,
     );
   }
 }
