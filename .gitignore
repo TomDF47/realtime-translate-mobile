@@ -22,3 +22,7 @@ DerivedData/
 .env
 .env.*
 !.env.example
+
+# Python tooling artifacts (e.g. scripts/check-supply-chain.py bytecode cache)
+__pycache__/
+*.pyc
