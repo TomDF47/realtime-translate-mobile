@@ -728,6 +728,43 @@ void main() {
     expect(find.text('recipient@example.com'), findsNothing);
   });
 
+  testWidgets('keeps hidden live controls hidden after lifecycle and menu', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+      ),
+    );
+
+    await tester.tap(find.text('Start interpreter'));
+    await tester.pumpAndSettle();
+    _expectHiddenActiveLiveControls();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pumpAndSettle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    _expectHiddenActiveLiveControls();
+
+    await tester.tap(find.byTooltip('Open menu'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Meeting history'), findsOneWidget);
+    _expectHiddenActiveLiveControls();
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    _expectHiddenActiveLiveControls();
+  });
+
   testWidgets('blocks live session when microphone permission is denied', (
     tester,
   ) async {
@@ -920,6 +957,25 @@ Future<void> _appendStoredTranscriptLine(
       playbackState: TranscriptPlaybackState.playable.name,
     ),
   );
+}
+
+void _expectHiddenActiveLiveControls() {
+  expect(find.text('Listening for languages...'), findsOneWidget);
+  expect(find.text('Auto-detect Spanish -> English'), findsNothing);
+  expect(find.bySemanticsLabel(RegExp('From language selector')), findsNothing);
+  expect(find.bySemanticsLabel(RegExp('To language selector')), findsNothing);
+  expect(find.text('Switch'), findsNothing);
+  expect(find.text('Switch Direction'), findsNothing);
+  expect(find.text('Translate Text'), findsNothing);
+  expect(find.text('Read Aloud'), findsNothing);
+  expect(find.text('Resume read-aloud meeting'), findsNothing);
+  expect(find.text('Pause Read Aloud'), findsNothing);
+  expect(find.text('Resume Read Aloud'), findsNothing);
+  expect(find.text('Speaker Active'), findsNothing);
+  expect(find.text('Headphones Active'), findsNothing);
+  expect(find.byTooltip('Open AI chat'), findsNothing);
+  expect(find.text('Generate export'), findsNothing);
+  expect(find.text('Open generated exports'), findsNothing);
 }
 
 Widget _liveSessionHarness(LiveSessionState state) {
