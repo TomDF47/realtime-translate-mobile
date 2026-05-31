@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../diagnostics/privacy_safe_diagnostics.dart';
+import '../language/language_support.dart';
 import 'openai_configuration.dart';
 
 abstract interface class TextInterpreterGateway {
@@ -15,11 +16,17 @@ class TextInterpreterTurnRequest {
   const TextInterpreterTurnRequest({
     required this.text,
     required this.knownLanguageCodes,
+    this.sourceLanguageCode,
+    this.targetLanguageCode,
+    this.routeType,
     this.model = OpenAiConfiguration.summaryModel,
   });
 
   final String text;
   final List<String> knownLanguageCodes;
+  final String? sourceLanguageCode;
+  final String? targetLanguageCode;
+  final TranslationRouteType? routeType;
   final String model;
 }
 
@@ -118,11 +125,12 @@ class OpenAiResponsesTextInterpreterGateway implements TextInterpreterGateway {
               'type': 'input_text',
               'text':
                   'Detect the language of the user text. If exactly one known '
-                  'language is supplied, do not translate. If two known '
-                  'languages are supplied and the detected language is one of '
-                  'them, translate into the other language. Return only JSON '
-                  'with detected_language_code, detected_language_label, and '
-                  'translated_text.',
+                  'language is supplied and the detected language is distinct, '
+                  'translate into the known language. If two known languages '
+                  'are supplied, use target_language_code when present; '
+                  'otherwise translate into the other language in the pair. '
+                  'Return only JSON with detected_language_code, '
+                  'detected_language_label, and translated_text.',
             },
           ],
         },
@@ -133,6 +141,12 @@ class OpenAiResponsesTextInterpreterGateway implements TextInterpreterGateway {
               'type': 'input_text',
               'text': jsonEncode({
                 'known_language_codes': request.knownLanguageCodes,
+                if (request.sourceLanguageCode != null)
+                  'source_language_code': request.sourceLanguageCode,
+                if (request.targetLanguageCode != null)
+                  'target_language_code': request.targetLanguageCode,
+                if (request.routeType != null)
+                  'route_type': request.routeType!.name,
                 'text': request.text,
               }),
             },

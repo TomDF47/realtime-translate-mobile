@@ -9,7 +9,8 @@ Flutter phone app
   -> OpenAI API directly
        Phase 1 live interpreter text path uses Responses with store: false
        detects first language, waits for second distinct language, then locks A <-> B
-       translates subsequent turns A-to-B and B-to-A as text
+       tracks per-turn direction explicitly and translates subsequent turns A-to-B and B-to-A as text
+       uses phone-only direct OpenAI text fallback for locked-pair targets not proven as realtime output, including English -> Italian
        existing realtime audio seams remain for later validated audio work
        explicit compatibility/experimental profile: gpt-realtime-2
 
@@ -59,6 +60,8 @@ There is no MVP AWS, Lambda, token broker, app backend, cloud sync, cloud identi
 ## OpenAI Responsibilities
 
 - Phase 1 normal live interpreter behavior is text-first: detect the two languages in use and translate turns bidirectionally through direct OpenAI calls with `store: false`.
+- The text-first interpreter owns an explicit pair/direction model. After pair lock, each source turn targets the other detected language in the pair. The route planner decides whether that target can use the conservative realtime target set or must use the phone-only direct OpenAI text fallback.
+- Italian is currently source-supported and direct-fallback target-supported, but not marked as a realtime output target. English-to-Italian therefore uses direct OpenAI text fallback until current docs or redacted live validation prove Italian realtime output support; Italian-to-English can target the realtime-capable English route.
 - The existing live human-speech interpretation seam through `gpt-realtime-translate` on `/v1/realtime/translations` remains available for validated audio work, but the active UI must not claim automatic bidirectional spoken audio until it is safely supported.
 - `gpt-realtime-2` kept only as an explicit compatibility/experimental voice-agent profile unless a later decision changes the live route.
 - Stream source and translated transcript deltas when live audio support is explicitly validated.

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:realtime_translate_mobile/src/language/language_support.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_text_interpreter.dart';
 import 'package:realtime_translate_mobile/src/session/live_text_interpreter.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
@@ -13,12 +14,16 @@ void main() {
       const TextInterpreterTurnRequest(
         text: 'Hola, podemos empezar?',
         knownLanguageCodes: ['es', 'en'],
+        sourceLanguageCode: 'es',
+        targetLanguageCode: 'en',
+        routeType: TranslationRouteType.realtime,
       ),
     );
     final serialized = body.toString();
 
     expect(body['store'], isFalse);
     expect(serialized, contains('known_language_codes'));
+    expect(serialized, contains('target_language_code'));
     expect(serialized, isNot(contains('placeholder-local-openai-credential')));
   });
 
@@ -135,6 +140,89 @@ void main() {
           .transcriptEntries;
       expect(entries, hasLength(4));
       expect(entries.last.status, 'final');
+    },
+  );
+
+  test(
+    'English Italian pair routes English to Italian fallback and Italian to English realtime text',
+    () async {
+      final harness = await _Harness.create();
+      harness.gateway.results.addAll(const [
+        TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+        ),
+        TextInterpreterTurnResult(
+          detectedLanguageCode: 'it',
+          detectedLanguageLabel: 'Italian',
+          translatedText: 'We can begin.',
+        ),
+        TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Possiamo confermare il piano.',
+        ),
+        TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Possiamo confermare il piano.',
+        ),
+        TextInterpreterTurnResult(
+          detectedLanguageCode: 'it',
+          detectedLanguageLabel: 'Italian',
+          translatedText: 'We can confirm the plan.',
+        ),
+      ]);
+
+      await harness.interpreter.handleTextTurn('We can begin.');
+      final italian = await harness.interpreter.handleTextTurn(
+        'Possiamo iniziare.',
+      );
+      final english = await harness.interpreter.handleTextTurn(
+        'We can confirm the plan.',
+      );
+      final backToEnglish = await harness.interpreter.handleTextTurn(
+        'Possiamo confermare il piano.',
+      );
+
+      expect(harness.interpreter.routeLabel, 'English <-> Italian');
+      expect(italian.languageCode, 'IT');
+      expect(italian.translatedText, 'We can begin.');
+      expect(english.languageCode, 'EN');
+      expect(english.translatedText, 'Possiamo confermare il piano.');
+      expect(backToEnglish.languageCode, 'IT');
+      expect(backToEnglish.translatedText, 'We can confirm the plan.');
+
+      final backfillDirection = harness.gateway.requests[2];
+      expect(backfillDirection.sourceLanguageCode, 'en');
+      expect(backfillDirection.targetLanguageCode, 'it');
+      expect(
+        backfillDirection.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
+
+      final englishDirection = harness.gateway.requests[3];
+      expect(englishDirection.sourceLanguageCode, 'en');
+      expect(englishDirection.targetLanguageCode, 'it');
+      expect(
+        englishDirection.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
+
+      final italianDirection = harness.gateway.requests[4];
+      expect(italianDirection.sourceLanguageCode, 'it');
+      expect(italianDirection.targetLanguageCode, 'en');
+      expect(italianDirection.routeType, TranslationRouteType.realtime);
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(4));
+      expect(entries[2].originalText, 'We can confirm the plan.');
+      expect(entries[2].translatedText, 'Possiamo confermare il piano.');
+      expect(entries[3].originalText, 'Possiamo confermare il piano.');
+      expect(entries[3].translatedText, 'We can confirm the plan.');
     },
   );
 }

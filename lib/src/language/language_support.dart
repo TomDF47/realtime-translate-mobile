@@ -94,6 +94,14 @@ abstract final class LanguageSupport {
       supportsDirectFallback: true,
     ),
     TranslationLanguage(
+      code: 'it',
+      name: 'Italian',
+      regionLabel: '(IT)',
+      supportsSource: true,
+      supportsRealtimeTarget: false,
+      supportsDirectFallback: true,
+    ),
+    TranslationLanguage(
       code: 'ja',
       name: 'Japanese',
       regionLabel: '(JP)',

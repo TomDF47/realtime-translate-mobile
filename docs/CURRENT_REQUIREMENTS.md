@@ -51,6 +51,7 @@ The active live experience is a text-first two-party interpreter. It should disc
 5. The top status must reflect that Italian was heard and that translation is needed; it must not remain unaware of the Italian side of the conversation.
 6. Once the pair is locked, later turns translate A-to-B and B-to-A without manual direction switching.
 7. First-turn translation may be delayed until the second language is known, but it must be backfilled into the correct transcript block.
+8. The runtime tracks the locked pair and per-turn direction explicitly. For English/Italian, Italian-to-English can use the realtime-capable English target, while English-to-Italian uses phone-only direct OpenAI text fallback until Italian realtime output is proven.
 
 ### Listening Controls
 
@@ -123,6 +124,7 @@ The active live experience is a text-first two-party interpreter. It should disc
 - The conservative realtime target table remains English, Spanish, and French until current OpenAI docs or live validation prove broader realtime target support.
 - Broader app languages such as Japanese, German, Portuguese, Chinese, Korean, Arabic, and Hindi may be shown in picker/fallback contexts outside the active auto-detect flow, but must be labeled as direct-OpenAI fallback where realtime output support is unverified.
 - Fallback behavior must be explicit in UI and must stay phone-only with direct OpenAI calls only.
+- Italian is direct-fallback target-supported for text behavior, but not currently marked as a realtime output target.
 
 ## Realtime Connection, Loading, And Recovery
 
@@ -180,7 +182,7 @@ The active live experience is a text-first two-party interpreter. It should disc
 
 - What exactly triggers "after screenshotting, other options appear": Android screenshot overlay, app menu, debug overlay, lifecycle pause/resume, or a specific screenshot tool?
 - What is the `1124` block identifier: a visible timestamp, internal transcript row ID, meeting ID suffix, or UI test label?
-- Should Italian be supported as a realtime output target now, or only as an auto-detected source with translation to the other locked language through the validated route/fallback?
+- What validation evidence is sufficient to promote Italian from direct text fallback target to realtime output target?
 - What exact text should be used for pending placeholders in production: `Original speech pending`, `Translation pending`, or shorter labels?
 - Should `Pause Listening` be the primary center control, or should it sit beside `Stop Listening` in a simplified bottom bar?
 - Which device/emulator path should be used for the next real microphone validation: host-audio emulator, physical Android device, or a controllable virtual audio route?

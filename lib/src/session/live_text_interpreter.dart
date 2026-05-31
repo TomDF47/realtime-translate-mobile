@@ -1,6 +1,7 @@
 import '../openai/openai_text_interpreter.dart';
 import '../storage/local_meeting_repository.dart';
 import '../storage/local_storage_models.dart';
+import 'bidirectional_interpreter_routing.dart';
 
 class LiveTextInterpreter {
   LiveTextInterpreter({
@@ -17,25 +18,16 @@ class LiveTextInterpreter {
   final String credential;
   final DateTime Function() now;
 
-  final Map<String, String> _languageLabels = <String, String>{};
+  final BidirectionalInterpreterRuntime _runtime =
+      BidirectionalInterpreterRuntime();
   _PendingFirstTurn? _pendingFirstTurn;
   int _turnSequence = 0;
 
-  List<String> get knownLanguageCodes =>
-      List.unmodifiable(_languageLabels.keys);
+  List<String> get knownLanguageCodes => _runtime.languageCodes;
 
-  bool get isPairLocked => _languageLabels.length >= 2;
+  bool get isPairLocked => _runtime.isPairLocked;
 
-  String get routeLabel {
-    if (_languageLabels.length >= 2) {
-      final labels = _languageLabels.values.take(2).toList(growable: false);
-      return '${labels[0]} <-> ${labels[1]}';
-    }
-    if (_languageLabels.length == 1) {
-      return 'Heard ${_languageLabels.values.single}. Waiting for the other language...';
-    }
-    return 'Listening for languages...';
-  }
+  String get routeLabel => _runtime.routeLabel;
 
   Future<StoredTranscriptEntry> handleTextTurn(String text) async {
     final trimmed = text.trim();
@@ -56,17 +48,15 @@ class LiveTextInterpreter {
     );
 
     final result = await gateway.interpretTurn(
-      request: TextInterpreterTurnRequest(
-        text: trimmed,
-        knownLanguageCodes: knownLanguageCodes,
-      ),
+      request: _turnRequest(text: trimmed),
       credential: credential,
     );
     final code = result.detectedLanguageCode.toLowerCase();
-    final hadLanguage = _languageLabels.containsKey(code);
-    _languageLabels.putIfAbsent(code, () => result.detectedLanguageLabel);
-    final discoveredSecondLanguage =
-        !hadLanguage && _languageLabels.length == 2;
+    final discoveredLanguage = _runtime.recordDetectedLanguage(
+      code: code,
+      label: result.detectedLanguageLabel,
+    );
+    final discoveredSecondLanguage = discoveredLanguage && isPairLocked;
     final translatedText = result.translatedText?.trim() ?? '';
     final status = translatedText.isEmpty ? 'language_detected' : 'translating';
     await _upsert(
@@ -78,7 +68,7 @@ class LiveTextInterpreter {
       status: status,
     );
 
-    if (_languageLabels.length == 1 && translatedText.isEmpty) {
+    if (knownLanguageCodes.length == 1 && translatedText.isEmpty) {
       _pendingFirstTurn = _PendingFirstTurn(
         entryId: entryId,
         languageCode: code,
@@ -127,9 +117,9 @@ class LiveTextInterpreter {
     );
 
     final result = await gateway.interpretTurn(
-      request: TextInterpreterTurnRequest(
+      request: _turnRequest(
         text: pending.originalText,
-        knownLanguageCodes: knownLanguageCodes,
+        sourceLanguageCode: pending.languageCode,
       ),
       credential: credential,
     );
@@ -180,6 +170,24 @@ class LiveTextInterpreter {
         status: status,
         playbackState: 'none',
       ),
+    );
+  }
+
+  TextInterpreterTurnRequest _turnRequest({
+    required String text,
+    String? sourceLanguageCode,
+  }) {
+    final resolvedSourceLanguageCode =
+        sourceLanguageCode ?? detectInterpreterLanguageCode(text);
+    final direction = resolvedSourceLanguageCode == null
+        ? null
+        : _runtime.directionForSource(resolvedSourceLanguageCode);
+    return TextInterpreterTurnRequest(
+      text: text,
+      knownLanguageCodes: knownLanguageCodes,
+      sourceLanguageCode: direction?.sourceLanguageCode,
+      targetLanguageCode: direction?.targetLanguageCode,
+      routeType: direction?.routePlan.type,
     );
   }
 }
