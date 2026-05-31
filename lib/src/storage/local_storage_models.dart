@@ -233,6 +233,32 @@ class StoredTranscriptEntry {
   final String status;
   final String playbackState;
 
+  StoredTranscriptEntry copyWith({
+    String? id,
+    String? meetingId,
+    String? languageCode,
+    String? originalText,
+    String? translatedText,
+    DateTime? timestamp,
+    String? speakerLabel,
+    double? confidence,
+    String? status,
+    String? playbackState,
+  }) {
+    return StoredTranscriptEntry(
+      id: id ?? this.id,
+      meetingId: meetingId ?? this.meetingId,
+      languageCode: languageCode ?? this.languageCode,
+      originalText: originalText ?? this.originalText,
+      translatedText: translatedText ?? this.translatedText,
+      timestamp: timestamp ?? this.timestamp,
+      speakerLabel: speakerLabel ?? this.speakerLabel,
+      confidence: confidence ?? this.confidence,
+      status: status ?? this.status,
+      playbackState: playbackState ?? this.playbackState,
+    );
+  }
+
   Map<String, Object?> toJson() {
     return {
       'id': id,

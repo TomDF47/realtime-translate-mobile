@@ -38,10 +38,22 @@ class LiveRealtimeTranscriptCommitter {
   String? _translationItemId;
   String? _detectedSourceLanguageCode;
 
-  Future<void> commitDelta(OpenAiRealtimeTranscriptDelta event) {
+  String? get currentEntryId => _hasTranscript ? _entryId : null;
+
+  String entryIdForRealtimeItem(String itemId) {
+    return _newEntryIdForRealtimeItem(target, itemId);
+  }
+
+  Future<StoredTranscriptEntry?> commitDelta(
+    OpenAiRealtimeTranscriptDelta event, {
+    bool forceNewSegment = false,
+  }) {
     return _enqueue(() async {
+      if (forceNewSegment && _hasTranscript) {
+        _resetSegment();
+      }
       if (_isDuplicateFinalItem(event.kind, event.itemId)) {
-        return;
+        return null;
       }
 
       final nextLanguageCode = event.kind == OpenAiRealtimeTranscriptKind.source
@@ -58,17 +70,24 @@ class LiveRealtimeTranscriptCommitter {
       _seedEntryIdFromItemIfNew(event);
       _appendDelta(event);
       _recordDetectedLanguage(event);
-      await _upsert(status: _statusForCurrentSegment());
+      final entry = await _upsert(status: _statusForCurrentSegment());
       if (_shouldRollReadableBlock()) {
         _readyForNextReadableBlock = true;
       }
+      return entry;
     });
   }
 
-  Future<void> commitCompleted(OpenAiRealtimeTranscriptCompleted event) {
-    return _enqueue(() {
+  Future<StoredTranscriptEntry?> commitCompleted(
+    OpenAiRealtimeTranscriptCompleted event, {
+    bool forceNewSegment = false,
+  }) {
+    return _enqueue(() async {
+      if (forceNewSegment && _hasTranscript) {
+        _resetSegment();
+      }
       if (_isDuplicateCompletion(event)) {
-        return Future<void>.value();
+        return null;
       }
 
       final nextLanguageCode = event.kind == OpenAiRealtimeTranscriptKind.source
@@ -105,10 +124,10 @@ class LiveRealtimeTranscriptCommitter {
     });
   }
 
-  Future<void> finish({required bool interrupted}) {
+  Future<StoredTranscriptEntry?> finish({required bool interrupted}) {
     return _enqueue(() {
       if (!_hasTranscript || _isFinal) {
-        return Future<void>.value();
+        return Future<StoredTranscriptEntry?>.value();
       }
 
       if (!_hasSourceText) {
@@ -120,9 +139,11 @@ class LiveRealtimeTranscriptCommitter {
     });
   }
 
-  Future<void> _enqueue(Future<void> Function() action) {
+  Future<StoredTranscriptEntry?> _enqueue(
+    Future<StoredTranscriptEntry?> Function() action,
+  ) {
     final next = _pendingCommit.then((_) => action());
-    _pendingCommit = next.catchError((_) {});
+    _pendingCommit = next.then<void>((_) {}).catchError((_) {});
     return next;
   }
 
@@ -198,29 +219,31 @@ class LiveRealtimeTranscriptCommitter {
     }
   }
 
-  Future<void> _upsert({required String status}) {
+  Future<StoredTranscriptEntry?> _upsert({required String status}) async {
     if (!_hasTranscript) {
-      return Future<void>.value();
+      return null;
     }
 
     final updatedAt = target.now().toUtc();
-    return target.repository.upsertTranscriptEntry(
+    final entry = StoredTranscriptEntry(
+      id: _entryId,
+      meetingId: target.meetingId,
+      languageCode: (_detectedSourceLanguageCode ?? target.targetLanguageCode)
+          .toUpperCase(),
+      originalText: _sourceBuffer.toString().trim(),
+      translatedText: _translationBuffer.toString().trim(),
+      timestamp: _timestamp ?? updatedAt,
+      speakerLabel: null,
+      confidence: null,
+      status: status,
+      playbackState: 'none',
+    );
+    await target.repository.upsertTranscriptEntry(
       meetingId: target.meetingId,
       updatedAt: updatedAt,
-      entry: StoredTranscriptEntry(
-        id: _entryId,
-        meetingId: target.meetingId,
-        languageCode: (_detectedSourceLanguageCode ?? target.targetLanguageCode)
-            .toUpperCase(),
-        originalText: _sourceBuffer.toString().trim(),
-        translatedText: _translationBuffer.toString().trim(),
-        timestamp: _timestamp ?? updatedAt,
-        speakerLabel: null,
-        confidence: null,
-        status: status,
-        playbackState: 'none',
-      ),
+      entry: entry,
     );
+    return entry;
   }
 
   bool _shouldStartNewSegment(

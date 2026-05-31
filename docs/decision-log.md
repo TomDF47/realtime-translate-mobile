@@ -82,6 +82,31 @@ Implications:
 - Tests should cover pause/resume resource teardown, transcript preservation, accessible pause/resume controls, and no regression of the simplified issue #30 interpreter UI.
 - Paused listening must not add a backend, token broker, cloud sync, live smoke requirement, or logging of transcript/audio/credential material.
 
+## 2026-05-31 - Bidirectional Interpreter Uses Explicit Pair Direction With Text Fallback
+
+Status: Accepted
+
+Decision:
+
+- Track the detected interpreter pair as runtime state: first language, second distinct language, locked pair, and per-turn source-to-target direction.
+- For a locked pair, each turn targets the other language in the pair rather than relying on the one configured realtime output language.
+- Continue using the dedicated realtime translation session for validated realtime output targets such as English, Spanish, and French.
+- Treat Italian as supported source and direct OpenAI text-fallback target until OpenAI realtime Italian output is proven by current documentation or live validation.
+- For English/Italian, Italian speech can continue to target English through the realtime-capable route; English speech targets Italian through the phone-only direct OpenAI text fallback with `store: false`.
+- Preserve the MVP network boundary: no app backend, AWS, Lambda, token broker, cloud sync, server-side transcript handling, or server-side fallback proxy.
+
+Rationale:
+
+- The dedicated `/v1/realtime/translations` session has one configured output language, so a single English-target session cannot honestly claim English-to-Italian realtime output.
+- Explicit direction state makes pair lock testable and avoids silently translating every turn into the startup target language.
+- A direct OpenAI text fallback keeps unsupported realtime targets inside the accepted phone-only credential and privacy model while avoiding unsupported spoken-audio claims.
+
+Implications:
+
+- Tests must prove English/Italian pair lock, English-to-Italian visible text fallback, Italian-to-English visible translation, route metadata, and no credential or payload leakage into diagnostics/backend paths.
+- Future agents may widen Italian to realtime output only after source-of-truth docs or redacted live validation prove `gpt-realtime-translate` target support for Italian.
+- This is a text-first fallback boundary; it does not prove bidirectional spoken audio or audible Italian output.
+
 ## 2026-05-24 - Direct OpenAI Credential And Model Preference
 
 Status: Accepted
