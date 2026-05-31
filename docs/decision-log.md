@@ -507,3 +507,26 @@ Implications:
 - The boot helper must only stop emulator processes whose arguments name `Pixel_9_API_36_Play`, and must continue to avoid `emulator -no-window` on this Fedora/Wayland host.
 
 Revision (2026-05-31): An initial implementation made the default path run `--verify-invalid-credential-recovery`, which saves a placeholder credential and waits for an OpenAI auth rejection. A max-model solution-architect review of PR #40 flagged that this is a live OpenAI request and violates the stated default boundary. The default was corrected to the offline `--verify-offline-startup` proof above, and the auth-rejection recovery moved behind the explicit opt-in flag.
+
+## 2026-05-31 - Release Builds Declare INTERNET And The Metadata Gate Requires Product-Critical Permissions (#41)
+
+Status: Accepted
+
+Decision:
+
+- Declare `android.permission.INTERNET` in `android/app/src/main/AndroidManifest.xml` alongside `android.permission.RECORD_AUDIO`, so release/store builds keep the permission instead of relying on the Flutter debug/profile manifest overlay that only applies to debug and profile builds.
+- Treat `RECORD_AUDIO` + `INTERNET` as the exact least-privilege permission set for the phone-only MVP; the only other entry expected in a built APK is the AndroidX `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` self-scoped signature permission.
+- Strengthen the release metadata gate (`scripts/check_apk_metadata.sh`) so that, in addition to rejecting permissions outside the allowlist, it now fails when either product-critical permission (`RECORD_AUDIO`, `INTERNET`) is absent from the built APK. The dynamic-receiver permission stays allowed but not required.
+- Strengthen the source-level supply-chain gate (`scripts/check-supply-chain.py`) to add `INTERNET` to the allowlist and require both `RECORD_AUDIO` and `INTERNET` in the source main manifest, so the regression is caught in CI before any APK is built.
+
+Rationale:
+
+- The repeatable release smoke (#39) surfaced that a fresh release APK requested only `RECORD_AUDIO` (plus the dynamic-receiver permission); `INTERNET` was declared only in the debug and profile manifests.
+- The MVP's only routine network path is direct phone-to-OpenAI HTTPS/WebSocket calls. A release build without `INTERNET` cannot perform realtime translation, scoped AI chat, summary generation, or export generation, even though debug/emulator builds work.
+- The offline default release smoke fails closed at the `OpenAI setup required` gate before any network call, so the gap was invisible to the bounded-state proof and only showed up in the permission list. Encoding the requirement in both the source gate (CI-cheap) and the APK gate (artifact-true) prevents the regression from recurring.
+
+Implications:
+
+- This is a least-privilege-preserving fix: it adds exactly one already-needed permission and adds no backend, AWS, token broker, cloud sync, or server-side transcript path. The phone-only direct-OpenAI boundary is unchanged.
+- Docs that describe release smoke or permissions (README, testing strategy, regression checklist, environment, cybersecurity report) state that `INTERNET` is declared in the main manifest and required by both gates.
+- A real release/store build still depends on store-ready signing (#24) and a fresh max-model architecture review; this change does not create or publish a release.

@@ -142,7 +142,7 @@ The active live experience is a text-first two-party interpreter. It should disc
 - No standard OpenAI API keys in source, config, assets, tests, screenshots, build outputs, docs, or logs.
 - No transcript, translated text, prompt, summary, recipient list, export payload, microphone audio, audio chunk, or audio-derived payload may be sent to app-owned backend infrastructure.
 - Local meetings, transcripts, summaries, generated exports, preferences, recipient preferences, and credential/session material are encrypted on device.
-- Android `RECORD_AUDIO` is the only current mobile permission and must remain minimized/justified.
+- Android `RECORD_AUDIO` (live microphone capture) and `INTERNET` (the direct phone-to-OpenAI network path) are the only declared mobile permissions and must remain minimized/justified. Release builds must declare `INTERNET` in the main manifest, not rely on the debug/profile tooling overlay.
 - Diagnostics are no-op by default and may record only allowlisted state/configuration labels after redaction/omission.
 - Logs, diagnostics, analytics, crash reports, screenshots, and tests must exclude speech, transcripts, prompts, translations, summaries, recipient lists, export bodies, audio payloads, credentials, tokens, request bodies, and response bodies.
 - Dependency/package changes require lockfile updates, advisory checks, and cybersecurity report updates.

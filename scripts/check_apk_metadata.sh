@@ -171,16 +171,25 @@ if [[ -z "$VERSION_CODE" || -z "$VERSION_NAME" ]]; then
   fail "APK is missing versionCode/versionName metadata"
 fi
 
-# --- Permission allowlist -------------------------------------------------
-# RECORD_AUDIO: live microphone capture. INTERNET: direct OpenAI calls (debug/
-# profile overlays). DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: AndroidX self-
-# scoped signature permission generated for runtime receivers on Android 14+.
+# --- Permission allowlist + product-critical requirement ------------------
+# Least privilege for this app is exactly two declared permissions, both
+# product-critical and therefore required in every shippable artifact:
+#   RECORD_AUDIO : live microphone capture.
+#   INTERNET     : the only routine network path is direct phone-to-OpenAI
+#                  HTTPS/WebSocket calls (realtime translation, scoped AI chat,
+#                  summary/export generation). A release APK missing INTERNET
+#                  cannot perform any of those, so it is a hard failure (#41).
+# DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION is an AndroidX self-scoped signature
+# permission generated for runtime receivers on Android 14+; it is allowed but
+# not required.
 UNEXPECTED_PERMISSIONS=""
+HAS_RECORD_AUDIO=0
+HAS_INTERNET=0
 while IFS= read -r permission; do
   [[ -z "$permission" ]] && continue
   case "$permission" in
-    android.permission.RECORD_AUDIO) ;;
-    android.permission.INTERNET) ;;
+    android.permission.RECORD_AUDIO) HAS_RECORD_AUDIO=1 ;;
+    android.permission.INTERNET) HAS_INTERNET=1 ;;
     "$EXPECTED_PACKAGE".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION) ;;
     *)
       UNEXPECTED_PERMISSIONS+="${UNEXPECTED_PERMISSIONS:+ }$permission"
@@ -190,6 +199,13 @@ done <<<"$PERMISSIONS"
 
 if [[ -n "$UNEXPECTED_PERMISSIONS" ]]; then
   fail "APK requests permission(s) outside the least-privilege allowlist: $UNEXPECTED_PERMISSIONS"
+fi
+
+MISSING_REQUIRED_PERMISSIONS=""
+((HAS_RECORD_AUDIO)) || MISSING_REQUIRED_PERMISSIONS+="${MISSING_REQUIRED_PERMISSIONS:+ }android.permission.RECORD_AUDIO"
+((HAS_INTERNET)) || MISSING_REQUIRED_PERMISSIONS+="${MISSING_REQUIRED_PERMISSIONS:+ }android.permission.INTERNET"
+if [[ -n "$MISSING_REQUIRED_PERMISSIONS" ]]; then
+  fail "APK is missing product-critical permission(s) required for this app: $MISSING_REQUIRED_PERMISSIONS"
 fi
 
 # --- Signing posture (report only; debug is expected for debug releases) --
