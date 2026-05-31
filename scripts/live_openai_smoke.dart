@@ -238,7 +238,7 @@ Future<_SmokeResult> _runRealtimeSmoke({
     if (event is OpenAiRealtimeError) {
       return _SmokeResult.failed(
         name,
-        'websocket event=${event.type} code=${event.code ?? 'unknown'} '
+        'websocket event=${event.type} code=${_safeRealtimeCode(event.code)} '
         '${_safeRealtimeErrorParam(event)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -309,7 +309,7 @@ Future<_SmokeResult> _runRealtimeSyntheticAudioSmoke({
     if (error != null) {
       return _SmokeResult.failed(
         name,
-        'websocket syntheticPcm16AppendError code=${error.code ?? 'unknown'} '
+        'websocket syntheticPcm16AppendError code=${_safeRealtimeCode(error.code)} '
         '${_safeRealtimeErrorParam(error)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -373,7 +373,7 @@ Future<_SmokeResult> _runRealtimePrimarySyntheticAudioSmoke({
     if (error != null) {
       return _SmokeResult.failed(
         name,
-        'websocket syntheticPcm16AppendError code=${error.code ?? 'unknown'} '
+        'websocket syntheticPcm16AppendError code=${_safeRealtimeCode(error.code)} '
         '${_safeRealtimeErrorParam(error)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -450,7 +450,7 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
       final error = evidence.error!;
       return _SmokeResult.failed(
         name,
-        'websocket generatedSpeechError code=${error.code ?? 'unknown'} '
+        'websocket generatedSpeechError code=${_safeRealtimeCode(error.code)} '
         '${_safeRealtimeErrorParam(error)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -537,7 +537,7 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechReconnectSmoke({
       return _SmokeResult.failed(
         name,
         'websocket generatedSpeechReconnectError '
-        'code=${error.code ?? 'unknown'} ${_safeRealtimeErrorParam(error)}'
+        'code=${_safeRealtimeCode(error.code)} ${_safeRealtimeErrorParam(error)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
     }
@@ -989,17 +989,23 @@ String _safeRealtimeErrorParam(OpenAiRealtimeError error) {
   return 'param=$param ';
 }
 
-/// connect() throws [OpenAiRealtimeStartupException] when the realtime session
-/// reports an error or closes before it becomes ready. Surface only a sanitized
-/// error code (never a server message, transcript, audio, or credential).
-String _safeStartupCode(OpenAiRealtimeStartupException error) {
-  final code = error.code;
-  if (RegExp(r'^[a-zA-Z0-9_.-]+$').hasMatch(code)) {
+/// Realtime error/close codes can originate from OpenAI error payloads or
+/// socket close reasons. Surface only an allowlisted `[A-Za-z0-9_.-]` code (or
+/// `unknown`) so no raw server message, transcript, audio byte, or credential
+/// text can reach the smoke output.
+String _safeRealtimeCode(String? code) {
+  if (code != null && RegExp(r'^[a-zA-Z0-9_.-]+$').hasMatch(code)) {
     return code;
   }
 
   return 'unknown';
 }
+
+/// connect() throws [OpenAiRealtimeStartupException] when the realtime session
+/// reports an error or closes before it becomes ready. Surface only a sanitized
+/// error code (never a server message, transcript, audio, or credential).
+String _safeStartupCode(OpenAiRealtimeStartupException error) =>
+    _safeRealtimeCode(error.code);
 
 void _printUsage() {
   print('Usage: dart run scripts/live_openai_smoke.dart [options]');
