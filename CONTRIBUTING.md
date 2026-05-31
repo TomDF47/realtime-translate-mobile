@@ -52,6 +52,9 @@ bash scripts/check-supply-chain.sh
 
 ## Pull Requests
 
+- Raise a pull request for every code, docs, or test change. Do not merge directly into `main`.
+- Every PR receives an automatic solution-architect review with the maximum available reviewer before merge consideration, and must not merge until that review is present and all merge-blocking findings are resolved.
+
 Every PR should state:
 
 - Which issue it addresses.

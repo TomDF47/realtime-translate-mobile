@@ -166,6 +166,8 @@ For local Android release-signing experiments, copy [android/key.properties.exam
 
 ## GitHub Issue Map
 
+The current debug pre-release is `debug-20260531-35642aa`; the latest merged PR (#47) was test/docs only, so no new APK was cut. No PRs are open.
+
 Closed planning and implementation intake:
 
 - #1 Finalize product spec and mockup intake
@@ -188,20 +190,24 @@ Closed planning and implementation intake:
 - #23 Decide safe direct OpenAI mobile credential approach
 - #29 Normalize auto-detect source labels in live UI and meeting history
 
+Closed implementation work (merged to `main`):
+
+- #27 Use the dedicated Realtime Translate path for streaming the original transcript
+- #30 Redesign MVP into a two-party live interpreter (now the default MVP surface)
+- #32 Design and implement bidirectional runtime routing for the two-party interpreter (PR #35)
+- #33 Prevent hidden route-translation controls from reappearing after screenshots or overlays (PR #36)
+- #37 Bound live-session startup so it cannot hang in `Preparing live session` (PR #38)
+- #39 Add repeatable Android release smoke validation (PR #40)
+- #41 Add `android.permission.INTERNET` to release builds (PR #42)
+- #44 Make `OpenAiRealtimeTranslationSession.closeImmediately()` not hang when the events stream was never listened to (PR #45)
+
 Open MVP/planning work:
 
-- #6 Integrate direct OpenAI Realtime Translation (OpenAI-facing gateway path proven live via the repaired `scripts/live_openai_smoke.dart` dedicated-translation smokes; installed valid-credential `Listening` and the English/Italian two-turn UI flow still need a physical device or host-audio emulator with a real capture source)
-- #14 Harden direct OpenAI realtime resilience (failure classification, bounded jittered reconnect/backoff, transcript de-duplication, and resource teardown are implemented and deterministically proven on the wired coordinator path; the real `OpenAiRealtimeTranslationSession` now also has wired proof that a mid-session live socket drop surfaces the retryable `OpenAiRealtimeSessionClosed` / `socket.close_<code>` reconnect trigger the coordinator consumes; the remaining installed-app live reconnect/credential-expiry/network-drop/audible-recovery proof stays blocked behind #6's physical live-audio path)
-- #19 Maintain README and agent handoff docs during implementation
-- #24 Track store-ready Android release signing
-- #27 Restore dedicated live translation behavior and transcript streaming
-- #30 Redesign MVP into a two-party live interpreter (implemented locally in this working tree; issue state not updated because GitHub was unreachable from the sandbox)
-- #31 Fix live interpreter block splitting and startup controls (block splitting, original+translation display, second-language status/header, pause/resume listening, and the `Connecting to OpenAI` startup indicator are implemented and now proven deterministically on the wired widget/coordinator path, including a full two-turn sequence that relies on local source-language detection when OpenAI sends no language metadata; the installed-app live-UI header/block proof stays blocked behind #6 because this machine's emulator has no audio source)
-- #32 Design and implement bidirectional runtime routing for English/Italian fallback (advanced locally in this working tree; issue state update depends on GitHub reachability)
-- #37 Bound live-session startup so it cannot hang indefinitely in `Preparing live session` (fix implemented on a PR branch pending max solution-architect review)
-- #39 Add repeatable Android release smoke validation (resilient emulator boot, APK metadata/signing preflight, and no-secret bounded-state proof implemented on a PR branch pending max solution-architect review)
-- #41 Add `android.permission.INTERNET` to release builds so direct phone-to-OpenAI calls work in store/release APKs (fix implemented on a PR branch pending max solution-architect review; release creation still deferred)
-- #44 Make `OpenAiRealtimeTranslationSession.closeImmediately()` not hang when the events stream was never listened to (fix implemented on a PR branch pending max solution-architect review; close now fire-and-forgets the single-subscription event controller when nothing ever listened and still awaits the flush when a listener is present, so `closeImmediately()` and the delegating `closeGracefully()` stay prompt; the startup `_closeStartupSessionNonBlocking` 250 ms timeout is retained because it independently guards a hanging `_socket.close()`)
+- #6 Integrate direct OpenAI Realtime Translation — blocked on physical Android validation: a real credential reaching `Listening`, physical microphone capture, the English/Italian two-turn UI flow, and audible translated-audio output. The OpenAI-facing realtime gateway path is proven live via the repaired `scripts/live_openai_smoke.dart` dedicated-translation smokes.
+- #14 Harden direct OpenAI realtime resilience — failure classification, bounded jittered reconnect/backoff, transcript de-duplication, and resource teardown are implemented and deterministically proven on the wired coordinator path, and the real `OpenAiRealtimeTranslationSession` now has wired proof that a mid-session live socket drop surfaces the retryable `OpenAiRealtimeSessionClosed` / `socket.close_<code>` reconnect trigger the coordinator consumes (PR #47). The remaining installed-app live reconnect/credential-expiry/network-drop/audible-recovery proof stays blocked behind #6's physical live-audio path.
+- #19 Maintain README and agent handoff docs during implementation — standing rolling handoff and docs-truthfulness tracker.
+- #24 Track store-ready Android release signing — blocked on real local release-signing material only. The store-ready preflight (`scripts/check_android_release_signing.sh` and `scripts/final_qa_gate.sh --require-store-signing`) is implemented and fails closed when local `android/key.properties` is absent, so release artifacts stay debug-signed and labeled not store-ready until that material exists.
+- #31 Fix live interpreter block splitting and startup controls — block splitting, original+translation display, second-language status/header, pause/resume listening, and the `Connecting to OpenAI` startup indicator are implemented and proven deterministically on the wired widget/coordinator path (PR #46), including a full two-turn sequence that relies on local source-language detection when OpenAI sends no language metadata. The installed-app live-UI header/block proof stays blocked behind #6 because this machine's emulator has no audio source.
 
 Deferred V2/future work:
 
