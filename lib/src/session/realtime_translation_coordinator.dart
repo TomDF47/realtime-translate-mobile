@@ -83,6 +83,7 @@ class LiveRealtimeTranslationCoordinator {
       <_RealtimeSourceTurn>[];
   final Set<String> _fallbackInFlightEntryIds = <String>{};
   final Set<String> _fallbackCompletedEntryIds = <String>{};
+  final Set<String> _fallbackAuthoritativeEntryIds = <String>{};
   bool _closingIntentionally = false;
   bool _processTranscriptsDuringIntentionalClose = false;
   bool _handlingFailure = false;
@@ -425,6 +426,9 @@ class LiveRealtimeTranslationCoordinator {
         if (!_shouldHandleTranscript(event.kind)) {
           return;
         }
+        if (_shouldSuppressRealtimeTranslationForFallback(event)) {
+          return;
+        }
         _commitTranscript(_transcriptCommitter?.commitDelta(event));
       case OpenAiRealtimeTranscriptCompleted():
         if (!_shouldHandleTranscript(event.kind)) {
@@ -432,6 +436,9 @@ class LiveRealtimeTranslationCoordinator {
         }
         if (event.kind == OpenAiRealtimeTranscriptKind.source) {
           _commitSourceTranscriptAndMaybeFallback(event);
+          return;
+        }
+        if (_shouldSuppressRealtimeTranslationForFallback(event)) {
           return;
         }
         _commitTranscript(_transcriptCommitter?.commitCompleted(event));
@@ -558,12 +565,6 @@ class LiveRealtimeTranslationCoordinator {
   }
 
   void _requestDirectFallbackIfNeeded(_RealtimeSourceTurn turn) {
-    if (turn.entry.translatedText.trim().isNotEmpty ||
-        _fallbackInFlightEntryIds.contains(turn.entry.id) ||
-        _fallbackCompletedEntryIds.contains(turn.entry.id)) {
-      return;
-    }
-
     final direction = _bidirectionalRuntime.directionForSource(
       turn.sourceLanguageCode,
     );
@@ -572,8 +573,45 @@ class LiveRealtimeTranslationCoordinator {
       return;
     }
 
+    if (_fallbackInFlightEntryIds.contains(turn.entry.id) ||
+        _fallbackCompletedEntryIds.contains(turn.entry.id)) {
+      return;
+    }
+
+    _fallbackAuthoritativeEntryIds.add(turn.entry.id);
     _fallbackInFlightEntryIds.add(turn.entry.id);
     unawaited(_translateTextFallbackTurn(turn, direction));
+  }
+
+  bool _shouldSuppressRealtimeTranslationForFallback(
+    OpenAiRealtimeEvent event,
+  ) {
+    final itemId = switch (event) {
+      OpenAiRealtimeTranscriptDelta(
+        kind: OpenAiRealtimeTranscriptKind.translation,
+        :final itemId,
+      ) =>
+        itemId,
+      OpenAiRealtimeTranscriptCompleted(
+        kind: OpenAiRealtimeTranscriptKind.translation,
+        :final itemId,
+      ) =>
+        itemId,
+      _ => null,
+    };
+    final committer = _transcriptCommitter;
+    if (itemId != null && itemId.isNotEmpty && committer != null) {
+      final entryId = committer.entryIdForRealtimeItem(itemId);
+      if (_fallbackAuthoritativeEntryIds.contains(entryId)) {
+        return true;
+      }
+    }
+
+    // Direct-fallback rows own their visible translatedText; realtime output is
+    // still from the single configured target session and must not overwrite it.
+    final currentEntryId = committer?.currentEntryId;
+    return currentEntryId != null &&
+        _fallbackAuthoritativeEntryIds.contains(currentEntryId);
   }
 
   Future<void> _translateTextFallbackTurn(
@@ -641,6 +679,7 @@ class LiveRealtimeTranslationCoordinator {
     _completedSourceTurns.clear();
     _fallbackInFlightEntryIds.clear();
     _fallbackCompletedEntryIds.clear();
+    _fallbackAuthoritativeEntryIds.clear();
   }
 
   String _languageLabelForCode(String code) {

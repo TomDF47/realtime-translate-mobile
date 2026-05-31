@@ -38,6 +38,12 @@ class LiveRealtimeTranscriptCommitter {
   String? _translationItemId;
   String? _detectedSourceLanguageCode;
 
+  String? get currentEntryId => _hasTranscript ? _entryId : null;
+
+  String entryIdForRealtimeItem(String itemId) {
+    return _newEntryIdForRealtimeItem(target, itemId);
+  }
+
   Future<StoredTranscriptEntry?> commitDelta(
     OpenAiRealtimeTranscriptDelta event,
   ) {

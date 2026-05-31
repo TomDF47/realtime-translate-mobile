@@ -4,9 +4,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:realtime_translate_mobile/src/language/language_support.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_text_interpreter.dart';
 import 'package:realtime_translate_mobile/src/session/live_session_controller.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
@@ -912,6 +914,183 @@ void main() {
   );
 
   test(
+    'English Italian fallback runs after realtime translated text arrives first',
+    () async {
+      final textGateway = _FakeTextInterpreterGateway();
+      textGateway.results.add(
+        const TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Possiamo confermare il piano.',
+        ),
+      );
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        textInterpreterGateway: textGateway,
+      );
+      final startedAt = DateTime.utc(2026, 5, 31, 1);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Fallback first order',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            itemId: 'source-en-1',
+            transcript: 'We can confirm the plan.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'source-en-1',
+            languageCode: 'en',
+            transcript: 'We can confirm the plan.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'source-it-1',
+            languageCode: 'it',
+            transcript: 'Possiamo iniziare.',
+          ),
+        );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(2));
+      expect(entries.first.languageCode, 'EN');
+      expect(entries.first.originalText, 'We can confirm the plan.');
+      expect(entries.first.translatedText, 'Possiamo confermare il piano.');
+      expect(entries.last.languageCode, 'IT');
+      expect(entries.last.originalText, 'Possiamo iniziare.');
+      expect(textGateway.requests, hasLength(1));
+      expect(textGateway.requests.single.sourceLanguageCode, 'en');
+      expect(textGateway.requests.single.targetLanguageCode, 'it');
+      expect(
+        textGateway.requests.single.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
+    },
+  );
+
+  test(
+    'English Italian fallback remains authoritative over later realtime output',
+    () async {
+      final textGateway = _FakeTextInterpreterGateway();
+      textGateway.results.add(
+        const TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Possiamo confermare il piano.',
+        ),
+      );
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        textInterpreterGateway: textGateway,
+      );
+      final startedAt = DateTime.utc(2026, 5, 31, 1, 15);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Fallback overwrite order',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'source-en-1',
+            languageCode: 'en',
+            transcript: 'We can confirm the plan.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'source-it-1',
+            languageCode: 'it',
+            transcript: 'Possiamo iniziare.',
+          ),
+        );
+      await _drainAsync();
+
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.output_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          itemId: 'source-en-1',
+          transcript: 'We can confirm the plan.',
+        ),
+      );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(2));
+      expect(entries.first.languageCode, 'EN');
+      expect(entries.first.originalText, 'We can confirm the plan.');
+      expect(entries.first.translatedText, 'Possiamo confermare il piano.');
+      expect(entries.last.languageCode, 'IT');
+      expect(entries.last.originalText, 'Possiamo iniziare.');
+      expect(entries.last.translatedText, isEmpty);
+      expect(textGateway.requests, hasLength(1));
+      expect(
+        textGateway.requests.single.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
+    },
+  );
+
+  test(
     'translation-first final stays partial until original speech backfills',
     () async {
       final harness = await _Harness.create(
@@ -1717,6 +1896,7 @@ class _Harness {
         const OpenAiRealtimeReconnectPolicy(),
     LiveRealtimeReconnectDelay? reconnectDelay,
     Duration connectionTimeout = const Duration(seconds: 12),
+    TextInterpreterGateway? textInterpreterGateway,
   }) async {
     final harness = _Harness._(permissionStatus: permissionStatus);
     harness.coordinator = LiveRealtimeTranslationCoordinator(
@@ -1728,6 +1908,7 @@ class _Harness {
       reconnectPolicy: reconnectPolicy,
       reconnectDelay: reconnectDelay ?? (_) => Future<void>.value(),
       connectionTimeout: connectionTimeout,
+      textInterpreterGateway: textInterpreterGateway,
     );
     if (seedCredential) {
       await harness.credentialStore.saveUserProvidedCredential(
@@ -1938,5 +2119,21 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
 
   void addEvent(OpenAiRealtimeEvent event) {
     _events.add(event);
+  }
+}
+
+class _FakeTextInterpreterGateway implements TextInterpreterGateway {
+  final List<TextInterpreterTurnRequest> requests = [];
+  final List<TextInterpreterTurnResult> results = [];
+  final List<String> credentials = [];
+
+  @override
+  Future<TextInterpreterTurnResult> interpretTurn({
+    required TextInterpreterTurnRequest request,
+    required String credential,
+  }) async {
+    requests.add(request);
+    credentials.add(credential);
+    return results.removeAt(0);
   }
 }
