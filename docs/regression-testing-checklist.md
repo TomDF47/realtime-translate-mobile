@@ -21,12 +21,12 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Tap `Start interpreter` without a saved credential and verify `OpenAI setup required` appears before microphone permission.
 - Save only a placeholder or current test credential through `OpenAI setup`; verify the saved value is not displayed.
 - Start an interpreter session with fake or valid local credential and granted microphone permission.
-- Verify the live screen starts with `Listening for languages...`, live status, elapsed timer, transcript area, `Translate Text`, and `Stop Listening`.
-- Verify the active live screen does not show source picker, target picker, direction switch, read-aloud controls, speaker/headphone chips, or `Resume read-aloud meeting`.
+- Verify the live screen starts with `Listening for languages...`, live status, elapsed timer, transcript area, `Stop Listening`, and `Pause Listening`.
+- Verify the active live screen does not show source picker, target picker, direction switch, `Translate Text`, read-aloud controls, speaker/headphone chips, live-header AI chat, live-screen export controls, or `Resume read-aloud meeting`.
 - Feed or fake a first detected language and verify `Heard <language>. Waiting for the other language...`.
 - Feed or fake a second distinct detected language and verify `<A> <-> <B>`.
-- Open the menu and verify `Meeting history`, `Generate export`, and `Open generated exports` respond.
-- Open AI chat from the header and close it with the close button and drag/back dismissal.
+- Open the live menu and verify `Meeting history` responds while `Generate export` and `Open generated exports` remain absent from the active live menu.
+- Open AI chat from meeting history or another non-live-header entry point and close it with the close button and drag/back dismissal.
 
 ## Language Discovery
 
@@ -38,9 +38,8 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 ## Buttons And Toggles
 
-- Tap `Translate Text` off and on; verify visual state and semantics change.
-- With `Translate Text` off, verify translation transcript deltas are ignored and translated output is not stored.
-- Verify read-aloud, pause/resume read-aloud, speaker/headphone state, and switch-direction controls are hidden in the active interpreter flow.
+- Verify `Translate Text` is absent from the active interpreter flow before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
+- Verify read-aloud, pause/resume read-aloud, speaker/headphone state, and switch-direction controls are hidden in the active interpreter flow before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
 - Tap `Stop Listening`; verify capture/realtime/playback resources close and the setup screen returns.
 - If `Jump to Live` is visible, tap it and verify the list returns to the latest transcript entry or shows the latest-state confirmation.
 - In AI chat, tap prompt chips, send, helpful, not helpful, regenerate, and close; verify no control is inert.
@@ -71,7 +70,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 ## Generated Share And Export
 
-- Open `Generate export` with no active meeting and verify it asks for a meeting first.
+- Open generated export controls from meeting history or another non-live-screen entry point; do not expect generated export controls on the active interpreter surface.
 - With an active meeting, generate `Transcript`; verify it saves encrypted local generated export metadata and opens in the in-app browser/detail view.
 - Generate `Summary` and `Both` through a fake summary gateway; verify the request uses direct OpenAI path with `store: false` in tests.
 - Verify no recipient input, recipient checklist, or outbound mail backend appears in the active MVP export flow.

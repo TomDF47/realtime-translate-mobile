@@ -319,6 +319,39 @@ tap_ui() {
   adb_cmd shell input tap "$x" "$y"
 }
 
+assert_ui_contains() {
+  local needle="$1"
+  if ! dump_ui | grep -Fq "$needle"; then
+    dump_ui_to "$ARTIFACT_DIR/assert-missing-window.xml" || true
+    fail "expected UI text/content-desc containing: $needle"
+  fi
+}
+
+assert_ui_absent() {
+  local needle="$1"
+  if dump_ui | grep -Fq "$needle"; then
+    dump_ui_to "$ARTIFACT_DIR/assert-unexpected-window.xml" || true
+    fail "unexpected UI text/content-desc found: $needle"
+  fi
+}
+
+assert_active_live_surface() {
+  assert_ui_contains "Listening"
+  assert_ui_contains "Stop listening"
+  assert_ui_contains "Pause listening"
+  assert_ui_absent "Auto-detect Spanish"
+  assert_ui_absent "Translate Text"
+  assert_ui_absent "Read Aloud"
+  assert_ui_absent "Pause Read Aloud"
+  assert_ui_absent "Resume Read Aloud"
+  assert_ui_absent "Speaker Active"
+  assert_ui_absent "Headphones Active"
+  assert_ui_absent "Switch Direction"
+  assert_ui_absent "Open AI chat"
+  assert_ui_absent "Generate export"
+  assert_ui_absent "Open generated exports"
+}
+
 tap_first_edit_text() {
   local xml line bounds x1 y1 x2 y2 x y
   xml="$(dump_ui)"
@@ -423,13 +456,13 @@ cleanup_app_data
 
 log "Launching $PACKAGE_NAME"
 adb_cmd shell am start -n "$PACKAGE_NAME/$MAIN_ACTIVITY" >/dev/null
-wait_for_ui "Start new meeting" 60
+wait_for_ui "Start interpreter" 60
 wait_for_ui "Open meeting history" 10
 screencap_to "$ARTIFACT_DIR/01-start.png"
 dump_ui_to "$ARTIFACT_DIR/01-start.xml"
 
 log "Verifying missing-credential gate"
-tap_ui "Start new meeting"
+tap_ui "Start interpreter"
 wait_for_ui "OpenAI setup required" 30
 screencap_to "$ARTIFACT_DIR/02-setup-required.png"
 dump_ui_to "$ARTIFACT_DIR/02-setup-required.xml"
@@ -460,8 +493,8 @@ if ((VERIFY_CREDENTIAL_RESET)); then
   tap_ui "Close OpenAI setup"
   wait_for_ui "OpenAI setup required" 10
   tap_ui "Back to start"
-  wait_for_ui "Start new meeting" 15
-  tap_ui "Start new meeting"
+  wait_for_ui "Start interpreter" 15
+  tap_ui "Start interpreter"
   wait_for_ui "OpenAI setup required" 30
   screencap_to "$ARTIFACT_DIR/05-credential-reset-gate.png"
   dump_ui_to "$ARTIFACT_DIR/05-credential-reset-gate.xml"
@@ -486,12 +519,12 @@ if ((VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
   tap_ui "Close OpenAI setup"
   wait_for_ui "OpenAI setup required" 10
   tap_ui "Back to start"
-  wait_for_ui "Start new meeting" 15
+  wait_for_ui "Start interpreter" 15
 
   log "Starting live path with invalid placeholder credential"
   adb_cmd shell pm grant "$PACKAGE_NAME" android.permission.RECORD_AUDIO \
     >/dev/null 2>&1 || true
-  tap_ui "Start new meeting"
+  tap_ui "Start interpreter"
   wait_for_ui "OpenAI credential expired or was rejected" 90
   wait_for_ui "OpenAI setup required" 5
   screencap_to "$ARTIFACT_DIR/04-invalid-credential-recovery.png"
@@ -499,8 +532,6 @@ if ((VERIFY_INVALID_CREDENTIAL_RECOVERY)); then
 fi
 
 if ((USE_LIVE_CREDENTIAL)); then
-  AI_CHAT_OPENED=0
-
   log "Saving live credential through the app UI without printing it"
   tap_ui "Open OpenAI setup"
   wait_for_ui "OpenAI setup" 20
@@ -516,10 +547,10 @@ if ((USE_LIVE_CREDENTIAL)); then
   tap_ui "Close OpenAI setup"
   wait_for_ui "OpenAI setup required" 10
   tap_ui "Back to start"
-  wait_for_ui "Start new meeting" 15
+  wait_for_ui "Start interpreter" 15
 
   log "Starting live surface with runtime microphone permission"
-  tap_ui "Start new meeting"
+  tap_ui "Start interpreter"
   for _ in $(seq 1 90); do
     ui="$(dump_ui || true)"
     if printf '%s\n' "$ui" | grep -Fq "OpenAI credential expired or was rejected"; then
@@ -533,10 +564,22 @@ if ((USE_LIVE_CREDENTIAL)); then
     sleep 1
   done
   wait_for_ui "Listening" 5
-  wait_for_ui "Auto-detect Spanish" 5
   wait_for_ui "Stop listening" 5
+  assert_active_live_surface
   screencap_to "$ARTIFACT_DIR/04-live-listening.png"
   dump_ui_to "$ARTIFACT_DIR/04-live-listening.xml"
+
+  log "Verifying live menu does not expose hidden live controls"
+  tap_ui "Open menu"
+  wait_for_ui "Meeting history" 10
+  assert_ui_absent "Generate export"
+  assert_ui_absent "Open generated exports"
+  assert_ui_absent "Open AI chat"
+  screencap_to "$ARTIFACT_DIR/05-live-menu-hidden-controls.png"
+  dump_ui_to "$ARTIFACT_DIR/05-live-menu-hidden-controls.xml"
+  adb_cmd shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+  wait_for_ui "Listening" 10
+  assert_active_live_surface
 
   if ((RUN_DEBUG_LIVE_EVENTS)); then
     log "Running opt-in debug generated-event proof"
@@ -549,7 +592,7 @@ if ((USE_LIVE_CREDENTIAL)); then
     log "Restarting app to verify persisted debug proof row"
     adb_cmd shell am force-stop "$PACKAGE_NAME" >/dev/null
     adb_cmd shell am start -n "$PACKAGE_NAME/$MAIN_ACTIVITY" >/dev/null
-    wait_for_ui "Start new meeting" 30
+    wait_for_ui "Start interpreter" 30
     wait_for_ui "Open meeting history" 10
     tap_ui "Open meeting history"
     wait_for_ui "Project timeline review" 20
@@ -557,26 +600,24 @@ if ((USE_LIVE_CREDENTIAL)); then
     screencap_to "$ARTIFACT_DIR/06-debug-realtime-proof-history-after-restart.png"
     dump_ui_to "$ARTIFACT_DIR/06-debug-realtime-proof-history-after-restart.xml"
 
-    log "Reopening persisted meeting and verifying this-meeting AI context"
+    log "Reopening persisted meeting and verifying hidden controls stay hidden"
     tap_ui "Project timeline review"
     wait_for_ui "Listening" 30
-    tap_ui "Open AI chat"
-    wait_for_ui "AI Chat" 20
-    wait_for_ui "This meeting" 10
-    wait_for_ui "Ready to answer from 5 local transcript lines." 10
-    screencap_to "$ARTIFACT_DIR/07-ai-chat-this-meeting-persisted-context.png"
-    dump_ui_to "$ARTIFACT_DIR/07-ai-chat-this-meeting-persisted-context.xml"
-    AI_CHAT_OPENED=1
+    assert_active_live_surface
+    screencap_to "$ARTIFACT_DIR/07-reopened-live-hidden-controls.png"
+    dump_ui_to "$ARTIFACT_DIR/07-reopened-live-hidden-controls.xml"
   fi
 
-  if ((AI_CHAT_OPENED == 0)); then
-    log "Opening scoped AI chat sheet without sending a prompt"
-    tap_ui "Open AI chat"
-    wait_for_ui "AI Chat" 20
-    wait_for_ui "This meeting" 10
-    screencap_to "$ARTIFACT_DIR/06-ai-chat-this-meeting.png"
-    dump_ui_to "$ARTIFACT_DIR/06-ai-chat-this-meeting.xml"
-  fi
+  log "Opening scoped AI chat sheet from meeting history without sending a prompt"
+  tap_ui "Open menu"
+  wait_for_ui "Meeting history" 10
+  tap_ui "Meeting history"
+  wait_for_ui "Ask across meetings" 20
+  tap_ui "Ask across meetings"
+  wait_for_ui "AI Chat" 20
+  wait_for_ui "All meetings" 10
+  screencap_to "$ARTIFACT_DIR/06-ai-chat-all-meetings.png"
+  dump_ui_to "$ARTIFACT_DIR/06-ai-chat-all-meetings.xml"
 fi
 
 cleanup_app_data
