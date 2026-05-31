@@ -28,17 +28,33 @@ Future<void> main(List<String> args) async {
   }
 
   final results = <_SmokeResult>[];
+  // Print and flush each result the moment it completes. print() block-buffers
+  // stdout when it is redirected to a file/pipe, and a multi-session realtime
+  // run (for example the controlled reconnect smoke) can exit before a single
+  // end-of-run flush lands, silently dropping the sanitized result lines.
+  // Flushing per result keeps the proof output repeatable when captured.
+  Future<void> record(_SmokeResult result) async {
+    results.add(result);
+    stdout.writeln(
+      '${result.passed ? 'PASS' : 'FAIL'} ${result.name}: ${result.note}',
+    );
+    await stdout.flush();
+  }
+
+  stdout.writeln('Live OpenAI smoke results:');
+  await stdout.flush();
+
   if (selection.summary) {
-    results.add(await _runResponsesSmoke(_summarySmokeRequest()));
+    await record(await _runResponsesSmoke(_summarySmokeRequest()));
   }
   if (selection.aiChatThisMeeting) {
-    results.add(await _runResponsesSmoke(_aiChatSmokeRequestThisMeeting()));
+    await record(await _runResponsesSmoke(_aiChatSmokeRequestThisMeeting()));
   }
   if (selection.aiChatAllMeetings) {
-    results.add(await _runResponsesSmoke(_aiChatSmokeRequestAllMeetings()));
+    await record(await _runResponsesSmoke(_aiChatSmokeRequestAllMeetings()));
   }
   if (selection.realtimePrimary) {
-    results.add(
+    await record(
       await _runRealtimeSmoke(
         credential: credential,
         name: 'realtime-primary',
@@ -50,7 +66,7 @@ Future<void> main(List<String> args) async {
     );
   }
   if (selection.realtimeTranslationFallback) {
-    results.add(
+    await record(
       await _runRealtimeSmoke(
         credential: credential,
         name: 'realtime-translation-fallback',
@@ -62,7 +78,7 @@ Future<void> main(List<String> args) async {
     );
   }
   if (selection.realtimeSyntheticAudio) {
-    results.add(
+    await record(
       await _runRealtimeSyntheticAudioSmoke(
         credential: credential,
         name: 'realtime-translation-synthetic-audio',
@@ -74,7 +90,7 @@ Future<void> main(List<String> args) async {
     );
   }
   if (selection.realtimePrimarySyntheticAudio) {
-    results.add(
+    await record(
       await _runRealtimePrimarySyntheticAudioSmoke(
         credential: credential,
         name: 'realtime-primary-synthetic-audio',
@@ -86,7 +102,7 @@ Future<void> main(List<String> args) async {
     );
   }
   if (selection.realtimeGeneratedSpeech) {
-    results.add(
+    await record(
       await _runRealtimeGeneratedSpeechSmoke(
         credential: credential,
         name: 'realtime-translation-generated-speech',
@@ -98,7 +114,7 @@ Future<void> main(List<String> args) async {
     );
   }
   if (selection.realtimeGeneratedSpeechReconnect) {
-    results.add(
+    await record(
       await _runRealtimeGeneratedSpeechReconnectSmoke(
         credential: credential,
         name: 'realtime-translation-generated-speech-reconnect',
@@ -110,10 +126,7 @@ Future<void> main(List<String> args) async {
     );
   }
 
-  print('Live OpenAI smoke results:');
-  for (final result in results) {
-    print('${result.passed ? 'PASS' : 'FAIL'} ${result.name}: ${result.note}');
-  }
+  await stdout.flush();
 
   if (results.any((result) => !result.passed)) {
     exitCode = 1;
@@ -225,7 +238,7 @@ Future<_SmokeResult> _runRealtimeSmoke({
     if (event is OpenAiRealtimeError) {
       return _SmokeResult.failed(
         name,
-        'websocket event=${event.type} code=${event.code ?? 'unknown'} '
+        'websocket event=${event.type} code=${_safeRealtimeCode(event.code)} '
         '${_safeRealtimeErrorParam(event)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -243,6 +256,12 @@ Future<_SmokeResult> _runRealtimeSmoke({
       name,
       'websocket event=${event.type} model=${config.profile.model} '
       'path=${config.profile.path}',
+    );
+  } on OpenAiRealtimeStartupException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket startupRejected code=${_safeStartupCode(error)} '
+      'model=${config.profile.model} path=${config.profile.path}',
     );
   } on WebSocketException catch (error) {
     return _SmokeResult.failed(
@@ -279,39 +298,9 @@ Future<_SmokeResult> _runRealtimeSyntheticAudioSmoke({
       credential: credential,
     );
 
-    final readyEvent = await _waitForRealtimeReady(
-      session.events,
-      const Duration(seconds: 10),
-      requireSessionUpdated: true,
-    );
-
-    if (readyEvent == null) {
-      return _SmokeResult.failed(
-        name,
-        'websocket sessionUpdateTimeout model=${config.profile.model} '
-        'path=${config.profile.path}',
-      );
-    }
-
-    if (readyEvent is OpenAiRealtimeError) {
-      return _SmokeResult.failed(
-        name,
-        'websocket event=${readyEvent.type} '
-        'code=${readyEvent.code ?? 'unknown'} '
-        '${_safeRealtimeErrorParam(readyEvent)}'
-        'model=${config.profile.model} '
-        'path=${config.profile.path}',
-      );
-    }
-
-    if (readyEvent is OpenAiRealtimeSessionClosed) {
-      return _SmokeResult.failed(
-        name,
-        'websocket closedBeforeReady model=${config.profile.model} '
-        'path=${config.profile.path}',
-      );
-    }
-
+    // connect() blocks until session.updated (or throws), so the session is
+    // ready here. session.events is single-subscription; subscribe exactly once
+    // (a second listen would throw "Stream has already been listened to").
     session.appendPcm16Audio(_syntheticTonePcm16(config));
     final error = await _waitForRealtimeError(
       session.events,
@@ -320,7 +309,7 @@ Future<_SmokeResult> _runRealtimeSyntheticAudioSmoke({
     if (error != null) {
       return _SmokeResult.failed(
         name,
-        'websocket syntheticPcm16AppendError code=${error.code ?? 'unknown'} '
+        'websocket syntheticPcm16AppendError code=${_safeRealtimeCode(error.code)} '
         '${_safeRealtimeErrorParam(error)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -331,6 +320,12 @@ Future<_SmokeResult> _runRealtimeSyntheticAudioSmoke({
       'websocket syntheticPcm16ToneAppend=200ms nonSpeech '
       'model=${config.profile.model} '
       'path=${config.profile.path}',
+    );
+  } on OpenAiRealtimeStartupException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket startupRejected code=${_safeStartupCode(error)} '
+      'model=${config.profile.model} path=${config.profile.path}',
     );
   } on WebSocketException catch (error) {
     return _SmokeResult.failed(
@@ -367,39 +362,8 @@ Future<_SmokeResult> _runRealtimePrimarySyntheticAudioSmoke({
       credential: credential,
     );
 
-    final readyEvent = await _waitForRealtimeReady(
-      session.events,
-      const Duration(seconds: 10),
-      requireSessionUpdated: true,
-    );
-
-    if (readyEvent == null) {
-      return _SmokeResult.failed(
-        name,
-        'websocket sessionUpdateTimeout model=${config.profile.model} '
-        'path=${config.profile.path}',
-      );
-    }
-
-    if (readyEvent is OpenAiRealtimeError) {
-      return _SmokeResult.failed(
-        name,
-        'websocket event=${readyEvent.type} '
-        'code=${readyEvent.code ?? 'unknown'} '
-        '${_safeRealtimeErrorParam(readyEvent)}'
-        'model=${config.profile.model} '
-        'path=${config.profile.path}',
-      );
-    }
-
-    if (readyEvent is OpenAiRealtimeSessionClosed) {
-      return _SmokeResult.failed(
-        name,
-        'websocket closedBeforeReady model=${config.profile.model} '
-        'path=${config.profile.path}',
-      );
-    }
-
+    // connect() blocks until session.updated (or throws). session.events is
+    // single-subscription; subscribe exactly once below.
     session.appendPcm16Audio(_syntheticTonePcm16(config));
 
     final error = await _waitForRealtimeError(
@@ -409,7 +373,7 @@ Future<_SmokeResult> _runRealtimePrimarySyntheticAudioSmoke({
     if (error != null) {
       return _SmokeResult.failed(
         name,
-        'websocket syntheticPcm16AppendError code=${error.code ?? 'unknown'} '
+        'websocket syntheticPcm16AppendError code=${_safeRealtimeCode(error.code)} '
         '${_safeRealtimeErrorParam(error)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -418,6 +382,12 @@ Future<_SmokeResult> _runRealtimePrimarySyntheticAudioSmoke({
     return _SmokeResult.passed(
       name,
       'websocket syntheticPcm16ToneAppend=200ms nonSpeech '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } on OpenAiRealtimeStartupException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket startupRejected code=${_safeStartupCode(error)} '
       'model=${config.profile.model} path=${config.profile.path}',
     );
   } on WebSocketException catch (error) {
@@ -460,39 +430,10 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
       credential: credential,
     );
 
-    final readyEvent = await _waitForRealtimeReady(
-      session.events,
-      const Duration(seconds: 10),
-      requireSessionUpdated: true,
-    );
-
-    if (readyEvent == null) {
-      return _SmokeResult.failed(
-        name,
-        'websocket sessionUpdateTimeout model=${config.profile.model} '
-        'path=${config.profile.path}',
-      );
-    }
-
-    if (readyEvent is OpenAiRealtimeError) {
-      return _SmokeResult.failed(
-        name,
-        'websocket event=${readyEvent.type} '
-        'code=${readyEvent.code ?? 'unknown'} '
-        '${_safeRealtimeErrorParam(readyEvent)}'
-        'model=${config.profile.model} '
-        'path=${config.profile.path}',
-      );
-    }
-
-    if (readyEvent is OpenAiRealtimeSessionClosed) {
-      return _SmokeResult.failed(
-        name,
-        'websocket closedBeforeReady model=${config.profile.model} '
-        'path=${config.profile.path}',
-      );
-    }
-
+    // connect() blocks until session.updated (or throws), so the session is
+    // ready. session.events is single-subscription; subscribe exactly once
+    // (the evidence collector below). The buffered session.created/updated
+    // lifecycle events it receives first are ignored by the collector.
     final evidenceFuture = _waitForGeneratedSpeechEvidence(
       session.events,
       const Duration(seconds: 18),
@@ -509,7 +450,7 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
       final error = evidence.error!;
       return _SmokeResult.failed(
         name,
-        'websocket generatedSpeechError code=${error.code ?? 'unknown'} '
+        'websocket generatedSpeechError code=${_safeRealtimeCode(error.code)} '
         '${_safeRealtimeErrorParam(error)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -530,6 +471,12 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
       'websocket generatedSpeech=local-espeak-ng '
       'transcriptEvents=${evidence.transcriptEvents} '
       'translatedAudioEvents=${evidence.audioEvents} '
+      'model=${config.profile.model} path=${config.profile.path}',
+    );
+  } on OpenAiRealtimeStartupException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket startupRejected code=${_safeStartupCode(error)} '
       'model=${config.profile.model} path=${config.profile.path}',
     );
   } on WebSocketException catch (error) {
@@ -590,7 +537,7 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechReconnectSmoke({
       return _SmokeResult.failed(
         name,
         'websocket generatedSpeechReconnectError '
-        'code=${error.code ?? 'unknown'} ${_safeRealtimeErrorParam(error)}'
+        'code=${_safeRealtimeCode(error.code)} ${_safeRealtimeErrorParam(error)}'
         'model=${config.profile.model} path=${config.profile.path}',
       );
     }
@@ -613,12 +560,11 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechReconnectSmoke({
       'recoveredTranslatedAudioEvents=${recovered.audioEvents} '
       'model=${config.profile.model} path=${config.profile.path}',
     );
-  } on _RealtimeSmokeError catch (error) {
+  } on OpenAiRealtimeStartupException catch (error) {
     return _SmokeResult.failed(
       name,
-      'websocket generatedSpeechReconnectError '
-      'code=${error.error.code ?? 'unknown'} '
-      '${_safeRealtimeErrorParam(error.error)}'
+      'websocket generatedSpeechReconnectStartupRejected '
+      'code=${_safeStartupCode(error)} '
       'model=${config.profile.model} path=${config.profile.path}',
     );
   } on WebSocketException catch (error) {
@@ -654,20 +600,12 @@ Future<int> _streamGeneratedSpeechUntilControlledClose({
       config: config,
       credential: credential,
     );
-    final readyEvent = await _waitForRealtimeReady(
-      session.events,
-      const Duration(seconds: 10),
-      requireSessionUpdated: true,
-    );
-    if (readyEvent == null) {
-      throw TimeoutException('sessionUpdateTimeout');
-    }
-    if (readyEvent is OpenAiRealtimeError) {
-      throw _RealtimeSmokeError(readyEvent);
-    }
-    if (readyEvent is OpenAiRealtimeSessionClosed) {
-      throw const SocketException('closedBeforeReady');
-    }
+    // Drain events while streaming. session.events is single-subscription, and
+    // closeImmediately() awaits the events controller's done future, which only
+    // completes once the stream has been listened to. Attaching a drain here
+    // lets the controlled close below complete promptly instead of leaving the
+    // event loop idle (which would otherwise abandon the awaiting caller).
+    final drain = session.events.listen((_) {});
 
     var appendedChunks = 0;
     for (final chunk in _pcm16Chunks(
@@ -684,6 +622,7 @@ Future<int> _streamGeneratedSpeechUntilControlledClose({
     }
 
     await session.closeImmediately();
+    await drain.cancel();
     return appendedChunks;
   } finally {
     await session?.closeImmediately();
@@ -701,25 +640,8 @@ Future<_GeneratedSpeechEvidence> _streamGeneratedSpeechForEvidence({
       config: config,
       credential: credential,
     );
-    final readyEvent = await _waitForRealtimeReady(
-      session.events,
-      const Duration(seconds: 10),
-      requireSessionUpdated: true,
-    );
-    if (readyEvent == null) {
-      throw TimeoutException('sessionUpdateTimeout');
-    }
-    if (readyEvent is OpenAiRealtimeError) {
-      return _GeneratedSpeechEvidence(
-        transcriptEvents: 0,
-        audioEvents: 0,
-        error: readyEvent,
-      );
-    }
-    if (readyEvent is OpenAiRealtimeSessionClosed) {
-      throw const SocketException('closedBeforeReady');
-    }
-
+    // connect() blocks until session.updated (or throws). session.events is
+    // single-subscription; the evidence collector is the only listener.
     final evidenceFuture = _waitForGeneratedSpeechEvidence(
       session.events,
       const Duration(seconds: 18),
@@ -729,7 +651,11 @@ Future<_GeneratedSpeechEvidence> _streamGeneratedSpeechForEvidence({
       config: config,
       speech: speech,
     );
-    return evidenceFuture;
+    // Await the evidence before the finally closes the session. Returning the
+    // unawaited future would let closeImmediately() run first and truncate
+    // transcript/translated-audio events that arrive shortly after the audio
+    // append completes.
+    return await evidenceFuture;
   } finally {
     await session?.closeImmediately();
   }
@@ -908,44 +834,6 @@ Future<_GeneratedSpeechEvidence> _waitForGeneratedSpeechEvidence(
   });
 }
 
-Future<OpenAiRealtimeEvent?> _waitForRealtimeReady(
-  Stream<OpenAiRealtimeEvent> events,
-  Duration timeout, {
-  required bool requireSessionUpdated,
-}) async {
-  final completer = Completer<OpenAiRealtimeEvent?>();
-  late final StreamSubscription<OpenAiRealtimeEvent> subscription;
-  Timer? timer;
-
-  subscription = events.listen((event) {
-    if (completer.isCompleted) {
-      return;
-    }
-
-    if (event is OpenAiRealtimeError || event is OpenAiRealtimeSessionClosed) {
-      completer.complete(event);
-      return;
-    }
-
-    if (event is OpenAiRealtimeSessionLifecycleEvent) {
-      if (!requireSessionUpdated || event.type == 'session.updated') {
-        completer.complete(event);
-      }
-    }
-  });
-
-  timer = Timer(timeout, () {
-    if (!completer.isCompleted) {
-      completer.complete(null);
-    }
-  });
-
-  return completer.future.whenComplete(() async {
-    timer?.cancel();
-    await subscription.cancel();
-  });
-}
-
 _ResponsesSmokeRequest _summarySmokeRequest() {
   return _ResponsesSmokeRequest(
     name: 'summary-export',
@@ -1101,6 +989,24 @@ String _safeRealtimeErrorParam(OpenAiRealtimeError error) {
   return 'param=$param ';
 }
 
+/// Realtime error/close codes can originate from OpenAI error payloads or
+/// socket close reasons. Surface only an allowlisted `[A-Za-z0-9_.-]` code (or
+/// `unknown`) so no raw server message, transcript, audio byte, or credential
+/// text can reach the smoke output.
+String _safeRealtimeCode(String? code) {
+  if (code != null && RegExp(r'^[a-zA-Z0-9_.-]+$').hasMatch(code)) {
+    return code;
+  }
+
+  return 'unknown';
+}
+
+/// connect() throws [OpenAiRealtimeStartupException] when the realtime session
+/// reports an error or closes before it becomes ready. Surface only a sanitized
+/// error code (never a server message, transcript, audio, or credential).
+String _safeStartupCode(OpenAiRealtimeStartupException error) =>
+    _safeRealtimeCode(error.code);
+
 void _printUsage() {
   print('Usage: dart run scripts/live_openai_smoke.dart [options]');
   print('');
@@ -1213,12 +1119,6 @@ class _SmokeSelection {
       ),
     );
   }
-}
-
-class _RealtimeSmokeError implements Exception {
-  const _RealtimeSmokeError(this.error);
-
-  final OpenAiRealtimeError error;
 }
 
 class _GeneratedSpeech {
