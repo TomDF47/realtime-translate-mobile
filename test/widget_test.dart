@@ -515,6 +515,111 @@ void main() {
     },
   );
 
+  testWidgets(
+    'live header detects Italian then English without realtime language '
+    'metadata',
+    (tester) async {
+      // Reproduces the #31 report where OpenAI sent no language metadata and
+      // the top status detector never recognized Italian. The committer must
+      // fall back to local source-language detection so the wired live header
+      // and transcript blocks still split per language.
+      final repository = _testRepository();
+      final realtimeGateway = _FakeRealtimeTranslationGateway();
+      final textGateway = _FakeTextInterpreterGateway();
+      // English -> Italian is a direct OpenAI text fallback turn because
+      // Italian is not a realtime output target; seed its translated result.
+      textGateway.results.add(
+        const TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Grazie, qual e la tempistica?',
+        ),
+      );
+      await _seedCredential(repository);
+      await tester.pumpWidget(
+        LiveTranslateApp(
+          permissionGateway: _FakePermissionGateway.granted(),
+          meetingRepository: repository,
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+          realtimeTranslationGateway: realtimeGateway,
+          textInterpreterGateway: textGateway,
+        ),
+      );
+
+      await tester.tap(find.text('Start interpreter'));
+      await tester.pumpAndSettle();
+      expect(find.text('Listening for languages...'), findsOneWidget);
+
+      // Italian is spoken first with no realtime language metadata, so the app
+      // must rely on local source-language detection to recognize Italian.
+      realtimeGateway.sessions.last
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'source-it-1',
+            transcript: 'Ciao, grazie. Allora, buongiorno.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            itemId: 'source-it-1',
+            transcript: 'Hello, thank you. Well, good morning.',
+          ),
+        );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Heard Italian. Waiting for the other language...'),
+        findsOneWidget,
+      );
+
+      // English is spoken next, again with no realtime language metadata.
+      realtimeGateway.sessions.last.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'source-en-1',
+          transcript: 'Thank you, what is the timeline?',
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      final entries =
+          (await repository.loadSnapshot()).meetings.single.transcriptEntries;
+      expect(entries, hasLength(2));
+      expect(entries.first.languageCode, 'IT');
+      expect(entries.first.originalText, 'Ciao, grazie. Allora, buongiorno.');
+      expect(
+        entries.first.translatedText,
+        'Hello, thank you. Well, good morning.',
+      );
+      expect(entries.first.status, 'final');
+      expect(entries.last.languageCode, 'EN');
+      expect(entries.last.originalText, 'Thank you, what is the timeline?');
+      expect(entries.last.translatedText, 'Grazie, qual e la tempistica?');
+
+      expect(find.text('Italian <-> English'), findsOneWidget);
+      expect(find.text('Ciao, grazie. Allora, buongiorno.'), findsOneWidget);
+      expect(
+        find.text('Hello, thank you. Well, good morning.'),
+        findsOneWidget,
+      );
+      expect(find.text('Thank you, what is the timeline?'), findsOneWidget);
+
+      // The English turn used the direct OpenAI text fallback (English ->
+      // Italian) keyed off the locally detected source language.
+      expect(textGateway.requests, hasLength(1));
+      expect(textGateway.requests.single.sourceLanguageCode, 'en');
+      expect(textGateway.requests.single.targetLanguageCode, 'it');
+    },
+  );
+
   testWidgets('shows reconnecting realtime recovery state on live surface', (
     tester,
   ) async {
