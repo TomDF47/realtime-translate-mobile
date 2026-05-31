@@ -1,5 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- RECORD_AUDIO: live microphone capture for interpretation.
+         INTERNET: the app's only routine network path is direct phone-to-OpenAI
+         HTTPS/WebSocket calls (realtime translation, scoped AI chat, summary and
+         export generation). Declared in the main manifest so release builds keep
+         it; debug/profile builds also receive it from the Flutter tooling overlay.
+         Least privilege for the MVP is exactly RECORD_AUDIO + INTERNET. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="false"

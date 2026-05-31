@@ -82,6 +82,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Confirm the printed result block under `/tmp/realtime-translate-mobile-release-smoke/release-smoke-result.md` shows each check as `pass`.
 - If the emulator cannot cold-boot on this host, confirm the smoke fails fast with a captured log tail under the artifact directory rather than hanging, then retry or attach a physical device.
 - For a metadata/signing-only check without an emulator, run `scripts/check_apk_metadata.sh --apk /tmp/<apk>.apk`.
+- Confirm the metadata preflight lists both `android.permission.RECORD_AUDIO` and `android.permission.INTERNET`; the gate fails if either product-critical permission is missing, so a release build cannot ship without the direct phone-to-OpenAI network path (#41).
 - If publishing a debug APK to GitHub Releases, use a unique tag such as `debug-YYYYMMDD-HHMMSS-<shortsha>`.
 - Upload the APK and `.sha256` sidecar.
 - Verify the release asset URL opens.

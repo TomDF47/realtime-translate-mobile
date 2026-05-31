@@ -50,8 +50,21 @@ SECRET_PATTERNS = {
     "private key block": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 }
 
+# Least privilege for the phone-only MVP is exactly these two permissions:
+# RECORD_AUDIO for live microphone capture and INTERNET for the direct
+# phone-to-OpenAI network path (realtime translation, scoped AI chat, summary
+# and export generation). Both are required; anything else needs review.
 ALLOWED_ANDROID_PERMISSIONS = {
     "android.permission.RECORD_AUDIO",
+    "android.permission.INTERNET",
+}
+
+# Product-critical permissions that must be declared in the source main
+# manifest. A release build that drops INTERNET cannot reach OpenAI, so this
+# gate catches that regression in CI before an APK is ever built (#41).
+REQUIRED_ANDROID_PERMISSIONS = {
+    "android.permission.RECORD_AUDIO",
+    "android.permission.INTERNET",
 }
 
 
@@ -272,6 +285,16 @@ def check_android_permissions(root: Path) -> list[str]:
         raise CheckFailure(
             "Unexpected Android permission(s). Review least privilege and "
             f"document before allowing:\n{formatted}"
+        )
+
+    missing = sorted(REQUIRED_ANDROID_PERMISSIONS.difference(permissions))
+    if missing:
+        formatted = "\n".join(f"  - {permission}" for permission in missing)
+        raise CheckFailure(
+            "Missing product-critical Android permission(s) from "
+            f"{manifest.relative_to(root)}:\n{formatted}\n"
+            "The phone-only MVP needs RECORD_AUDIO for capture and INTERNET for "
+            "the direct phone-to-OpenAI network path."
         )
     return permissions
 
