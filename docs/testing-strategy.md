@@ -139,17 +139,22 @@ For a one-command non-live pre-handoff gate, `scripts/final_qa_gate.sh` runs Flu
 
 ### Android Release Smoke Validation (#39)
 
-`scripts/android_release_smoke.sh` is the repeatable, no-secret release smoke. It exists because publishing a release should not depend on a hand-driven emulator session that can die during cold boot before stable `adb`.
+`scripts/android_release_smoke.sh` is the repeatable, offline-by-default release smoke. It exists because publishing a release should not depend on a hand-driven emulator session that can die during cold boot before stable `adb`.
 
-The flow is:
+The default flow is:
 
-1. Locate `--apk PATH` or build a debug APK artifact (with a SHA-256 sidecar).
+1. Locate `--apk PATH` or build an APK artifact (debug by default, `--release` for a release-mode artifact), each with a SHA-256 sidecar.
 2. `scripts/check_apk_metadata.sh` verifies the SHA-256 sidecar (when present), the package id `com.tomdf47.realtime_translate_mobile`, version metadata, and that requested permissions stay within the least-privilege allowlist (`RECORD_AUDIO`, `INTERNET`, and the AndroidX `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`), then reports debug vs release signing without failing a debug release.
-3. `scripts/lib/android_emulator_boot.sh` cold-boots `Pixel_9_API_36_Play` with bounded retries, a process watchdog, and `adb` device-state checks, replacing the previous single-shot launch and unbounded `adb wait-for-device`. A dying cold boot now fails fast with a captured log tail instead of hanging.
-4. `scripts/android_emulator_e2e.sh --verify-invalid-credential-recovery` installs the APK, clears app state, launches it, verifies the missing-credential gate, and asserts startup reaches a bounded recovery state and never remains on `Preparing live session`. This proof uses only a non-secret invalid placeholder credential.
-5. The script prints a sanitized result block and writes it to `/tmp/realtime-translate-mobile-release-smoke/release-smoke-result.md`. `--record-to-release <tag>` and `--record-to-issue <number>` post that block via `gh` after a secret-pattern guard (default print-only).
+3. `scripts/lib/android_emulator_boot.sh` cold-boots `Pixel_9_API_36_Play` with bounded retries, a process watchdog, and `adb` device-state checks, replacing the previous single-shot launch and unbounded `adb wait-for-device`. A dying cold boot now fails fast with a captured log tail instead of hanging. The booted serial is captured and reused by the installed-app proof so result attribution stays tight.
+4. `scripts/android_emulator_e2e.sh --verify-offline-startup` installs the APK, clears app state, launches it, and proves the offline bounded state: with no credential saved the live coordinator returns `missingCredential` before any network call, microphone-permission request, or OpenAI request, so the app reaches the `OpenAI setup required` gate and the proof asserts it never remains on `Preparing live session`. No credential is read or saved and no OpenAI request is made.
+5. The script prints a sanitized result block (including the run mode) and writes it to `/tmp/realtime-translate-mobile-release-smoke/release-smoke-result.md`. `--record-to-release <tag>` and `--record-to-issue <number>` post that block via `gh` after a secret-pattern guard (default print-only).
 
-The default path reads no OpenAI credential and makes no live OpenAI request. Live realtime validation stays opt-in through `--with-live-credential`, which reads the local secret file only when explicitly requested. Boot resilience is local-only by design; Android emulator smoke stays out of CI (see CI Gates below).
+The default path reads no OpenAI credential and makes no OpenAI network request. Two network paths are explicit, separate opt-ins:
+
+- `--verify-invalid-credential-recovery` saves a non-secret invalid placeholder credential, grants microphone permission, and **makes a live OpenAI auth-rejection network request** to prove the app fails closed to `OpenAI setup required` without staying on `Preparing live session`. It reads no real secret, but it is a live OpenAI request and is therefore not part of the default offline path.
+- `--with-live-credential` reads the local secret file and drives the live realtime path with real credentials.
+
+Boot resilience is local-only by design; Android emulator smoke stays out of CI (see CI Gates below).
 
 For focused store-signing validation, run `scripts/check_android_release_signing.sh` before building and `scripts/check_android_release_signing.sh --apk /tmp/<release-apk>.apk` after building. In a checkout without local signing material, `scripts/check_android_release_signing.sh` must fail clearly while the normal non-live final QA gate can still pass.
 

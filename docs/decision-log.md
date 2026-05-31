@@ -484,10 +484,11 @@ Status: Accepted
 
 Decision:
 
-- Add `scripts/android_release_smoke.sh` as the repeatable Android release smoke entrypoint: build/locate a debug APK, run an APK metadata + signing preflight, cold-boot the emulator resiliently, install, clear app state, launch, and prove startup reaches a bounded state without a real OpenAI credential.
+- Add `scripts/android_release_smoke.sh` as the repeatable Android release smoke entrypoint: build/locate an APK (debug by default, `--release` for a release artifact), run an APK metadata + signing preflight, cold-boot the emulator resiliently, install, clear app state, launch, and prove startup reaches a bounded state.
 - Extract the emulator cold boot into a shared helper `scripts/lib/android_emulator_boot.sh` with reuse-online-device, bounded retries, an AVD-scoped process watchdog, `adb` device-state checks, conservative stale-lock cleanup, and per-attempt log tails. Source it from `scripts/android_emulator_e2e.sh`, replacing the previous single-shot launch plus unbounded `adb wait-for-device`.
 - Add `scripts/check_apk_metadata.sh` to verify SHA-256 sidecar, package id, version metadata, and a least-privilege permission allowlist, and to report debug vs release signing without failing a debug release.
-- Prove the bounded startup state with the existing no-secret `--verify-invalid-credential-recovery` path plus an explicit assertion that the UI never remains on `Preparing live session`.
+- Make the default release smoke truly offline. Prove the bounded startup state with `scripts/android_emulator_e2e.sh --verify-offline-startup`: with no credential saved, the live coordinator returns `missingCredential` before any network call, microphone-permission request, or OpenAI request, so the app reaches the `OpenAI setup required` gate, and the proof asserts the UI never remains on `Preparing live session`. The default path reads no credential and makes no OpenAI network request.
+- Keep invalid-credential auth-rejection recovery as an explicit opt-in (`--verify-invalid-credential-recovery`) that makes a live OpenAI auth-rejection network request using a non-secret placeholder credential, and live realtime validation as a separate opt-in (`--with-live-credential`) that reads the local secret. Document both as network paths.
 - Keep Android emulator smoke local-only. CI stays Flutter-only (`flutter pub get`, `flutter analyze`, `flutter test`, supply-chain), and docs (`bash scripts/check-docs.sh`).
 - Make GitHub result recording opt-in: print a sanitized result block by default, and post to a release (`--record-to-release`) or issue (`--record-to-issue`) via `gh` only when asked, after a secret-pattern guard.
 
@@ -495,12 +496,14 @@ Rationale:
 
 - The 2026-05-31 debug release could not complete install/run validation because `Pixel_9_API_36_Play` repeatedly died during cold boot before stable `adb`, and the single-shot boot path either hung or failed without a repeatable outcome.
 - A flaky cold boot should not block every release. Bounded retries plus a watchdog convert a hang into a fast, deterministic pass or fail.
-- Validating an APK should not require a live OpenAI key; the invalid-credential recovery path already exercises the connecting phase and, with the #37 connect bound, reaches a bounded recovery state.
+- Validating an APK on the default path must not contact OpenAI at all. With no credential saved the app fails closed at the setup gate before any network, which is a genuine bounded-state proof and is safe on machines with no OpenAI key. Exercising the connecting phase through an auth rejection is still useful but is a network request, so it must be an explicit opt-in rather than the default.
 - A GitHub-hosted emulator job (for example `reactivecircus/android-emulator-runner`) was considered and rejected for the MVP: it is historically flaky, adds CI surface, and contradicts the existing local/manual emulator stance.
 
 Implications:
 
 - Releases should run `scripts/android_release_smoke.sh` (or `scripts/final_qa_gate.sh --release-smoke`) and record the sanitized result in release notes or an issue comment.
 - If the emulator cannot cold-boot on the host, the smoke fails fast with a captured log tail; fall back to a physical device or an attached emulator rather than weakening the boot checks.
-- The default smoke path must never read a real OpenAI credential, make a live OpenAI request, or print credential/transcript/audio/summary/export payloads.
+- The default smoke path must never read an OpenAI credential, make any OpenAI network request, or print credential/transcript/audio/summary/export payloads. Any auth-rejection or live validation must stay behind the explicit opt-in flags.
 - The boot helper must only stop emulator processes whose arguments name `Pixel_9_API_36_Play`, and must continue to avoid `emulator -no-window` on this Fedora/Wayland host.
+
+Revision (2026-05-31): An initial implementation made the default path run `--verify-invalid-credential-recovery`, which saves a placeholder credential and waits for an OpenAI auth rejection. A max-model solution-architect review of PR #40 flagged that this is a live OpenAI request and violates the stated default boundary. The default was corrected to the offline `--verify-offline-startup` proof above, and the auth-rejection recovery moved behind the explicit opt-in flag.

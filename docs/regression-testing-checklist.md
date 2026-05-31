@@ -78,7 +78,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 ## APK Release Sanity
 
-- Run the repeatable, no-secret release smoke with `scripts/android_release_smoke.sh` (or `scripts/android_release_smoke.sh --apk /tmp/<apk>.apk` for an already-built artifact). This verifies APK metadata and signing before install, cold-boots the emulator resiliently, installs the APK, clears app state, launches it, and asserts startup reaches a bounded state and does not remain on `Preparing live session`.
+- Run the repeatable, offline-by-default release smoke with `scripts/android_release_smoke.sh` (or `scripts/android_release_smoke.sh --apk /tmp/<apk>.apk` for an already-built artifact, or `--release` for a release-mode build). This verifies APK metadata and signing before install, cold-boots the emulator resiliently, installs the APK, clears app state, launches it, and asserts startup reaches the offline `OpenAI setup required` bounded state and never remains on `Preparing live session`. The default path reads no OpenAI credential and makes no OpenAI network request; `--verify-invalid-credential-recovery` (live auth-rejection request with a non-secret placeholder) and `--with-live-credential` (real secret) are explicit opt-ins.
 - Confirm the printed result block under `/tmp/realtime-translate-mobile-release-smoke/release-smoke-result.md` shows each check as `pass`.
 - If the emulator cannot cold-boot on this host, confirm the smoke fails fast with a captured log tail under the artifact directory rather than hanging, then retry or attach a physical device.
 - For a metadata/signing-only check without an emulator, run `scripts/check_apk_metadata.sh --apk /tmp/<apk>.apk`.

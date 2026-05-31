@@ -3,21 +3,27 @@ set -euo pipefail
 
 # Repeatable Android release smoke validation (#39).
 #
-# Default (no-secret) flow:
-#   1. Locate or build a debug APK artifact (with a SHA-256 sidecar).
+# Default (offline, no-credential) flow:
+#   1. Locate or build an APK artifact (debug by default; --release for a
+#      release-mode artifact), each with a SHA-256 sidecar.
 #   2. APK metadata + signing preflight (scripts/check_apk_metadata.sh).
 #   3. Resilient emulator cold boot (scripts/lib/android_emulator_boot.sh) so a
 #      flaky cold boot no longer blocks the whole release.
-#   4. Install, clear app state, launch, verify the missing-credential gate, and
-#      prove startup reaches a bounded state (never stuck on
-#      "Preparing live session") via
-#      scripts/android_emulator_e2e.sh --verify-invalid-credential-recovery.
+#   4. Install, clear app state, launch, and prove startup reaches a bounded
+#      state (the "OpenAI setup required" gate, never stuck on "Preparing live
+#      session") via scripts/android_emulator_e2e.sh --verify-offline-startup.
+#      With no credential saved the app short-circuits before any OpenAI
+#      network call, so the default path reads no credential and is offline.
 #   5. Print a sanitized result block and, when explicitly asked, record it to a
 #      GitHub release or issue.
 #
-# The default path reads no OpenAI credential and makes no live OpenAI request.
-# Live realtime validation stays opt-in via --with-live-credential, which is
-# passed through to the E2E driver and reads the local secret file only then.
+# The default path reads no OpenAI credential and makes no OpenAI network
+# request of any kind. Two network paths are explicit opt-ins:
+#   --verify-invalid-credential-recovery : makes a live OpenAI auth-rejection
+#       request using a NON-SECRET placeholder credential (no real secret read)
+#       to prove fail-closed recovery.
+#   --with-live-credential : reads the local secret file and drives the live
+#       realtime path with real credentials.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -25,32 +31,48 @@ DEFAULT_ARTIFACT_DIR="/tmp/realtime-translate-mobile-release-smoke"
 ARTIFACT_DIR="${ARTIFACT_DIR:-$DEFAULT_ARTIFACT_DIR}"
 APK_PATH=""
 SKIP_BUILD=0
+RELEASE_BUILD=0
 WITH_LIVE_CREDENTIAL=0
+VERIFY_INVALID_CREDENTIAL=0
 RECORD_TO_RELEASE=""
 RECORD_TO_ISSUE=""
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/android_release_smoke.sh [--apk PATH] [--skip-build]
+Usage: scripts/android_release_smoke.sh [--apk PATH] [--release] [--skip-build]
+                                        [--verify-invalid-credential-recovery]
                                         [--with-live-credential]
                                         [--record-to-release TAG]
                                         [--record-to-issue NUMBER]
                                         [--artifact-dir DIR]
 
-Repeatable Android release smoke validation. Builds or locates a debug APK,
-runs an APK metadata + signing preflight, cold-boots the emulator resiliently,
-installs the APK, clears app state, and proves startup reaches a bounded state
-without a real OpenAI credential.
+Repeatable Android release smoke validation. Builds or locates an APK, runs an
+APK metadata + signing preflight, cold-boots the emulator resiliently, installs
+the APK, clears app state, and proves startup reaches a bounded state.
+
+By default this is fully offline: with no credential saved the app reaches the
+"OpenAI setup required" gate and never stays on "Preparing live session", and no
+OpenAI network request is made. Network validation is explicit opt-in only.
 
 Options:
   --apk PATH              Validate this APK instead of building one. Implies no
                           build step.
-  --skip-build            When no --apk is given, copy the existing Flutter
-                          debug APK instead of rebuilding.
+  --release               When no --apk is given, build a release-mode APK
+                          artifact instead of the debug default. Release
+                          artifacts are debug-signed and not store-ready unless
+                          local android/key.properties is present.
+  --skip-build            When no --apk is given, copy the existing Flutter APK
+                          for the selected mode instead of rebuilding.
+  --verify-invalid-credential-recovery
+                          Opt in to the invalid-credential auth-recovery proof.
+                          Saves a NON-SECRET placeholder credential and MAKES A
+                          LIVE OpenAI AUTH-REJECTION NETWORK REQUEST to prove the
+                          app fails closed to setup-required. Reads no real
+                          secret. Not part of the default offline path.
   --with-live-credential  Opt in to the live realtime path. Passes
                           --with-live-credential to the E2E driver, which reads
-                          the local secret file. Off by default; the default
-                          path makes no live OpenAI request.
+                          the local secret file and makes live OpenAI requests.
+                          Off by default.
   --record-to-release TAG Append the sanitized result block to the GitHub
                           release notes for TAG via gh (records pass or fail).
   --record-to-issue NUMBER
@@ -74,6 +96,14 @@ while (($#)); do
       ;;
     --skip-build)
       SKIP_BUILD=1
+      shift
+      ;;
+    --release)
+      RELEASE_BUILD=1
+      shift
+      ;;
+    --verify-invalid-credential-recovery)
+      VERIFY_INVALID_CREDENTIAL=1
       shift
       ;;
     --with-live-credential)
@@ -116,6 +146,11 @@ while (($#)); do
   esac
 done
 
+if ((WITH_LIVE_CREDENTIAL)) && ((VERIFY_INVALID_CREDENTIAL)); then
+  echo "Choose one network path: --with-live-credential or --verify-invalid-credential-recovery" >&2
+  exit 2
+fi
+
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
 export JAVA_HOME="${JAVA_HOME:-$HOME/.local/share/jdks/temurin-21}"
@@ -139,8 +174,10 @@ DEVICE_LINE="not booted"
 
 if ((WITH_LIVE_CREDENTIAL)); then
   MODE_LABEL="live opt-in (reads local secret file; live OpenAI request expected)"
+elif ((VERIFY_INVALID_CREDENTIAL)); then
+  MODE_LABEL="invalid-credential opt-in (non-secret placeholder; live OpenAI auth-rejection request)"
 else
-  MODE_LABEL="no-secret (no OpenAI credential read; no live OpenAI request)"
+  MODE_LABEL="offline default (no OpenAI credential read; no OpenAI network request)"
 fi
 
 log() {
@@ -164,7 +201,12 @@ fact() {
 
 collect_device_facts() {
   local serial model api
-  serial="$(adb devices 2>/dev/null | awk 'NR > 1 && $2 == "device" { print $1; exit }')"
+  # Prefer the serial captured from the explicit resilient boot step so the
+  # result block attributes the proof to the exact device that was booted.
+  serial="${ADB_SERIAL:-}"
+  if [[ -z "$serial" ]]; then
+    serial="$(adb devices 2>/dev/null | awk 'NR > 1 && $2 == "device" { print $1; exit }')"
+  fi
   if [[ -z "$serial" ]]; then
     return 0
   fi
@@ -260,8 +302,13 @@ if [[ -n "$APK_PATH" ]]; then
   STEP_BUILD="skipped (supplied --apk)"
   log "Using supplied APK: $APK_PATH"
 else
-  log "Building debug APK artifact under $ARTIFACT_DIR"
   build_args=(--output-dir "$ARTIFACT_DIR")
+  if ((RELEASE_BUILD)); then
+    log "Building release APK artifact under $ARTIFACT_DIR"
+    build_args+=(--release)
+  else
+    log "Building debug APK artifact under $ARTIFACT_DIR"
+  fi
   if ((SKIP_BUILD)); then
     build_args+=(--skip-build)
   fi
@@ -288,26 +335,42 @@ else
 fi
 
 # --- Step 3: resilient emulator boot -------------------------------------
+# Boot once here and capture the booted serial so it propagates to fact
+# collection and the installed-app proof (the E2E driver reuses an exported
+# ADB_SERIAL). The boot helper logs to stderr inside the capture subshell while
+# only the resolved serial is returned on stdout; a failed boot exits non-zero
+# (never hangs) and is attributed as STEP_BOOT=fail.
 log "Booting Android target with resilient cold boot (artifacts in $ARTIFACT_DIR)"
-if (
+ADB_SERIAL=""
+if ADB_SERIAL="$(
   EMU_ARTIFACT_DIR="$ARTIFACT_DIR"
   EMU_REQUIRE_DEVICE_AUDIO=0
-  emu_resilient_boot
-); then
+  emu_resilient_boot >&2
+  printf '%s' "$ADB_SERIAL"
+)"; then
   STEP_BOOT="pass"
+  export ADB_SERIAL
+  if [[ -n "$ADB_SERIAL" ]]; then
+    log "Booted device: $ADB_SERIAL"
+  fi
 else
   STEP_BOOT="fail"
   fail "emulator did not reach a booted state; see $ARTIFACT_DIR/emulator-boot-attempt-*.log"
 fi
 
-# --- Step 4: install + no-secret bounded-state smoke ----------------------
+# --- Step 4: install + bounded-state smoke --------------------------------
+# Default is the offline bounded-state proof (no credential, no OpenAI request).
+# The two network paths are explicit opt-ins and are reflected in MODE_LABEL.
 e2e_args=(--apk "$APK_PATH")
 if ((WITH_LIVE_CREDENTIAL)); then
-  log "Running opt-in live installed-app smoke (reads local secret file)"
+  log "Running opt-in live installed-app smoke (reads local secret file; live OpenAI request)"
   e2e_args+=(--with-live-credential)
-else
-  log "Running no-secret install + bounded-state smoke"
+elif ((VERIFY_INVALID_CREDENTIAL)); then
+  log "Running opt-in invalid-credential recovery smoke (non-secret placeholder; live auth-rejection request)"
   e2e_args+=(--verify-invalid-credential-recovery)
+else
+  log "Running offline install + bounded-state smoke (no credential, no OpenAI request)"
+  e2e_args+=(--verify-offline-startup)
 fi
 
 if ARTIFACT_DIR="$ARTIFACT_DIR" "$SCRIPT_DIR/android_emulator_e2e.sh" "${e2e_args[@]}"; then

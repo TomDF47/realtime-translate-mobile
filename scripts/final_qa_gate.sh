@@ -32,9 +32,10 @@ Options:
                     OpenAI request and does not read the local secret file.
   --release-smoke   Run the repeatable release smoke against the fresh release
                     artifact: APK metadata + signing preflight, resilient
-                    emulator boot, install, and a no-secret bounded-state proof
-                    via scripts/android_release_smoke.sh. Makes no live OpenAI
-                    request and does not read the local secret file.
+                    emulator boot, install, and the default offline
+                    bounded-state proof via scripts/android_release_smoke.sh.
+                    Makes no OpenAI network request and does not read the local
+                    secret file.
   --require-store-signing
                     Require local release-signing config before building the
                     release artifact, then verify the release APK is not
