@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_configuration.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 
 void main() {
@@ -581,6 +582,136 @@ void main() {
           fail('closeGracefully hung when events stream had no listener'),
     );
   });
+
+  test(
+    'mid-session live socket drop surfaces a retryable reconnect trigger',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+
+      unawaited(
+        server.first.then((request) async {
+          final socket = await WebSocketTransformer.upgrade(request);
+          await for (final message in socket) {
+            if ((message as String).contains('session.update')) {
+              socket.add(jsonEncode({'type': 'session.updated'}));
+              // Simulate a live transport drop: the realtime socket goes away
+              // mid-session with no application-level session.close handshake,
+              // which is what a network loss or server hangup looks like.
+              await socket.close();
+              break;
+            }
+          }
+        }),
+      );
+
+      final gateway = OpenAiRealtimeTranslationGateway(
+        webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}/v1'),
+      );
+      final session = await gateway.connect(
+        config: const OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es'),
+        credential: 'placeholder-local-openai-credential',
+      );
+
+      final events = <OpenAiRealtimeEvent>[];
+      final sessionClosedObserved = Completer<void>();
+      session.events.listen(
+        (event) {
+          events.add(event);
+          if (event is OpenAiRealtimeSessionClosed &&
+              !sessionClosedObserved.isCompleted) {
+            sessionClosedObserved.complete();
+          }
+        },
+        onDone: () {
+          if (!sessionClosedObserved.isCompleted) {
+            sessionClosedObserved.complete();
+          }
+        },
+      );
+
+      await sessionClosedObserved.future.timeout(const Duration(seconds: 3));
+
+      // The live coordinator subscribes to session.events with onData/onError
+      // but no onDone, so production reconnect depends entirely on the real
+      // session surfacing an explicit session-closed event when the transport
+      // drops. Lock that behavior in on the real product class.
+      expect(events.whereType<OpenAiRealtimeSessionClosed>(), isNotEmpty);
+
+      // Reproduce exactly how the coordinator maps each surfaced drop event
+      // into a failure, then assert every one routes into bounded
+      // reconnect/backoff on the live path (never a fatal stop, never a
+      // credential reset).
+      const policy = OpenAiRealtimeReconnectPolicy();
+      final dropDecisions = <OpenAiRealtimeReconnectDecision>[
+        for (final event in events)
+          if (event is OpenAiRealtimeError)
+            policy.plan(
+              failure: OpenAiRealtimeFailure.fromRealtimeError(event),
+              retryAttempt: 1,
+            )
+          else if (event is OpenAiRealtimeSessionClosed)
+            policy.plan(
+              failure: OpenAiRealtimeFailure.sessionClosed(),
+              retryAttempt: 1,
+            ),
+      ];
+      expect(dropDecisions, isNotEmpty);
+      for (final decision in dropDecisions) {
+        expect(decision.failure.kind.isRetryable, isTrue);
+        expect(
+          decision.action,
+          OpenAiRealtimeRecoveryAction.reconnectAfterBackoff,
+        );
+      }
+    },
+  );
+
+  test(
+    'live socket close code surfaces a sanitized retryable error event',
+    () async {
+      final socket = _MidSessionDropWebSocket(dropCloseCode: 1011);
+      final gateway = OpenAiRealtimeTranslationGateway(
+        webSocketFactory: (uri, headers) async => socket,
+      );
+      final session = await gateway.connect(
+        config: const OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es'),
+        credential: 'placeholder-local-openai-credential',
+      );
+
+      final events = <OpenAiRealtimeEvent>[];
+      final closed = Completer<void>();
+      session.events.listen(
+        (event) {
+          events.add(event);
+          if (event is OpenAiRealtimeSessionClosed && !closed.isCompleted) {
+            closed.complete();
+          }
+        },
+        onDone: () {
+          if (!closed.isCompleted) {
+            closed.complete();
+          }
+        },
+      );
+
+      // The transport drops mid-session reporting only a close code: no
+      // application session.close and no human-readable close reason.
+      socket.dropWithCloseCode();
+      await closed.future.timeout(const Duration(seconds: 3));
+
+      final errorEvents = events.whereType<OpenAiRealtimeError>().toList();
+      expect(errorEvents, isNotEmpty);
+      for (final error in errorEvents) {
+        final failure = OpenAiRealtimeFailure.fromRealtimeError(error);
+        // The diagnostic code is a sanitized close-code token, never a raw
+        // server payload, and it must classify as retryable network loss.
+        expect(failure.kind, OpenAiRealtimeFailureKind.retryableNetwork);
+        expect(failure.diagnosticCode, contains('socket.close_'));
+      }
+      expect(events.whereType<OpenAiRealtimeSessionClosed>(), isNotEmpty);
+    },
+  );
 }
 
 class _StartupErrorHangingCloseWebSocket implements WebSocket {
@@ -614,6 +745,68 @@ class _StartupErrorHangingCloseWebSocket implements WebSocket {
   Future<void> close([int? code, String? reason]) {
     closeStarted = true;
     return Completer<void>().future;
+  }
+
+  @override
+  StreamSubscription<dynamic> listen(
+    void Function(dynamic event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    return _events.stream.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// A controllable transport that becomes ready, then drops mid-session while
+/// reporting only a numeric close code. It lets the real
+/// [OpenAiRealtimeTranslationSession] socket-done path run deterministically
+/// without depending on a loopback server's non-deterministic close code.
+class _MidSessionDropWebSocket implements WebSocket {
+  _MidSessionDropWebSocket({required this.dropCloseCode});
+
+  final int dropCloseCode;
+  final StreamController<dynamic> _events = StreamController<dynamic>();
+  int? _reportedCloseCode;
+
+  @override
+  int? get closeCode => _reportedCloseCode;
+
+  @override
+  String? get closeReason => null;
+
+  @override
+  void add(dynamic data) {
+    if (data is String && data.contains('session.update')) {
+      scheduleMicrotask(() {
+        if (!_events.isClosed) {
+          _events.add(jsonEncode({'type': 'session.updated'}));
+        }
+      });
+    }
+  }
+
+  void dropWithCloseCode() {
+    _reportedCloseCode = dropCloseCode;
+    if (!_events.isClosed) {
+      unawaited(_events.close());
+    }
+  }
+
+  @override
+  Future<void> close([int? code, String? reason]) async {
+    _reportedCloseCode ??= code;
+    if (!_events.isClosed) {
+      await _events.close();
+    }
   }
 
   @override
