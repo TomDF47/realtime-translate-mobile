@@ -1767,6 +1767,13 @@ void main() {
       expect(entries.single.translatedText, 'Hello.');
       expect(entries.single.status, 'partial');
 
+      // While the source has not yet backfilled, the translation-only
+      // completion provisionally trips the sourceless-final signal.
+      final beforeBackfill = harness.coordinator.transcriptSignalSnapshot;
+      expect(beforeBackfill.sourcelessFinalCount, 1);
+      expect(beforeBackfill.hasSourcelessFinal, isTrue);
+      expect(beforeBackfill.translationArrivedWithoutSource, isTrue);
+
       harness.realtimeGateway.session.addEvent(
         const OpenAiRealtimeTranscriptCompleted(
           type: 'session.input_transcript.done',
@@ -1787,6 +1794,15 @@ void main() {
       expect(entries.single.originalText, 'Ciao.');
       expect(entries.single.translatedText, 'Hello.');
       expect(entries.single.status, 'final');
+
+      // After the valid backfill the same row is a complete turn, so the
+      // release-checkable signal must NOT report Tom's failure mode (architect
+      // blocker: the diagnostic was previously left tripped here).
+      final afterBackfill = harness.coordinator.transcriptSignalSnapshot;
+      expect(afterBackfill.sourcelessFinalCount, 0);
+      expect(afterBackfill.hasSourcelessFinal, isFalse);
+      expect(afterBackfill.translationArrivedWithoutSource, isFalse);
+      expect(afterBackfill.hasSourceSignal, isTrue);
     },
   );
 

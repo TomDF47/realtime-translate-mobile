@@ -100,6 +100,13 @@ class LiveRealtimeTranslationCoordinator {
   int _sourceTranscriptTurns = 0;
   int _outputTranscriptTurns = 0;
   int _sourcelessFinalTurns = 0;
+  // Ids of entries that finalized translation-only (translated text, empty
+  // original) and were counted in [_sourcelessFinalTurns]. The dedicated
+  // translation wire can deliver a turn's translation before its source, so
+  // such an entry is only provisionally sourceless: if the SAME row later
+  // backfills original text, it is a valid turn, not the round-3 failure, and
+  // must be uncounted so the release-checkable signal stays accurate.
+  final Set<String> _sourcelessFinalEntryIds = <String>{};
   bool _closingIntentionally = false;
   bool _processTranscriptsDuringIntentionalClose = false;
   bool _handlingFailure = false;
@@ -576,9 +583,17 @@ class LiveRealtimeTranslationCoordinator {
             // it as a privacy-safe, content-free signal so a release check can
             // detect it instead of the UI silently showing a misleading
             // completed card with "Original speech pending".
+            //
+            // This is provisional: on the dedicated translation wire a turn's
+            // translation can finalize before its source arrives. The entry id
+            // is tracked so that, if this same row later backfills original
+            // text, [_commitSourceTranscriptAndMaybeFallback] uncounts it
+            // (the valid translation-first ordering must not leave the
+            // release-checkable signal tripped).
             if (entry.translatedText.trim().isNotEmpty &&
                 entry.originalText.trim().isEmpty) {
               _sourcelessFinalTurns += 1;
+              _sourcelessFinalEntryIds.add(entry.id);
               diagnostics.warning(
                 'live_realtime.translation_without_source',
                 fields: {
@@ -623,6 +638,7 @@ class LiveRealtimeTranslationCoordinator {
             }
             if (entry.originalText.trim().isNotEmpty) {
               _sourceTranscriptTurns += 1;
+              _clearSourcelessFinalForBackfilledEntry(entry);
             }
             _trackSourceTurnForFallback(entry);
           })
@@ -798,10 +814,33 @@ class LiveRealtimeTranslationCoordinator {
     _resetTranscriptSignalCounters();
   }
 
+  /// Reverses a provisional translation-only count once the same row backfills
+  /// original text.
+  ///
+  /// On the dedicated `/v1/realtime/translations` wire a turn's translation
+  /// can finalize before its source arrives, so the translation completion
+  /// provisionally counts the row as sourceless. When the matching source
+  /// completion later writes original text into the SAME entry id, that turn
+  /// is valid (not the round-3 "translation arrived but source never did"
+  /// failure), so its sourceless-final count is reversed. This keeps
+  /// [transcriptSignalSnapshot] accurate: after a valid backfill,
+  /// `sourcelessFinalCount` returns to its prior value and
+  /// `translationArrivedWithoutSource`/`hasSourcelessFinal` are not left
+  /// falsely tripped.
+  void _clearSourcelessFinalForBackfilledEntry(StoredTranscriptEntry entry) {
+    if (!_sourcelessFinalEntryIds.remove(entry.id)) {
+      return;
+    }
+    if (_sourcelessFinalTurns > 0) {
+      _sourcelessFinalTurns -= 1;
+    }
+  }
+
   void _resetTranscriptSignalCounters() {
     _sourceTranscriptTurns = 0;
     _outputTranscriptTurns = 0;
     _sourcelessFinalTurns = 0;
+    _sourcelessFinalEntryIds.clear();
   }
 
   String _languageLabelForCode(String code) {
