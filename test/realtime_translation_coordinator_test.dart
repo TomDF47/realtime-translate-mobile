@@ -1807,6 +1807,105 @@ void main() {
   );
 
   test(
+    'repeated translation-only completion before source backfill is counted '
+    'once and fully cleared',
+    () async {
+      // Round-2 architect follow-up: a still-partial row can receive more than
+      // one output `.done` (a refinement/re-emission) before its source
+      // arrives. Each must count the row toward sourcelessFinalCount AT MOST
+      // ONCE, otherwise a single source backfill could not zero the count and
+      // the release-checkable signal would stay falsely tripped on a valid
+      // turn.
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 6, 1, 7);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Repeated translation-only then backfill',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+
+      // The same turn's translation finalizes twice (a refinement) before any
+      // source transcript arrives. No item ids on this wire, so both land on
+      // the same still-partial row.
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Hello.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Hello there.',
+          ),
+        );
+      await _drainAsync();
+
+      var entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, isEmpty);
+      // Two output completions on one row must count the row only once.
+      final beforeBackfill = harness.coordinator.transcriptSignalSnapshot;
+      expect(beforeBackfill.sourcelessFinalCount, 1);
+      expect(beforeBackfill.hasSourcelessFinal, isTrue);
+      expect(beforeBackfill.translationArrivedWithoutSource, isTrue);
+
+      // Source backfills into the same row: a single reversal must fully clear
+      // the count.
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'source-it-1',
+          languageCode: 'it',
+          transcript: 'Ciao.',
+        ),
+      );
+      await _drainAsync();
+
+      entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, 'Ciao.');
+      expect(entries.single.status, 'final');
+
+      final afterBackfill = harness.coordinator.transcriptSignalSnapshot;
+      expect(afterBackfill.sourcelessFinalCount, 0);
+      expect(afterBackfill.hasSourcelessFinal, isFalse);
+      expect(afterBackfill.translationArrivedWithoutSource, isFalse);
+      expect(afterBackfill.hasSourceSignal, isTrue);
+    },
+  );
+
+  test(
     'output transcript without any source never finalizes a sourceless row',
     () async {
       // Safety net for the exact failure mode Tom hit on the installed app: if

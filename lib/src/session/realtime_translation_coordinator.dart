@@ -589,11 +589,15 @@ class LiveRealtimeTranslationCoordinator {
             // is tracked so that, if this same row later backfills original
             // text, [_commitSourceTranscriptAndMaybeFallback] uncounts it
             // (the valid translation-first ordering must not leave the
-            // release-checkable signal tripped).
+            // release-checkable signal tripped). Each entry is counted at most
+            // once: a still-partial row can receive more than one output
+            // `.done` (a refinement/re-emission) before its source arrives, so
+            // counting per completion would over-count and a single backfill
+            // reversal could not zero it again.
             if (entry.translatedText.trim().isNotEmpty &&
-                entry.originalText.trim().isEmpty) {
+                entry.originalText.trim().isEmpty &&
+                _sourcelessFinalEntryIds.add(entry.id)) {
               _sourcelessFinalTurns += 1;
-              _sourcelessFinalEntryIds.add(entry.id);
               diagnostics.warning(
                 'live_realtime.translation_without_source',
                 fields: {
