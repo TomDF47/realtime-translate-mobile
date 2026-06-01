@@ -456,11 +456,23 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
       );
     }
 
-    if (!evidence.hasTranscript || !evidence.hasTranslatedAudio) {
+    if (evidence.translationArrivedWithoutSource) {
+      return _SmokeResult.failed(
+        name,
+        'websocket generatedSpeechTranslationWithoutSource '
+        'sourceTranscriptEvents=${evidence.sourceTranscriptEvents} '
+        'outputTranscriptEvents=${evidence.outputTranscriptEvents} '
+        'translatedAudioEvents=${evidence.audioEvents} '
+        'model=${config.profile.model} path=${config.profile.path}',
+      );
+    }
+
+    if (!evidence.hasSourceTranscript || !evidence.hasTranslatedAudio) {
       return _SmokeResult.failed(
         name,
         'websocket generatedSpeechMissingEvidence '
-        'transcriptEvents=${evidence.transcriptEvents} '
+        'sourceTranscriptEvents=${evidence.sourceTranscriptEvents} '
+        'outputTranscriptEvents=${evidence.outputTranscriptEvents} '
         'translatedAudioEvents=${evidence.audioEvents} '
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -469,7 +481,8 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
     return _SmokeResult.passed(
       name,
       'websocket generatedSpeech=local-espeak-ng '
-      'transcriptEvents=${evidence.transcriptEvents} '
+      'sourceTranscriptEvents=${evidence.sourceTranscriptEvents} '
+      'outputTranscriptEvents=${evidence.outputTranscriptEvents} '
       'translatedAudioEvents=${evidence.audioEvents} '
       'model=${config.profile.model} path=${config.profile.path}',
     );
@@ -542,12 +555,25 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechReconnectSmoke({
       );
     }
 
-    if (!recovered.hasTranscript || !recovered.hasTranslatedAudio) {
+    if (recovered.translationArrivedWithoutSource) {
+      return _SmokeResult.failed(
+        name,
+        'websocket generatedSpeechReconnectTranslationWithoutSource '
+        'interruptedChunks=$interruptedChunks '
+        'recoveredSourceTranscriptEvents=${recovered.sourceTranscriptEvents} '
+        'recoveredOutputTranscriptEvents=${recovered.outputTranscriptEvents} '
+        'recoveredTranslatedAudioEvents=${recovered.audioEvents} '
+        'model=${config.profile.model} path=${config.profile.path}',
+      );
+    }
+
+    if (!recovered.hasSourceTranscript || !recovered.hasTranslatedAudio) {
       return _SmokeResult.failed(
         name,
         'websocket generatedSpeechReconnectMissingEvidence '
         'interruptedChunks=$interruptedChunks '
-        'recoveredTranscriptEvents=${recovered.transcriptEvents} '
+        'recoveredSourceTranscriptEvents=${recovered.sourceTranscriptEvents} '
+        'recoveredOutputTranscriptEvents=${recovered.outputTranscriptEvents} '
         'recoveredTranslatedAudioEvents=${recovered.audioEvents} '
         'model=${config.profile.model} path=${config.profile.path}',
       );
@@ -556,7 +582,8 @@ Future<_SmokeResult> _runRealtimeGeneratedSpeechReconnectSmoke({
     return _SmokeResult.passed(
       name,
       'websocket controlledReconnect=1 interruptedChunks=$interruptedChunks '
-      'recoveredTranscriptEvents=${recovered.transcriptEvents} '
+      'recoveredSourceTranscriptEvents=${recovered.sourceTranscriptEvents} '
+      'recoveredOutputTranscriptEvents=${recovered.outputTranscriptEvents} '
       'recoveredTranslatedAudioEvents=${recovered.audioEvents} '
       'model=${config.profile.model} path=${config.profile.path}',
     );
@@ -794,7 +821,8 @@ Future<_GeneratedSpeechEvidence> _waitForGeneratedSpeechEvidence(
   final completer = Completer<_GeneratedSpeechEvidence>();
   late final StreamSubscription<OpenAiRealtimeEvent> subscription;
   Timer? timer;
-  var transcriptEvents = 0;
+  var sourceTranscriptEvents = 0;
+  var outputTranscriptEvents = 0;
   var audioEvents = 0;
 
   void complete({OpenAiRealtimeError? error}) {
@@ -803,7 +831,8 @@ Future<_GeneratedSpeechEvidence> _waitForGeneratedSpeechEvidence(
     }
     completer.complete(
       _GeneratedSpeechEvidence(
-        transcriptEvents: transcriptEvents,
+        sourceTranscriptEvents: sourceTranscriptEvents,
+        outputTranscriptEvents: outputTranscriptEvents,
         audioEvents: audioEvents,
         error: error,
       ),
@@ -815,14 +844,23 @@ Future<_GeneratedSpeechEvidence> _waitForGeneratedSpeechEvidence(
       complete(error: event);
       return;
     }
-    if (event is OpenAiRealtimeTranscriptDelta ||
-        event is OpenAiRealtimeTranscriptCompleted) {
-      transcriptEvents += 1;
+    final kind = switch (event) {
+      OpenAiRealtimeTranscriptDelta(:final kind) => kind,
+      OpenAiRealtimeTranscriptCompleted(:final kind) => kind,
+      _ => null,
+    };
+    if (kind == OpenAiRealtimeTranscriptKind.source) {
+      sourceTranscriptEvents += 1;
+    } else if (kind == OpenAiRealtimeTranscriptKind.translation) {
+      outputTranscriptEvents += 1;
     }
     if (event is OpenAiRealtimeAudioDelta) {
       audioEvents += 1;
     }
-    if (transcriptEvents > 0 && audioEvents > 0) {
+    // Wait until both the original source transcript and translated audio have
+    // arrived. Translation-only output must not satisfy this gate, otherwise a
+    // session that never emits original source text would still pass.
+    if (sourceTranscriptEvents > 0 && audioEvents > 0) {
       complete();
     }
   });
@@ -1136,18 +1174,35 @@ class _GeneratedSpeech {
 
 class _GeneratedSpeechEvidence {
   const _GeneratedSpeechEvidence({
-    required this.transcriptEvents,
+    required this.sourceTranscriptEvents,
+    required this.outputTranscriptEvents,
     required this.audioEvents,
     required this.error,
   });
 
-  final int transcriptEvents;
+  // Source (original) transcript events from the dedicated translation wire,
+  // i.e. `session.input_transcript.*`. These prove the original speech was
+  // transcribed and is available to populate transcript cards.
+  final int sourceTranscriptEvents;
+
+  // Output (translated) transcript events, i.e. `session.output_transcript.*`.
+  // Translation-only output must NOT be accepted as proof that the original
+  // source transcript arrived; that is exactly Tom's installed-app failure.
+  final int outputTranscriptEvents;
   final int audioEvents;
   final OpenAiRealtimeError? error;
 
-  bool get hasTranscript => transcriptEvents > 0;
+  bool get hasSourceTranscript => sourceTranscriptEvents > 0;
+
+  bool get hasOutputTranscript => outputTranscriptEvents > 0;
 
   bool get hasTranslatedAudio => audioEvents > 0;
+
+  /// True when translated transcript/audio output arrived but the original
+  /// source transcript never did. This is the "translation arrived but
+  /// original source never did" condition that must fail the smoke check.
+  bool get translationArrivedWithoutSource =>
+      (hasOutputTranscript || hasTranslatedAudio) && !hasSourceTranscript;
 }
 
 class _Pcm16Wav {

@@ -2,6 +2,32 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-01 - Gate Readable-Block Rolling On Source-Utterance Completion, And Track Content-Free Source/Output Signal Evidence
+
+Status: Accepted
+
+Context:
+
+- After PR #50 enabled input transcription, Tom's physical-device retest on 2026-06-01 showed the first card with original speech and translation (`EN` chip), but later cards reverted to `Original speech pending` with a `--` chip while still translating, and the second language was never detected.
+- Root cause: `RealtimeTranscriptCommitter._shouldRollReadableBlock` marked a block ready to roll when the translated text crossed a sentence boundary or grew past a length threshold, even while the same continuous source utterance was still streaming. Source transcription lags the translation, so the next translation delta opened a new block with no source text; the continued translation orphaned onto a sourceless card and the coordinator never recorded that turn's source language, so the bidirectional header could not lock the second language.
+
+Decision:
+
+- On the dedicated `/v1/realtime/translations` wire (no item ids, no per-event language metadata), treat the completed source utterance as the only reliable turn boundary. `RealtimeTranscriptCommitter` only rolls a readable block once the current turn's source has completed (`_sourceCompleted`). A genuinely new source utterance after completion still starts a new card, and item-id-driven splitting (for the primary realtime profile) is unchanged.
+- Maintain content-free source/output transcript signal counters on the coordinator, expose a `transcriptSignalSnapshot` (source/output turn counts, sourceless-final count, derived `translationArrivedWithoutSource`), and emit a privacy-safe `live_realtime.translation_without_source` warning when a card finalizes with translated output but no original text.
+- Harden the live generated-speech smoke to count source (`session.input_transcript`) and output (`session.output_transcript`) transcript events separately and fail on translation-only output, so a release check can detect "translation arrived but original source never did."
+
+Rationale:
+
+- The fix is minimal and production-safe: it changes only block-boundary timing on the existing wired path, preserves automatic language detection with no manual pickers, and keeps original speech and its translation on one card for a continuous utterance.
+- The signal counters and diagnostic give a deterministic, content-free way to detect the sourceless-final failure mode in tests and future smokes without storing transcript/translation content.
+
+Implications:
+
+- No dependency, Android permission, backend route, app-owned network path, live credential read, or microphone recording is added. The new diagnostic keys (`hasSourceSignal`, `hasOutputSignal`, `sourceTurnCount`, `outputTurnCount`, `sourcelessFinalCount`, `signalState`) are presence-only and allowlisted in `PrivacySafeDiagnostics`; transcript-bearing keys remain redacted.
+- Regression coverage: a committer test reproduces the screenshot (2 cards, second sourceless) and proves the fix yields 1 card retaining original + full translation; a guard proves new utterances still split; coordinator tests prove the translation-without-source diagnostic/snapshot and second-language detection from later source; a diagnostics test proves the new keys are allowlisted, not redacted.
+- The installed-app live-UI proof stays blocked behind #6 (no emulator audio source); #31 stays open until Tom confirms on a physical Android device.
+
 ## 2026-06-01 - Enable Source Input Transcription On The Realtime Translation Session, And Keep Debug-Signed Release APKs Out Of Tester Distribution
 
 Status: Accepted

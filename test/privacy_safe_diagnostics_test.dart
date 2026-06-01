@@ -53,6 +53,40 @@ void main() {
     expect(serialized, isNot(contains('Secret translated payload')));
   });
 
+  test('realtime transcript signal counters are allowlisted, not redacted', () {
+    final sink = MemoryPrivacySafeDiagnosticsSink();
+    final diagnostics = PrivacySafeDiagnostics(sink: sink);
+
+    diagnostics.warning(
+      'live_realtime.translation_without_source',
+      fields: {
+        'operation': 'realtime.transcript.signal',
+        'signalState': 'translation_without_source',
+        'hasSourceSignal': false,
+        'hasOutputSignal': true,
+        'sourceTurnCount': 0,
+        'outputTurnCount': 3,
+        'sourcelessFinalCount': 1,
+      },
+    );
+
+    final record = sink.records.single;
+    expect(record.event, 'live_realtime.translation_without_source');
+    expect(record.severity, DiagnosticSeverity.warning);
+    // Presence-only signal keys must survive sanitization as real values so a
+    // release check can read them; they must never be omitted or redacted.
+    expect(record.fields['signalState'], 'translation_without_source');
+    expect(record.fields['hasSourceSignal'], 'false');
+    expect(record.fields['hasOutputSignal'], 'true');
+    expect(record.fields['sourceTurnCount'], '0');
+    expect(record.fields['outputTurnCount'], '3');
+    expect(record.fields['sourcelessFinalCount'], '1');
+    for (final value in record.fields.values) {
+      expect(value, isNot(PrivacySafeDiagnostics.omitted));
+      expect(value, isNot(PrivacySafeDiagnostics.redacted));
+    }
+  });
+
   test('live session diagnostics record state only', () async {
     final sink = MemoryPrivacySafeDiagnosticsSink();
     final controller = LiveSessionController(

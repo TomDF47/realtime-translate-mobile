@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:realtime_translate_mobile/src/diagnostics/privacy_safe_diagnostics.dart';
 import 'package:realtime_translate_mobile/src/language/language_support.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
@@ -1159,6 +1160,172 @@ void main() {
       );
     },
   );
+
+  group('realtime source-signal evidence', () {
+    test(
+      'translation-only completion with no source raises a privacy-safe '
+      'translation_without_source signal',
+      () async {
+        // Reproduces Tom's installed-app symptom at the coordinator/diagnostic
+        // boundary: the dedicated wire delivered only translated output for a
+        // turn and never any source/original transcript. The runtime must
+        // surface this as a content-free signal (so a release check can catch
+        // it) instead of silently presenting a completed, sourceless card.
+        final diagnosticsSink = MemoryPrivacySafeDiagnosticsSink();
+        final harness = await _Harness.create(
+          permissionStatus: MicrophonePermissionStatus.granted,
+          diagnostics: PrivacySafeDiagnostics(sink: diagnosticsSink),
+        );
+        final startedAt = DateTime.utc(2026, 6, 1, 4);
+        await harness.repository.upsertMeeting(
+          StoredMeeting(
+            id: 'meeting-1',
+            title: 'Sourceless translation',
+            createdAt: startedAt,
+            updatedAt: startedAt,
+            sourceLanguageLabel: 'Auto-detect',
+            targetLanguageLabel: 'English',
+            transcriptEntries: const [],
+            summaryMetadata: const StoredSummaryMetadata.empty(),
+          ),
+        );
+        await harness.coordinator.start(
+          config: config,
+          transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+            repository: harness.repository,
+            meetingId: 'meeting-1',
+            sourceLanguageCode: 'auto',
+            targetLanguageCode: 'en',
+            now: () => startedAt,
+          ),
+        );
+
+        // Only translated output arrives and completes; no source transcript
+        // events are ever delivered for this turn.
+        harness.realtimeGateway.session
+          ..addEvent(
+            const OpenAiRealtimeTranscriptDelta(
+              type: 'session.output_transcript.delta',
+              kind: OpenAiRealtimeTranscriptKind.translation,
+              delta: 'That is good. Okay, yes. What are you doing today?',
+            ),
+          )
+          ..addEvent(
+            const OpenAiRealtimeTranscriptCompleted(
+              type: 'session.output_transcript.done',
+              kind: OpenAiRealtimeTranscriptKind.translation,
+              transcript: 'That is good. Okay, yes. What are you doing today?',
+            ),
+          );
+        await _drainAsync();
+
+        final snapshot = harness.coordinator.transcriptSignalSnapshot;
+        expect(snapshot.hasOutputSignal, isTrue);
+        expect(snapshot.hasSourceSignal, isFalse);
+        expect(snapshot.translationArrivedWithoutSource, isTrue);
+        expect(snapshot.sourcelessFinalCount, greaterThanOrEqualTo(1));
+
+        final signalRecords = diagnosticsSink.records
+            .where(
+              (record) =>
+                  record.event == 'live_realtime.translation_without_source',
+            )
+            .toList();
+        expect(signalRecords, isNotEmpty);
+        final record = signalRecords.first;
+        expect(record.severity, DiagnosticSeverity.warning);
+        expect(record.fields['signalState'], 'translation_without_source');
+        expect(record.fields['hasSourceSignal'], 'false');
+        expect(record.fields['hasOutputSignal'], 'true');
+        // The diagnostic must never carry transcript/translation content.
+        for (final value in record.fields.values) {
+          expect(value, isNot(contains('What are you doing today')));
+        }
+      },
+    );
+
+    test(
+      'later source turn updates the signal snapshot and detects the second '
+      'language without losing original text',
+      () async {
+        // A first English turn arrives with its source transcript, then a
+        // later Italian source turn arrives. The runtime must record BOTH
+        // source signals, detect the second language for the header, and keep
+        // original text on both cards (no permanent "Original speech pending").
+        final harness = await _Harness.create(
+          permissionStatus: MicrophonePermissionStatus.granted,
+        );
+        final startedAt = DateTime.utc(2026, 6, 1, 5);
+        await harness.repository.upsertMeeting(
+          StoredMeeting(
+            id: 'meeting-1',
+            title: 'Second language from source',
+            createdAt: startedAt,
+            updatedAt: startedAt,
+            sourceLanguageLabel: 'Auto-detect',
+            targetLanguageLabel: 'English',
+            transcriptEntries: const [],
+            summaryMetadata: const StoredSummaryMetadata.empty(),
+          ),
+        );
+        await harness.coordinator.start(
+          config: config,
+          transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+            repository: harness.repository,
+            meetingId: 'meeting-1',
+            sourceLanguageCode: 'auto',
+            targetLanguageCode: 'en',
+            now: () => startedAt,
+          ),
+        );
+
+        harness.realtimeGateway.session.addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Hello everyone, welcome to the meeting.',
+          ),
+        );
+        await _drainAsync();
+
+        expect(
+          harness.coordinator.interpreterRouteLabel,
+          'Heard English. Waiting for the other language...',
+        );
+
+        harness.realtimeGateway.session.addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Buongiorno a tutti, benvenuti alla riunione.',
+          ),
+        );
+        await _drainAsync();
+
+        final snapshot = harness.coordinator.transcriptSignalSnapshot;
+        expect(snapshot.sourceTurnCount, greaterThanOrEqualTo(2));
+        expect(snapshot.translationArrivedWithoutSource, isFalse);
+        expect(snapshot.sourcelessFinalCount, 0);
+
+        // The second distinct language locks the bidirectional header.
+        expect(
+          harness.coordinator.interpreterRouteLabel,
+          'English <-> Italian',
+        );
+
+        final entries = (await harness.repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries;
+        expect(entries, hasLength(2));
+        for (final entry in entries) {
+          expect(entry.originalText, isNotEmpty);
+        }
+        expect(entries.first.languageCode, 'EN');
+        expect(entries.last.languageCode, 'IT');
+      },
+    );
+  });
 
   test(
     'English Italian fallback runs after realtime translated text arrives first',
@@ -2411,6 +2578,123 @@ void main() {
         expect(entry.languageCode, isNot('IT'));
       },
     );
+
+    test(
+      'continuous source utterance is not fragmented into a sourceless card '
+      'by translation-side rolling',
+      () async {
+        // Reproduces Tom's 2026-06-01 installed-app screenshot against the
+        // real /v1/realtime/translations wire shape (no item ids, no language
+        // metadata). A single continuous source utterance streams while the
+        // translation output streams alongside and crosses a sentence
+        // boundary. The previous translation-side readable-block roll split
+        // the still-open source utterance: the first card kept the original
+        // text, but the continued translation rolled onto a NEW card whose
+        // original was empty ("Original speech pending"), exactly the
+        // screenshot symptom. The source utterance is the only reliable turn
+        // boundary on this wire, so a still-incomplete source utterance must
+        // keep its translation on the same card.
+        final repository = LocalMeetingRepository(
+          store: MemoryEncryptedLocalStore(),
+        );
+        final committer = await committerFor(repository);
+
+        // Source transcription streams the full utterance first (Whisper
+        // source transcription and target translation arrive on independent
+        // cadences; neither side has completed yet).
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hello, how are you? That is good. Okay, yes.',
+          ),
+        );
+        // Translation output streams in pieces that individually end on
+        // sentence boundaries.
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Hi, how are you?',
+          ),
+        );
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: ' That is good. Okay, yes.',
+          ),
+        );
+
+        final entries = (await repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries;
+        // The whole continuous turn stays on ONE card; no sourceless card is
+        // created while the source utterance is still open.
+        expect(entries, hasLength(1));
+        expect(
+          entries.single.originalText,
+          'Hello, how are you? That is good. Okay, yes.',
+        );
+        expect(
+          entries.single.translatedText,
+          'Hi, how are you? That is good. Okay, yes.',
+        );
+        for (final entry in entries) {
+          expect(
+            entry.originalText,
+            isNotEmpty,
+            reason: 'no card may show "Original speech pending" while the '
+                'source utterance is still streaming',
+          );
+        }
+      },
+    );
+
+    test(
+      'next source utterance after completion still starts a new card',
+      () async {
+        // Guard against over-correcting: once the current source utterance has
+        // completed, a genuinely new source utterance must still roll a new
+        // card on the no-item-id wire.
+        final repository = LocalMeetingRepository(
+          store: MemoryEncryptedLocalStore(),
+        );
+        final committer = await committerFor(repository);
+
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Buongiorno a tutti.',
+          ),
+        );
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Good morning everyone.',
+          ),
+        );
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Come stai oggi?',
+          ),
+        );
+
+        final entries = (await repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries;
+        expect(entries, hasLength(2));
+        expect(entries.first.originalText, 'Buongiorno a tutti.');
+        expect(entries.first.translatedText, 'Good morning everyone.');
+        expect(entries.last.originalText, 'Come stai oggi?');
+      },
+    );
   });
 }
 
@@ -2447,6 +2731,7 @@ class _Harness {
     Duration connectionTimeout = const Duration(seconds: 12),
     Duration startupStepTimeout = const Duration(seconds: 12),
     TextInterpreterGateway? textInterpreterGateway,
+    PrivacySafeDiagnostics? diagnostics,
   }) async {
     final harness = _Harness._(permissionStatus: permissionStatus);
     harness.coordinator = LiveRealtimeTranslationCoordinator(
@@ -2460,6 +2745,7 @@ class _Harness {
       connectionTimeout: connectionTimeout,
       startupStepTimeout: startupStepTimeout,
       textInterpreterGateway: textInterpreterGateway,
+      diagnostics: diagnostics ?? const PrivacySafeDiagnostics(),
     );
     if (seedCredential) {
       await harness.credentialStore.saveUserProvidedCredential(

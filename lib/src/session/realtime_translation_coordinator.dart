@@ -92,6 +92,14 @@ class LiveRealtimeTranslationCoordinator {
   final Set<String> _fallbackInFlightEntryIds = <String>{};
   final Set<String> _fallbackCompletedEntryIds = <String>{};
   final Set<String> _fallbackAuthoritativeEntryIds = <String>{};
+  // Presence-only counters that prove what the dedicated translation wire
+  // actually delivered for the active session, without retaining any
+  // transcript content. They back the "translation arrived but original
+  // source never did" detection and the privacy-safe session-end signal
+  // summary; never store transcript/translation text here.
+  int _sourceTranscriptTurns = 0;
+  int _outputTranscriptTurns = 0;
+  int _sourcelessFinalTurns = 0;
   bool _closingIntentionally = false;
   bool _processTranscriptsDuringIntentionalClose = false;
   bool _handlingFailure = false;
@@ -116,6 +124,19 @@ class LiveRealtimeTranslationCoordinator {
   /// locked two-language pair state once a second distinct language is
   /// detected. It never defaults an unknown source to the target language.
   String get interpreterRouteLabel => _bidirectionalRuntime.routeLabel;
+
+  /// Content-free snapshot of which realtime transcript signals the active
+  /// session has actually received. Exposes only counts and a derived state,
+  /// never any transcript/translation text, so smoke and release checks can
+  /// assert that source (original) transcript turns arrived and were not
+  /// silently replaced by translation-only output.
+  RealtimeTranscriptSignalSnapshot get transcriptSignalSnapshot {
+    return RealtimeTranscriptSignalSnapshot(
+      sourceTurnCount: _sourceTranscriptTurns,
+      outputTurnCount: _outputTranscriptTurns,
+      sourcelessFinalCount: _sourcelessFinalTurns,
+    );
+  }
 
   Future<LiveRealtimeStartResult> start({
     required OpenAiRealtimeTranslationConfig config,
@@ -458,7 +479,7 @@ class LiveRealtimeTranslationCoordinator {
         if (_shouldSuppressRealtimeTranslationForFallback(event)) {
           return;
         }
-        _commitTranscript(
+        _commitTranslationCompletion(
           _transcriptCommitter?.commitCompleted(
             event,
             forceNewSegment: _shouldStartNewRealtimeTranslationAfterFallback(
@@ -534,6 +555,57 @@ class LiveRealtimeTranslationCoordinator {
     );
   }
 
+  void _commitTranslationCompletion(Future<StoredTranscriptEntry?>? commit) {
+    if (commit == null) {
+      return;
+    }
+
+    unawaited(
+      commit
+          .then((entry) {
+            onTranscriptCommitted?.call();
+            if (entry == null) {
+              return;
+            }
+            if (entry.translatedText.trim().isNotEmpty) {
+              _outputTranscriptTurns += 1;
+            }
+            // A finalized card that carries translated output but no original
+            // source text is the "translation arrived but original source
+            // never did" failure mode from Tom's installed-app retest. Surface
+            // it as a privacy-safe, content-free signal so a release check can
+            // detect it instead of the UI silently showing a misleading
+            // completed card with "Original speech pending".
+            if (entry.translatedText.trim().isNotEmpty &&
+                entry.originalText.trim().isEmpty) {
+              _sourcelessFinalTurns += 1;
+              diagnostics.warning(
+                'live_realtime.translation_without_source',
+                fields: {
+                  'operation': 'realtime.transcript.signal',
+                  'signalState': 'translation_without_source',
+                  'hasSourceSignal': _sourceTranscriptTurns > 0,
+                  'hasOutputSignal': _outputTranscriptTurns > 0,
+                  'sourceTurnCount': _sourceTranscriptTurns,
+                  'outputTurnCount': _outputTranscriptTurns,
+                  'sourcelessFinalCount': _sourcelessFinalTurns,
+                },
+              );
+            }
+          })
+          .catchError((Object error, StackTrace stackTrace) {
+            diagnostics.warning(
+              'live_realtime.transcript_commit_failed',
+              fields: {
+                'operation': 'realtime.transcript.commit',
+                'result': 'failed',
+                'errorCode': error.runtimeType.toString(),
+              },
+            );
+          }),
+    );
+  }
+
   void _commitSourceTranscriptAndMaybeFallback(
     OpenAiRealtimeTranscriptCompleted event,
   ) {
@@ -548,6 +620,9 @@ class LiveRealtimeTranslationCoordinator {
             onTranscriptCommitted?.call();
             if (entry == null) {
               return;
+            }
+            if (entry.originalText.trim().isNotEmpty) {
+              _sourceTranscriptTurns += 1;
             }
             _trackSourceTurnForFallback(entry);
           })
@@ -720,6 +795,13 @@ class LiveRealtimeTranslationCoordinator {
     _fallbackInFlightEntryIds.clear();
     _fallbackCompletedEntryIds.clear();
     _fallbackAuthoritativeEntryIds.clear();
+    _resetTranscriptSignalCounters();
+  }
+
+  void _resetTranscriptSignalCounters() {
+    _sourceTranscriptTurns = 0;
+    _outputTranscriptTurns = 0;
+    _sourcelessFinalTurns = 0;
   }
 
   String _languageLabelForCode(String code) {
@@ -1062,6 +1144,44 @@ class LiveRealtimeStartupTimeoutException implements Exception {
 
   @override
   String toString() => 'LiveRealtimeStartupTimeoutException($step)';
+}
+
+/// Content-free summary of which realtime transcript signals a session has
+/// received. Carries only counts/derived flags so it can be logged, asserted
+/// in smoke checks, or surfaced in diagnostics without ever exposing
+/// transcript or translation content.
+class RealtimeTranscriptSignalSnapshot {
+  const RealtimeTranscriptSignalSnapshot({
+    required this.sourceTurnCount,
+    required this.outputTurnCount,
+    required this.sourcelessFinalCount,
+  });
+
+  /// Number of finalized source (original) transcript turns that carried text.
+  final int sourceTurnCount;
+
+  /// Number of finalized translation (output) transcript commits that carried
+  /// text. This counts output `.done` finalizations, not unique visible cards;
+  /// a long turn that crosses readable-block rolls can finalize output more
+  /// than once. It is a presence signal, so callers should only rely on
+  /// whether it is greater than zero.
+  final int outputTurnCount;
+
+  /// Number of finalized cards that had translated output but never received
+  /// any original/source text (the "translation arrived but source never did"
+  /// failure mode).
+  final int sourcelessFinalCount;
+
+  /// True when at least one source/original transcript turn arrived.
+  bool get hasSourceSignal => sourceTurnCount > 0;
+
+  /// True when at least one translation/output transcript turn arrived.
+  bool get hasOutputSignal => outputTurnCount > 0;
+
+  /// True when translation output arrived but no original/source text ever
+  /// did, i.e. cards would render "Original speech pending" permanently.
+  bool get translationArrivedWithoutSource =>
+      hasOutputSignal && !hasSourceSignal;
 }
 
 class _RealtimeSourceTurn {

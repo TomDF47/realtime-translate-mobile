@@ -384,6 +384,21 @@ class LiveRealtimeTranscriptCommitter {
       return false;
     }
 
+    // The dedicated `/v1/realtime/translations` wire sends no item ids and no
+    // language metadata, so the completed source utterance is the only
+    // reliable turn boundary. A single continuous utterance streams its source
+    // and target transcripts on independent cadences, and the translation side
+    // frequently crosses sentence boundaries (or grows long) while the same
+    // source utterance is still being transcribed. Rolling on the translation
+    // alone there splits one still-open turn: the next translation delta opens
+    // a fresh card whose original stays empty ("Original speech pending"),
+    // which is exactly Tom's 2026-06-01 installed-app screenshot. Only treat a
+    // readable block as complete once this turn's source has finished, so a
+    // mid-utterance translation never orphans itself onto a sourceless card.
+    if (!_sourceCompleted) {
+      return false;
+    }
+
     final sourceText = _sourceBuffer.toString().trim();
     final translatedText = _translationBuffer.toString().trim();
     if (sourceText.length >= _readableBlockCharacterThreshold ||
