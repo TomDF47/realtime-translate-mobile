@@ -174,10 +174,29 @@ class OpenAiRealtimeTranslationConfig {
   }
 
   Map<String, Object?> _dedicatedTranslationSessionUpdate() {
+    // The dedicated `/v1/realtime/translations` endpoint only emits the
+    // source/original transcript (`session.input_transcript.delta`/`.done`)
+    // when input transcription is explicitly configured. Without
+    // `audio.input.transcription`, the session streams translated audio and
+    // `session.output_transcript` deltas only, so the live UI can never show
+    // the original speech and never sees a source-turn boundary to split
+    // blocks on. Per the official Realtime Translation guide and cookbook,
+    // enable the dedicated streaming transcription model and near-field noise
+    // reduction so the original speech and per-turn source boundaries arrive.
+    // Source-language detection remains server-side and is not requested here;
+    // the target output language is the only language we set.
     return {
       'type': 'session.update',
       'session': {
         'audio': {
+          'input': {
+            'transcription': {
+              'model': OpenAiConfiguration.translationTranscriptionModel,
+            },
+            'noise_reduction': {
+              'type': OpenAiConfiguration.realtimeInputNoiseReduction,
+            },
+          },
           'output': {'language': targetLanguageCode},
         },
       },

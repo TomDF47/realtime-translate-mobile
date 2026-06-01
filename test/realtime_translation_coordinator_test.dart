@@ -1511,6 +1511,91 @@ void main() {
     },
   );
 
+  test(
+    'output transcript without any source never finalizes a sourceless row',
+    () async {
+      // Safety net for the exact failure mode Tom hit on the installed app: if
+      // the dedicated translation endpoint streams only translated
+      // (`session.output_transcript`) deltas and never any source
+      // (`session.input_transcript`) events, the app must not present a
+      // completed/"final" row with empty original speech. The row stays
+      // non-final (partial), and on session end it is marked partial/interrupted
+      // rather than final, so the UI never claims a finished turn whose original
+      // is missing. With the session-config fix the endpoint now emits source
+      // events; this guards against any future config/endpoint regression that
+      // silently drops them.
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      final startedAt = DateTime.utc(2026, 6, 1, 4);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Output-only safety',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      // Two full translated turns arrive, each completed, but no source ever
+      // does. This is what the broken (pre-fix) session config produced.
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Good morning everyone.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Good morning everyone.',
+          ),
+        );
+      await _drainAsync();
+
+      var entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, isEmpty);
+      expect(entries.single.translatedText, 'Good morning everyone.');
+      // Critically NOT final: a completed translation with no original speech
+      // must not be presented as a finished turn.
+      expect(entries.single.status, isNot('final'));
+      expect(entries.single.status, 'partial');
+
+      // Ending the session must not promote the sourceless row to final.
+      await harness.coordinator.stop();
+      await _drainAsync();
+
+      entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.originalText, isEmpty);
+      expect(entries.single.status, isNot('final'));
+    },
+  );
+
   test('pause and resume listening preserves transcript state', () async {
     final harness = await _Harness.create(
       permissionStatus: MicrophonePermissionStatus.granted,

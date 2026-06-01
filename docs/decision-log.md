@@ -2,6 +2,33 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-01 - Enable Source Input Transcription On The Realtime Translation Session, And Keep Debug-Signed Release APKs Out Of Tester Distribution
+
+Status: Accepted
+
+Context:
+
+- Tom re-tested the installed app on 2026-06-01 after PR #49 and the original speech still never appeared; all recognized/translated text went into a single transcript box and the header stayed on `Heard English`. The release assets for `debug-20260601-a7a2743` contained two APKs: a 49 MB `release-debug-signed` build that "does not work at all" and a 168 MB plain debug build that runs but still showed the transcript bug.
+- Root cause: the dedicated `/v1/realtime/translations` session config (`OpenAiRealtimeTranslationConfig._dedicatedTranslationSessionUpdate`) only set `audio.output.language` and never configured `audio.input.transcription`. The official OpenAI Realtime Translation guide and cookbook state that the source/original transcript (`session.input_transcript.delta`/`.done`) is emitted only when input transcription is configured. With no source events, the original speech could never display, and the committer's source-utterance block boundary never fired, so every translation delta appended to one block. PR #49's block-splitting/attribution fixes were correct but could not engage because their input — source events — never arrived; the test seams injected source events the live session never requested.
+
+Decision:
+
+- Configure input transcription on the dedicated translation session: `session.audio.input.transcription.model = gpt-realtime-whisper`, plus `session.audio.input.noise_reduction.type = near_field` per the official guide. Keep `audio.output.language` as the only language we set; source-language detection stays server-side. Do not send a model, instructions, or a source language on this endpoint (it rejects custom prompting/voice and detects source automatically).
+- Keep the existing parser and committer behavior; they already handle `session.input_transcript.*`. The defect was purely the missing session input-transcription request.
+- Keep a coordinator safety net: a completed translation with no source ever arriving must not finalize a sourceless row (it stays `partial`/`interrupted`), so a future config/endpoint regression degrades safely instead of presenting falsely complete turns.
+- Do not distribute the debug-signed release APK (`release-debug-signed`) for installed device testing. It is a store-signing rehearsal artifact only until real local release-signing material exists (#24). The supported installed-test artifact is the debug APK. The artifact builder and `scripts/check_apk_metadata.sh` now print explicit tester guidance, and release notes/checklists must recommend only the debug APK to testers.
+
+Rationale:
+
+- Enabling input transcription is the minimal, production-safe, phone-only change that makes the source/original transcript and per-turn source boundaries arrive on the existing direct-OpenAI path, with no backend.
+- The 49 MB release APK builds and boots to the bounded `OpenAI setup required` state on the emulator (offline release smoke passed), and carries the correct `INTERNET`/`RECORD_AUDIO` permissions, so the binary is not broken at the code level. Debug-signed builds presented as releases have repeatedly failed to install/run for testers (a debug-signed "release" is the kind of artifact device security such as Play Protect commonly blocks), so the safe action is to stop presenting it for testing rather than ship a confusing second artifact.
+
+Implications:
+
+- This changes the OpenAI realtime session request body for the dedicated translation profile (adds `audio.input.transcription` and `audio.input.noise_reduction`). It adds no dependency, Android permission, backend route, app-owned network path, live credential read, microphone recording, or logging/diagnostics surface, and preserves the phone-only direct-OpenAI privacy boundary. No transcript/audio/prompt/credential content is logged.
+- Regression coverage: a session-config test asserts input transcription is configured (fails cleanly on main with a null source `input` block), a wire-level connect assertion proves the gateway sends the input-transcription request over the socket, and a coordinator regression proves output-only streams never finalize a sourceless row. The existing wired coordinator/full-app EN-then-IT block-split tests continue to prove two language-correct blocks once source events flow.
+- The installed-app live-UI proof (a real credential reaching `Listening`, physical microphone capture, the EN/IT two-turn UI, and audible output) stays blocked behind #6 because this machine's emulator has no audio source. #31 stays open until Tom confirms on a physical Android device.
+
 ## 2026-06-01 - Live Block Splitting And Language Attribution For The Real Translation Wire Shape
 
 Status: Accepted

@@ -72,16 +72,17 @@ void main() {
       OpenAiRealtimeTranslationProfile.dedicatedTranslation,
     );
     expect(session.keys, ['audio']);
-    expect(audio.keys, ['output']);
+    expect(audio.keys, containsAll(<String>['input', 'output']));
     expect(output.keys, ['language']);
     expect(output['language'], 'fr');
+    // The dedicated endpoint does not accept custom prompts or a source
+    // language; we must not leak the model, instructions, or a source language
+    // into the translation session config.
     expect(serialized, isNot(contains('gpt-realtime-2')));
     expect(serialized, isNot(contains('gpt-realtime-translate')));
-    expect(serialized, isNot(contains('model')));
     expect(serialized, isNot(contains('instructions')));
     expect(serialized, isNot(contains('"sourceLanguageCode"')));
     expect(serialized, isNot(contains('"source"')));
-    expect(serialized, isNot(contains('"input"')));
     expect(serialized, isNot(contains('"language":"en"')));
     expect(
       config.audioAppendEvent([1, 2, 3])['type'],
@@ -91,6 +92,52 @@ void main() {
     expect(config.responseCreateEvent(), isNull);
     expect(config.gracefulCloseEvent(), {'type': 'session.close'});
   });
+
+  test(
+    'dedicated translation session enables source input transcription',
+    () {
+      // Regression for Tom's installed-app retest after PR #49: the original
+      // speech never appeared and every turn collapsed into one block because
+      // the dedicated `/v1/realtime/translations` session never enabled input
+      // transcription, so the endpoint emitted no source
+      // (`session.input_transcript`) events at all. Without source events the
+      // committer never reaches a source-turn boundary, so output transcript
+      // deltas keep appending to a single block.
+      //
+      // Per the official OpenAI Realtime Translation guide and cookbook, the
+      // source/original transcript is only emitted when
+      // `session.audio.input.transcription` is configured. This test fails on
+      // main/a7a2743 (no `input` key) and passes once the config requests the
+      // streaming transcription model.
+      const config = OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es');
+
+      final sessionUpdate = config.initialSessionUpdate();
+      final session = sessionUpdate['session']! as Map<String, Object?>;
+      final audio = session['audio']! as Map<String, Object?>;
+      final input = audio['input']! as Map<String, Object?>;
+      final transcription = input['transcription']! as Map<String, Object?>;
+      final noiseReduction = input['noise_reduction']! as Map<String, Object?>;
+
+      expect(
+        transcription['model'],
+        OpenAiConfiguration.translationTranscriptionModel,
+        reason:
+            'input transcription must be configured so the endpoint emits '
+            'session.input_transcript source events',
+      );
+      expect(transcription['model'], 'gpt-realtime-whisper');
+      expect(
+        noiseReduction['type'],
+        OpenAiConfiguration.realtimeInputNoiseReduction,
+      );
+      // The translation endpoint rejects custom prompting and voice selection,
+      // and source language is detected server-side, so we still send no
+      // model, instructions, or source language.
+      final serialized = jsonEncode(sessionUpdate);
+      expect(serialized, isNot(contains('instructions')));
+      expect(serialized, isNot(contains('"language":"auto"')));
+    },
+  );
 
   test('parses realtime audio, transcript, lifecycle, and error events', () {
     final audio = OpenAiRealtimeEventParser.parse({
@@ -271,6 +318,18 @@ void main() {
       expect(authorization, 'Bearer placeholder-local-openai-credential');
       expect(receivedMessages, hasLength(3));
       expect(receivedMessages.first, contains('session.update'));
+      // The session.update sent on the wire must request input transcription so
+      // the dedicated translation endpoint streams the source/original
+      // transcript. This is the end-to-end (gateway -> socket) guarantee that
+      // the original speech can appear in the live UI.
+      final firstSent =
+          jsonDecode(receivedMessages.first) as Map<String, dynamic>;
+      final sentSession = firstSent['session'] as Map<String, dynamic>;
+      final sentAudio = sentSession['audio'] as Map<String, dynamic>;
+      final sentInput = sentAudio['input'] as Map<String, dynamic>;
+      final sentTranscription =
+          sentInput['transcription'] as Map<String, dynamic>;
+      expect(sentTranscription['model'], 'gpt-realtime-whisper');
       expect(receivedMessages[1], contains('AQIDBA=='));
       expect(
         receivedMessages[1],

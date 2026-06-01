@@ -227,6 +227,18 @@ fi
 PERMISSIONS_CSV="$(printf '%s' "$PERMISSIONS" | paste -sd, - 2>/dev/null || printf '%s' "$PERMISSIONS" | tr '\n' ',')"
 PERMISSIONS_CSV="${PERMISSIONS_CSV%,}"
 
+# Distinguish the debug APK (debug-signed, built with `flutter build apk
+# --debug`) from a debug-signed *release* artifact. Only the file naming and
+# size distinguish them once both are debug-signed, so we surface the standard
+# Flutter debug APK path as the supported installed-test artifact and flag any
+# other debug-signed APK (i.e. a release-mode build using the debug-signing
+# fallback) as not for tester distribution.
+APK_BASENAME="$(basename "$APK_PATH")"
+IS_FLUTTER_DEBUG_APK=0
+case "$APK_BASENAME" in
+  app-debug.apk|*-debug-*.apk|*-debug.apk) IS_FLUTTER_DEBUG_APK=1 ;;
+esac
+
 printf 'APK metadata preflight passed.\n'
 printf '  apk: %s\n' "$APK_PATH"
 printf '  sha256: %s (%s)\n' "$APK_SHA256" "$SHA_STATUS"
@@ -234,6 +246,13 @@ printf '  package: %s\n' "$PACKAGE_NAME"
 printf '  version: %s (code %s)\n' "$VERSION_NAME" "$VERSION_CODE"
 printf '  permissions: %s\n' "$PERMISSIONS_CSV"
 printf '  signing: %s\n' "$SIGNING"
+if [[ "$SIGNING" == "debug" && "$IS_FLUTTER_DEBUG_APK" -eq 0 ]]; then
+  printf '  tester_artifact: no (debug-signed release; do not distribute for installed testing — use the debug APK)\n'
+elif [[ "$SIGNING" == "debug" ]]; then
+  printf '  tester_artifact: yes (debug APK is the supported installed-test artifact)\n'
+else
+  printf '  tester_artifact: release-signed\n'
+fi
 
 if [[ -n "$FACTS_FILE" ]]; then
   mkdir -p "$(dirname "$FACTS_FILE")" >/dev/null 2>&1 || true
