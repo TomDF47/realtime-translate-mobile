@@ -2,6 +2,30 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-01 - Live Block Splitting And Language Attribution For The Real Translation Wire Shape
+
+Status: Accepted
+
+Decision:
+
+- Treat the live `/v1/realtime/translations` wire shape as authoritative: `session.input_transcript` (source) and `session.output_transcript` (translation) deltas can arrive with no item ids and no per-event language metadata, and source detection is automatic on OpenAI's side without a published language field.
+- Drive transcript block splitting on the wired path from source-utterance boundaries: once the current block's source has completed, the next incoming source content always starts a new block. Do not require a realtime translation to be present on the block to roll, because a fallback turn's translated text is written separately.
+- Never default an unresolved source language to the target language. An unknown source language stays neutral (`auto`) so the live header and per-row language chips do not collapse every turn to the target language.
+- Resolve a short, distinctive foreign phrase from a single high-signal marker (for example `buongiorno`, `ciao`, `hola`, `bonjour`) while keeping the higher multi-marker threshold for English, whose markers are common function words. English-homograph markers (for example Italian `come`) are excluded from single-marker eligibility so an English-only phrase does not resolve to a foreign language at score 1.
+- Make the runtime's detected-language ordering the single source of truth for the live header/status, falling back to stored-entry derivation only for resumed/historical meetings.
+
+Rationale:
+
+- Tom re-tested the installed app on 2026-06-01 and the prior #31 fix (proven only against the text-first/metadata-rich test seam) did not hold: a long English block kept "Original speech pending" while a later Italian turn's English translation merged into it, and the header stayed on "Heard English" instead of locking Italian/English.
+- The previous block-split heuristic depended on translation text being present and on item ids/language metadata that the dedicated endpoint does not send, so it mis-bucketed source and translation and mislabeled every turn as the target language.
+- Source-utterance boundaries and target-contrast-safe language attribution are deterministic against the real wire shape and keep the English-to-Italian direct fallback turn paired with its own block.
+
+Implications:
+
+- This is wired-path logic and test coverage only. It adds no dependency, Android permission, backend route, network path, OpenAI request format, live credential read, microphone recording, or logging surface change, and preserves the phone-only direct-OpenAI boundary.
+- Regression coverage includes a wired coordinator test and a full-app widget test for the exact "English paragraph, then Italian phrase meaning Good morning, how are you?" scenario, plus committer unit tests for neutral unknown-language attribution and single-marker foreign-phrase resolution.
+- The installed-app live-UI header/block proof remains blocked behind #6 because this machine's emulator has no audio source; this decision does not claim physical microphone or audible output validation.
+
 ## 2026-05-24 - Phone-Only MVP Architecture
 
 Status: Accepted

@@ -620,6 +620,143 @@ void main() {
     },
   );
 
+  testWidgets(
+    'live English paragraph then Italian turn shows two language-correct cards',
+    (tester) async {
+      // End-to-end reproduction of Tom's 2026-06-01 installed-app report,
+      // driving the real LiveTranslateApp/coordinator/committer/storage path
+      // and faking only the external seams. A long English paragraph is heard,
+      // then the Italian phrase meaning "Good morning, how are you?". Both
+      // arrive with no item ids and no language metadata, exactly like the live
+      // /v1/realtime/translations wire shape. The first card must keep the
+      // English original with its Italian translation; the Italian turn must be
+      // a new card with the Italian original and the English translation; the
+      // header must lock English <-> Italian; and no completed card may remain
+      // on "Original speech pending".
+      final repository = _testRepository();
+      final realtimeGateway = _FakeRealtimeTranslationGateway();
+      final textGateway = _FakeTextInterpreterGateway();
+      textGateway.results.add(
+        const TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Buongiorno a tutti.',
+        ),
+      );
+      await _seedCredential(repository);
+      await tester.pumpWidget(
+        LiveTranslateApp(
+          permissionGateway: _FakePermissionGateway.granted(),
+          meetingRepository: repository,
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+          realtimeTranslationGateway: realtimeGateway,
+          textInterpreterGateway: textGateway,
+        ),
+      );
+
+      await tester.tap(find.text('Start interpreter'));
+      await tester.pumpAndSettle();
+      expect(find.text('Listening for languages...'), findsOneWidget);
+
+      const englishParagraph =
+          "Well, you've been on this trip for a full month, haven't you? "
+          "Yes, a million hunters, a bit exaggerated, maybe. And now we've "
+          "been here five months; that means we're in Australia. Good "
+          'morning, how are you?';
+      // English source leads, no language metadata, no item id.
+      realtimeGateway.sessions.last
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: englishParagraph,
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: englishParagraph,
+          ),
+        );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Heard English. Waiting for the other language...'),
+        findsOneWidget,
+      );
+
+      // Italian turn: source leads, English translation streams alongside.
+      realtimeGateway.sessions.last
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Buongiorno, come stai?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Good morning, how are you?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Buongiorno, come stai?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Good morning, how are you?',
+          ),
+        );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      final entries =
+          (await repository.loadSnapshot()).meetings.single.transcriptEntries;
+      expect(entries, hasLength(2));
+      expect(entries.first.languageCode, 'EN');
+      expect(entries.first.originalText, englishParagraph);
+      expect(entries.first.translatedText, 'Buongiorno a tutti.');
+      expect(entries.last.languageCode, 'IT');
+      expect(entries.last.originalText, 'Buongiorno, come stai?');
+      expect(entries.last.translatedText, 'Good morning, how are you?');
+
+      // Header locks the pair; it must not stay on "Heard English" or collapse
+      // to the English target only.
+      expect(find.text('English <-> Italian'), findsOneWidget);
+      expect(
+        find.text('Heard English. Waiting for the other language...'),
+        findsNothing,
+      );
+
+      // Both cards render their original speech; nothing stays pending.
+      expect(find.text(englishParagraph), findsOneWidget);
+      expect(find.text('Buongiorno, come stai?'), findsOneWidget);
+      expect(find.text('Buongiorno a tutti.'), findsOneWidget);
+      expect(find.text('Good morning, how are you?'), findsOneWidget);
+      expect(find.text('Original speech pending'), findsNothing);
+
+      // The English turn routed through the direct OpenAI text fallback.
+      expect(textGateway.requests, hasLength(1));
+      expect(textGateway.requests.single.sourceLanguageCode, 'en');
+      expect(textGateway.requests.single.targetLanguageCode, 'it');
+      expect(
+        textGateway.requests.single.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
+    },
+  );
+
   testWidgets('shows reconnecting realtime recovery state on live surface', (
     tester,
   ) async {

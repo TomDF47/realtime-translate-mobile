@@ -107,6 +107,16 @@ class LiveRealtimeTranslationCoordinator {
     return _realtimeSession != null && captureGateway.isCapturing;
   }
 
+  /// User-facing interpreter status/header label derived from the languages the
+  /// runtime has actually detected on committed source turns.
+  ///
+  /// This is the single runtime source of truth for the live header so it stays
+  /// consistent with transcript block language attribution. It reports the
+  /// listening state, then the single heard-language waiting state, then the
+  /// locked two-language pair state once a second distinct language is
+  /// detected. It never defaults an unknown source to the target language.
+  String get interpreterRouteLabel => _bidirectionalRuntime.routeLabel;
+
   Future<LiveRealtimeStartResult> start({
     required OpenAiRealtimeTranslationConfig config,
     LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
