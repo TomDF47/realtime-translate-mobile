@@ -145,7 +145,7 @@ TranscriptEntryData _transcriptEntryFromStored(StoredTranscriptEntry entry) {
   };
 
   return TranscriptEntryData(
-    languageCode: entry.languageCode,
+    languageCode: _languageChipLabel(entry.languageCode),
     originalText: entry.originalText,
     translatedText: entry.translatedText,
     timestamp: _timeLabel(entry.timestamp),
@@ -167,6 +167,19 @@ String? _transcriptStatusLabel(String status) {
     'final' => 'Translated',
     _ => null,
   };
+}
+
+// Chip/label text for a stored language code. The stored code stays neutral
+// ('auto') for an unresolved source so routing logic is unaffected, but the
+// transcript card must not show a raw "auto" chip, so it is presented as a
+// short neutral marker instead.
+String _languageChipLabel(String code) {
+  final normalized = code.trim().toLowerCase();
+  if (normalized.isEmpty || normalized == 'auto') {
+    return '--';
+  }
+
+  return code.trim().toUpperCase();
 }
 
 String _languageNameFromCodeValue(String code) {
@@ -772,9 +785,35 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return 'Listening paused';
     }
     final activeMeeting = _activeMeeting;
-    return _interpreterLabelForTranscriptEntries(
+    final storedLabel = _interpreterLabelForTranscriptEntries(
       activeMeeting?.transcriptEntries ?? const [],
     );
+    // Prefer the live runtime's detected-language label when it is more
+    // specific than what the stored transcript codes yield. The runtime is the
+    // single source of truth for live language detection and preserves the
+    // order languages were first heard, so the header advances to the
+    // heard-language and paired-language states even when individual rows could
+    // not be language-coded yet. Stored-entry derivation still drives resumed
+    // or historical meetings where the runtime has no detections.
+    final runtimeLabel = _realtimeCoordinator.interpreterRouteLabel;
+    if (_isRuntimeLabelMoreSpecific(runtimeLabel, storedLabel)) {
+      return runtimeLabel;
+    }
+    return storedLabel;
+  }
+
+  bool _isRuntimeLabelMoreSpecific(String runtimeLabel, String storedLabel) {
+    int specificity(String label) {
+      if (label.contains('<->')) {
+        return 2;
+      }
+      if (label.startsWith('Heard ')) {
+        return 1;
+      }
+      return 0;
+    }
+
+    return specificity(runtimeLabel) > specificity(storedLabel);
   }
 
   String? _liveStatusLabel(LiveSessionMode fallbackMode) {

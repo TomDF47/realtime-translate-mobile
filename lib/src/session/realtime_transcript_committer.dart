@@ -101,6 +101,7 @@ class LiveRealtimeTranscriptCommitter {
         isCompletion: true,
         itemId: event.itemId,
         languageCode: nextLanguageCode,
+        transcript: event.transcript,
       )) {
         _resetSegment();
       }
@@ -225,11 +226,17 @@ class LiveRealtimeTranscriptCommitter {
     }
 
     final updatedAt = target.now().toUtc();
+    final resolvedSourceLanguage = _resolveSourceLanguageCode();
     final entry = StoredTranscriptEntry(
       id: _entryId,
       meetingId: target.meetingId,
-      languageCode: (_detectedSourceLanguageCode ?? target.targetLanguageCode)
-          .toUpperCase(),
+      // Never default an unknown source language to the target language; an
+      // unresolved source stays neutral ('auto') so the live header and block
+      // language chips do not collapse every turn to the target language.
+      languageCode: (resolvedSourceLanguage == null ||
+              resolvedSourceLanguage.isEmpty)
+          ? 'auto'
+          : resolvedSourceLanguage.toUpperCase(),
       originalText: _sourceBuffer.toString().trim(),
       translatedText: _translationBuffer.toString().trim(),
       timestamp: _timestamp ?? updatedAt,
@@ -251,6 +258,7 @@ class LiveRealtimeTranscriptCommitter {
     bool isCompletion = false,
     String? itemId,
     String? languageCode,
+    String? transcript,
   }) {
     if (!_hasTranscript) {
       return false;
@@ -271,6 +279,22 @@ class LiveRealtimeTranscriptCommitter {
       return true;
     }
 
+    // New source utterance on the dedicated translation path, which sends no
+    // item ids: once the current block's source has completed, any further
+    // incoming source content belongs to a new turn. This is the reliable
+    // block boundary when the previous turn never received a realtime
+    // translation (for example an English->Italian direct fallback turn whose
+    // translated text is written separately), so a later turn's source and
+    // translation no longer merge into the prior source-only block. An
+    // identical re-sent source completion (a duplicate/refinement of the
+    // current turn rather than a new utterance) is excluded so a repeated
+    // event does not over-split.
+    if (nextKind == OpenAiRealtimeTranscriptKind.source &&
+        _sourceCompleted &&
+        !_isRepeatedCurrentSourceTranscript(transcript)) {
+      return true;
+    }
+
     if (_isFinal) {
       if (isCompletion &&
           ((nextKind == OpenAiRealtimeTranscriptKind.source &&
@@ -287,6 +311,15 @@ class LiveRealtimeTranscriptCommitter {
     }
 
     if (nextKind == OpenAiRealtimeTranscriptKind.translation) {
+      // Do not roll when this event finalizes the current block's own
+      // in-progress translation; only roll when the current translation side is
+      // already complete, so the incoming translation belongs to a new turn.
+      // Without this guard a single turn whose translation ends on a sentence
+      // boundary would orphan its own `output_transcript.done` into a new,
+      // source-less block.
+      if (isCompletion && !_translationCompleted) {
+        return false;
+      }
       return true;
     }
 
@@ -332,6 +365,20 @@ class LiveRealtimeTranscriptCommitter {
     _detectedSourceLanguageCode ??= resolvedLanguageCode;
   }
 
+  /// Resolves the source language for the current block without defaulting to
+  /// the target language.
+  ///
+  /// The dedicated `/v1/realtime/translations` endpoint sends no language
+  /// metadata, so this resolves from, in order: an explicitly recorded source
+  /// language and deterministic detection over the source transcript text. It
+  /// returns `null` when the source language is genuinely unknown so callers
+  /// can render a neutral label instead of mislabeling the source as the
+  /// target language.
+  String? _resolveSourceLanguageCode() {
+    return _detectedSourceLanguageCode ??
+        _detectLanguageCode(_sourceBuffer.toString());
+  }
+
   bool _shouldRollReadableBlock() {
     if (!_hasSourceText || !_hasTranslationText) {
       return false;
@@ -358,6 +405,15 @@ class LiveRealtimeTranscriptCommitter {
 
   bool get _hasTranslationText =>
       _translationBuffer.toString().trim().isNotEmpty;
+
+  bool _isRepeatedCurrentSourceTranscript(String? transcript) {
+    final candidate = transcript?.trim();
+    if (candidate == null || candidate.isEmpty) {
+      return false;
+    }
+
+    return _sourceBuffer.toString().trim() == candidate;
+  }
 
   bool _isDuplicateCompletion(OpenAiRealtimeTranscriptCompleted event) {
     final transcript = event.transcript?.trim();
@@ -398,65 +454,8 @@ String? _detectLanguageCode(String text) {
   }
 
   final scores = <String, int>{
-    'en': _languageScore(normalized, const [
-      'the',
-      'and',
-      'you',
-      'what',
-      'going',
-      'hello',
-      'thank',
-      'thanks',
-      'meeting',
-      'timeline',
-      'please',
-    ]),
-    'it': _languageScore(normalized, const [
-      'ciao',
-      'grazie',
-      'buongiorno',
-      'buonasera',
-      'allora',
-      'cosa',
-      'perche',
-      'perchè',
-      'sono',
-      'siamo',
-      'questo',
-      'questa',
-      'quello',
-      'quella',
-      'parlo',
-      'italiano',
-    ]),
-    'es': _languageScore(normalized, const [
-      'hola',
-      'gracias',
-      'buenos',
-      'dias',
-      'estas',
-      'esta',
-      'que',
-      'por',
-      'favor',
-      'hablo',
-      'espanol',
-      'español',
-    ]),
-    'fr': _languageScore(normalized, const [
-      'bonjour',
-      'merci',
-      'salut',
-      'avec',
-      'pourquoi',
-      'parle',
-      'francais',
-      'français',
-      'nous',
-      'vous',
-      'etre',
-      'être',
-    ]),
+    for (final language in _languageMarkers.entries)
+      language.key: _languageScore(normalized, language.value),
   };
 
   var bestCode = '';
@@ -472,12 +471,120 @@ String? _detectLanguageCode(String text) {
     }
   }
 
-  return bestScore < _minimumLocalLanguageScore || tiedBestScore
-      ? null
-      : bestCode;
+  if (tiedBestScore || bestScore <= 0) {
+    return null;
+  }
+
+  // A single distinctive non-English marker (for example "buongiorno", "ciao",
+  // "hola", "bonjour") is enough to resolve a short foreign phrase, as long as
+  // English scored nothing. English short phrases still need the higher
+  // threshold because its markers are common function words that can appear
+  // incidentally in other languages. The relaxed threshold also requires the
+  // best language to have matched a marker that is not an English homograph
+  // (for example Italian "come"), so an English-only phrase such as
+  // "Let me come in." does not resolve to a foreign language at score 1.
+  final englishScore = scores['en'] ?? 0;
+  final hasDistinctiveMarker =
+      bestCode != 'en' && _languageScore(normalized, _distinctiveMarkers(bestCode)) > 0;
+  final minimumScore =
+      (bestCode != 'en' && englishScore == 0 && hasDistinctiveMarker)
+      ? _minimumDistinctiveLanguageScore
+      : _minimumLocalLanguageScore;
+
+  return bestScore < minimumScore ? null : bestCode;
 }
 
 const _minimumLocalLanguageScore = 2;
+const _minimumDistinctiveLanguageScore = 1;
+
+// Single source of truth for the deterministic local language markers. English
+// markers are common function words, so English never uses the relaxed
+// single-marker threshold (see `_detectLanguageCode`).
+const _languageMarkers = <String, List<String>>{
+  'en': [
+    'the',
+    'and',
+    'you',
+    'what',
+    'going',
+    'hello',
+    'thank',
+    'thanks',
+    'meeting',
+    'timeline',
+    'please',
+  ],
+  'it': [
+    'ciao',
+    'grazie',
+    'buongiorno',
+    'buonasera',
+    'allora',
+    'cosa',
+    'perche',
+    'perchè',
+    'sono',
+    'siamo',
+    'questo',
+    'questa',
+    'quello',
+    'quella',
+    'parlo',
+    'italiano',
+    'come',
+    'stai',
+    'sta',
+    'bene',
+    'tutti',
+    'tutto',
+    'sei',
+    'molto',
+    'anche',
+  ],
+  'es': [
+    'hola',
+    'gracias',
+    'buenos',
+    'dias',
+    'estas',
+    'esta',
+    'que',
+    'por',
+    'favor',
+    'hablo',
+    'espanol',
+    'español',
+  ],
+  'fr': [
+    'bonjour',
+    'merci',
+    'salut',
+    'avec',
+    'pourquoi',
+    'parle',
+    'francais',
+    'français',
+    'nous',
+    'vous',
+    'etre',
+    'être',
+  ],
+};
+
+// Markers that are also common English words. They count toward the higher
+// multi-marker threshold but are excluded from single-marker eligibility so an
+// English-only phrase (for example "Let me come in.") cannot resolve to a
+// foreign language at score 1.
+const _englishHomographMarkers = <String>{'come'};
+
+// Markers for [code] that are eligible to resolve the language from a single
+// hit, i.e. its full marker list minus any English homographs.
+List<String> _distinctiveMarkers(String code) {
+  final markers = _languageMarkers[code] ?? const <String>[];
+  return markers
+      .where((marker) => !_englishHomographMarkers.contains(marker))
+      .toList(growable: false);
+}
 
 int _languageScore(String text, List<String> markers) {
   var score = 0;

@@ -332,7 +332,9 @@ void main() {
       expect(entries, hasLength(1));
       expect(entries.single.originalText, 'Hola');
       expect(entries.single.translatedText, 'Hello there');
-      expect(entries.single.languageCode, 'EN');
+      // The Spanish source resolves to ES from local detection; it must not
+      // default to the EN target language.
+      expect(entries.single.languageCode, 'ES');
       expect(entries.single.status, 'partial');
 
       harness.realtimeGateway.session.addEvent(
@@ -1001,6 +1003,160 @@ void main() {
       expect(entries.last.languageCode, 'IT');
       expect(entries.last.originalText, 'Ciao, grazie.');
       expect(entries.last.translatedText, isEmpty);
+    },
+  );
+
+  test(
+    'live English paragraph then Italian turn splits blocks without item ids '
+    'or language metadata',
+    () async {
+      // Reproduces Tom's 2026-06-01 installed-app report against the real
+      // /v1/realtime/translations wire shape: source and translation deltas
+      // arrive interleaved with NO item_id and NO language metadata. A long
+      // English paragraph is spoken, then the Italian phrase meaning "Good
+      // morning, how are you?". The first block must keep the English original
+      // with its Italian translation, and the Italian turn must form a new
+      // block whose original is Italian and translation is English. The header
+      // language labels must not collapse both turns to the target language.
+      final textGateway = _FakeTextInterpreterGateway();
+      // English -> Italian is the direct OpenAI text fallback turn.
+      textGateway.results.add(
+        const TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Buongiorno a tutti.',
+        ),
+      );
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        textInterpreterGateway: textGateway,
+      );
+      final startedAt = DateTime.utc(2026, 6, 1, 3, 10);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Live Italian block split',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+
+      const englishParagraph =
+          "Well, you've been on this trip for a full month, haven't you? "
+          "Yes, a million hunters, a bit exaggerated, maybe. And now we've "
+          "been here five months; that means we're in Australia. Good "
+          'morning, how are you?';
+      // English turn: input transcript (source) and a target-language output
+      // transcript stream together. The dedicated endpoint sends no item_id
+      // and no language field on either side.
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: englishParagraph,
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: englishParagraph,
+          ),
+        );
+      await _drainAsync();
+
+      // After only English is heard, the header must say it heard English.
+      expect(
+        harness.coordinator.interpreterRouteLabel,
+        'Heard English. Waiting for the other language...',
+      );
+
+      // The Italian turn arrives next, again with no item_id and no language
+      // metadata. The Italian source transcript leads and its English
+      // translation streams alongside, matching OpenAI's documented event
+      // flow where input_transcript updates as audio arrives.
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Buongiorno, come stai?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Good morning, how are you?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Buongiorno, come stai?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Good morning, how are you?',
+          ),
+        );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(2));
+
+      // Block 1: English original, Italian translation (direct fallback).
+      expect(entries.first.languageCode, 'EN');
+      expect(entries.first.originalText, englishParagraph);
+      expect(entries.first.translatedText, 'Buongiorno a tutti.');
+      expect(entries.first.originalText, isNotEmpty);
+
+      // Block 2: Italian original, English translation.
+      expect(entries.last.languageCode, 'IT');
+      expect(entries.last.originalText, 'Buongiorno, come stai?');
+      expect(entries.last.translatedText, 'Good morning, how are you?');
+
+      // No completed/final row may remain with empty original speech once the
+      // source transcript text is available.
+      for (final entry in entries) {
+        expect(entry.originalText, isNotEmpty);
+      }
+
+      // The header locks the pair as Italian/English (not target-only EN).
+      expect(harness.coordinator.interpreterRouteLabel, 'English <-> Italian');
+
+      // The English turn used the direct OpenAI text fallback (English ->
+      // Italian) keyed off the locally detected source language.
+      expect(textGateway.requests, hasLength(1));
+      expect(textGateway.requests.single.sourceLanguageCode, 'en');
+      expect(textGateway.requests.single.targetLanguageCode, 'it');
+      expect(
+        textGateway.requests.single.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
     },
   );
 
@@ -2056,6 +2212,120 @@ void main() {
     expect(harness.captureGateway.startCount, 2);
     expect(harness.playbackGateway.startCount, 2);
     expect(harness.controller.state.phase, LiveSessionPhase.listening);
+  });
+
+  group('LiveRealtimeTranscriptCommitter language resolution', () {
+    Future<LiveRealtimeTranscriptCommitter> committerFor(
+      LocalMeetingRepository repository, {
+      String targetLanguageCode = 'en',
+    }) async {
+      final now = DateTime.utc(2026, 6, 1, 2);
+      await repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Committer unit',
+          createdAt: now,
+          updatedAt: now,
+          sourceLanguageLabel: 'Auto-detect',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+      return LiveRealtimeTranscriptCommitter(
+        LiveRealtimeTranscriptCommitTarget(
+          repository: repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: targetLanguageCode,
+          now: () => now,
+        ),
+      );
+    }
+
+    test('unknown source language stays neutral, never the target', () async {
+      final repository = LocalMeetingRepository(
+        store: MemoryEncryptedLocalStore(),
+      );
+      final committer = await committerFor(repository);
+      // A short, language-ambiguous source with a target-language translation
+      // must not be mislabeled as the target language.
+      await committer.commitCompleted(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          transcript: 'OK 42.',
+        ),
+      );
+      await committer.commitCompleted(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.output_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          transcript: 'OK 42.',
+        ),
+      );
+
+      final entry = (await repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries
+          .single;
+      expect(entry.languageCode, 'auto');
+      expect(entry.languageCode, isNot('EN'));
+    });
+
+    test(
+      'single distinctive Italian marker resolves to IT for short phrases',
+      () async {
+        final repository = LocalMeetingRepository(
+          store: MemoryEncryptedLocalStore(),
+        );
+        final committer = await committerFor(repository);
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Buongiorno.',
+          ),
+        );
+
+        final entry = (await repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries
+            .single;
+        expect(entry.languageCode, 'IT');
+      },
+    );
+
+    test(
+      'English homograph marker does not falsely resolve to a foreign language',
+      () async {
+        final repository = LocalMeetingRepository(
+          store: MemoryEncryptedLocalStore(),
+        );
+        final committer = await committerFor(repository);
+        // "come" is an Italian marker but also a common English word. An
+        // English-only phrase that happens to contain it, with no distinctive
+        // Italian marker, must not resolve to IT at the relaxed single-marker
+        // threshold; it stays neutral.
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Come in.',
+          ),
+        );
+
+        final entry = (await repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries
+            .single;
+        expect(entry.languageCode, 'auto');
+        expect(entry.languageCode, isNot('IT'));
+      },
+    );
   });
 }
 
