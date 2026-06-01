@@ -1325,6 +1325,118 @@ void main() {
         expect(entries.last.languageCode, 'IT');
       },
     );
+
+    test(
+      'first source-backed turn then a later sourceless final exposes a '
+      'release-checkable failure state',
+      () async {
+        // Architect blocker repro (PR #51): Tom's actual round-3 shape is a
+        // FIRST card that has source + translation, then LATER cards that lose
+        // the original while still translating. Once any source has arrived,
+        // `hasSourceSignal` is permanently true, so a flag defined only as
+        // `hasOutputSignal && !hasSourceSignal` can never catch this. The
+        // snapshot must expose a failure state derived from
+        // `sourcelessFinalCount > 0` so a release/smoke check can detect "first
+        // source works, later source missing".
+        final diagnosticsSink = MemoryPrivacySafeDiagnosticsSink();
+        final harness = await _Harness.create(
+          permissionStatus: MicrophonePermissionStatus.granted,
+          diagnostics: PrivacySafeDiagnostics(sink: diagnosticsSink),
+        );
+        final startedAt = DateTime.utc(2026, 6, 1, 6);
+        await harness.repository.upsertMeeting(
+          StoredMeeting(
+            id: 'meeting-1',
+            title: 'First source then sourceless final',
+            createdAt: startedAt,
+            updatedAt: startedAt,
+            sourceLanguageLabel: 'Auto-detect',
+            targetLanguageLabel: 'English',
+            transcriptEntries: const [],
+            summaryMetadata: const StoredSummaryMetadata.empty(),
+          ),
+        );
+        await harness.coordinator.start(
+          config: config,
+          transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+            repository: harness.repository,
+            meetingId: 'meeting-1',
+            sourceLanguageCode: 'auto',
+            targetLanguageCode: 'en',
+            now: () => startedAt,
+          ),
+        );
+
+        // First turn arrives complete with both source and translation.
+        harness.realtimeGateway.session
+          ..addEvent(
+            const OpenAiRealtimeTranscriptCompleted(
+              type: 'session.input_transcript.done',
+              kind: OpenAiRealtimeTranscriptKind.source,
+              itemId: 'turn-1',
+              transcript: 'Hello everyone, welcome to the meeting.',
+            ),
+          )
+          ..addEvent(
+            const OpenAiRealtimeTranscriptCompleted(
+              type: 'session.output_transcript.done',
+              kind: OpenAiRealtimeTranscriptKind.translation,
+              itemId: 'turn-1',
+              transcript: 'Ciao a tutti, benvenuti alla riunione.',
+            ),
+          );
+        await _drainAsync();
+
+        // After the first good turn, the all-output/no-source flag is false
+        // because a source signal has now arrived.
+        final afterFirstTurn = harness.coordinator.transcriptSignalSnapshot;
+        expect(afterFirstTurn.hasSourceSignal, isTrue);
+        expect(afterFirstTurn.sourcelessFinalCount, 0);
+        expect(afterFirstTurn.hasSourcelessFinal, isFalse);
+        expect(afterFirstTurn.translationArrivedWithoutSource, isFalse);
+
+        // A LATER turn delivers only translated output and finalizes with no
+        // source transcript for that turn.
+        harness.realtimeGateway.session.addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            itemId: 'turn-2',
+            transcript: 'That is good. Okay, yes.',
+          ),
+        );
+        await _drainAsync();
+
+        final snapshot = harness.coordinator.transcriptSignalSnapshot;
+        // The release-checkable failure state trips on the later sourceless
+        // final even though an earlier turn had source.
+        expect(snapshot.sourcelessFinalCount, greaterThanOrEqualTo(1));
+        expect(snapshot.hasSourcelessFinal, isTrue);
+        expect(snapshot.translationArrivedWithoutSource, isTrue);
+        // The earlier source signal is still recorded; we do not pretend it
+        // never arrived.
+        expect(snapshot.hasSourceSignal, isTrue);
+
+        final signalRecords = diagnosticsSink.records
+            .where(
+              (record) =>
+                  record.event == 'live_realtime.translation_without_source',
+            )
+            .toList();
+        expect(signalRecords, isNotEmpty);
+        final record = signalRecords.last;
+        expect(record.severity, DiagnosticSeverity.warning);
+        expect(record.fields['signalState'], 'translation_without_source');
+        // Even though an earlier source arrived, the diagnostic reports the
+        // sourceless-final count so the failure is detectable.
+        expect(record.fields['hasSourceSignal'], 'true');
+        expect(record.fields['sourcelessFinalCount'], '1');
+        for (final value in record.fields.values) {
+          expect(value, isNot(contains('That is good')));
+          expect(value, isNot(contains('benvenuti')));
+        }
+      },
+    );
   });
 
   test(
@@ -2647,6 +2759,90 @@ void main() {
             isNotEmpty,
             reason: 'no card may show "Original speech pending" while the '
                 'source utterance is still streaming',
+          );
+        }
+      },
+    );
+
+    test(
+      'source completion mid-translation keeps the continued translation on '
+      'the same card',
+      () async {
+        // Architect blocker repro (PR #51): the readable-block roll can fire
+        // when source completion arrives WHILE the same turn's translation is
+        // still streaming. Ordering:
+        //   1. source delta
+        //   2. translation delta ending on a sentence boundary (readable)
+        //   3. source done (turn's source finishes; readable roll arms)
+        //   4. later translation delta + done for the SAME turn
+        // Before the fix, step 3 set `_readyForNextReadableBlock` and step 4's
+        // non-completion translation delta rolled a brand new, source-less
+        // card ("Original speech pending" / "--"), then orphaned the
+        // translation tail onto it. The completed source utterance is the only
+        // reliable turn boundary on this wire, and no NEW source arrived, so
+        // the whole turn must stay on one card with the original preserved and
+        // the full translation appended.
+        final repository = LocalMeetingRepository(
+          store: MemoryEncryptedLocalStore(),
+        );
+        final committer = await committerFor(repository);
+
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hello, how are you?',
+          ),
+        );
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Ciao, come stai?',
+          ),
+        );
+        // Source for this turn finishes before the translation stream does.
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Hello, how are you?',
+          ),
+        );
+        // The translation for the SAME turn keeps streaming and then finishes.
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: ' Tutto bene.',
+          ),
+        );
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Ciao, come stai? Tutto bene.',
+          ),
+        );
+
+        final entries = (await repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries;
+        expect(
+          entries,
+          hasLength(1),
+          reason: 'source completion mid-translation must not split the turn '
+              'into a second, source-less card',
+        );
+        expect(entries.single.originalText, 'Hello, how are you?');
+        expect(entries.single.translatedText, 'Ciao, come stai? Tutto bene.');
+        for (final entry in entries) {
+          expect(
+            entry.originalText,
+            isNotEmpty,
+            reason: 'no card may show "Original speech pending" for a turn '
+                'whose source completed',
           );
         }
       },

@@ -1178,10 +1178,26 @@ class RealtimeTranscriptSignalSnapshot {
   /// True when at least one translation/output transcript turn arrived.
   bool get hasOutputSignal => outputTurnCount > 0;
 
-  /// True when translation output arrived but no original/source text ever
-  /// did, i.e. cards would render "Original speech pending" permanently.
+  /// True when any finalized card carried translated output but never received
+  /// its own original/source text.
+  ///
+  /// This is the release-checkable failure state for the round-3 regression,
+  /// where the FIRST card had source + translation but LATER cards lost the
+  /// original while still translating. It is derived from
+  /// [sourcelessFinalCount] so it stays true even once an earlier source turn
+  /// has set [hasSourceSignal]; the all-output/no-source heuristic alone
+  /// cannot detect "first source works, later source missing".
+  bool get hasSourcelessFinal => sourcelessFinalCount > 0;
+
+  /// True when translation output arrived but at least one finalized card had
+  /// no original/source text, i.e. cards would render "Original speech
+  /// pending" permanently.
+  ///
+  /// Covers both the all-output/no-source case ([hasOutputSignal] with no
+  /// [hasSourceSignal]) and the round-3 case where an earlier turn had source
+  /// but a later turn finalized translation-only ([hasSourcelessFinal]).
   bool get translationArrivedWithoutSource =>
-      hasOutputSignal && !hasSourceSignal;
+      hasSourcelessFinal || (hasOutputSignal && !hasSourceSignal);
 }
 
 class _RealtimeSourceTurn {
