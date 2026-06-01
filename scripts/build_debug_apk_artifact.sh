@@ -117,3 +117,26 @@ sha256sum "$DEST_APK" >"$DEST_SHA"
 printf 'APK artifact: %s\n' "$DEST_APK"
 printf 'SHA-256 sidecar: %s\n' "$DEST_SHA"
 printf 'Signing note: %s\n' "$SIGNING_NOTE"
+
+# Tester guidance. A debug-signed "release" artifact has repeatedly failed to
+# install/run for testers on real devices (e.g. Play Protect rejecting a
+# debug-signed build that presents as a release), even though it boots on the
+# emulator. The debug APK is the supported installed-test artifact. Do not hand
+# the release-debug-signed APK to a tester; keep it for store-signing rehearsal
+# only until real local release-signing material exists (#24).
+if [[ "$BUILD_MODE" == "release-debug-signed" ]]; then
+  printf '\n'
+  printf 'TESTER GUIDANCE: This is a debug-signed release artifact for signing\n'
+  printf 'rehearsal only. Do NOT distribute it for installed device testing;\n'
+  printf 'debug-signed release builds have failed to install/run for testers.\n'
+  printf 'Build and share the debug APK instead:\n'
+  printf '  scripts/build_debug_apk_artifact.sh\n'
+elif [[ "$BUILD_MODE" == "release-local-signed" ]]; then
+  printf '\n'
+  printf 'TESTER GUIDANCE: Store-signed release artifact. For ad-hoc installed\n'
+  printf 'testing prefer the debug APK unless a store-signed build is required.\n'
+else
+  printf '\n'
+  printf 'TESTER GUIDANCE: Debug APK — this is the supported installed-test\n'
+  printf 'artifact for ad-hoc device testing.\n'
+fi
