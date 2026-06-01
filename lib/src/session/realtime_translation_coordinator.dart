@@ -92,6 +92,21 @@ class LiveRealtimeTranslationCoordinator {
   final Set<String> _fallbackInFlightEntryIds = <String>{};
   final Set<String> _fallbackCompletedEntryIds = <String>{};
   final Set<String> _fallbackAuthoritativeEntryIds = <String>{};
+  // Presence-only counters that prove what the dedicated translation wire
+  // actually delivered for the active session, without retaining any
+  // transcript content. They back the "translation arrived but original
+  // source never did" detection and the privacy-safe session-end signal
+  // summary; never store transcript/translation text here.
+  int _sourceTranscriptTurns = 0;
+  int _outputTranscriptTurns = 0;
+  int _sourcelessFinalTurns = 0;
+  // Ids of entries that finalized translation-only (translated text, empty
+  // original) and were counted in [_sourcelessFinalTurns]. The dedicated
+  // translation wire can deliver a turn's translation before its source, so
+  // such an entry is only provisionally sourceless: if the SAME row later
+  // backfills original text, it is a valid turn, not the round-3 failure, and
+  // must be uncounted so the release-checkable signal stays accurate.
+  final Set<String> _sourcelessFinalEntryIds = <String>{};
   bool _closingIntentionally = false;
   bool _processTranscriptsDuringIntentionalClose = false;
   bool _handlingFailure = false;
@@ -116,6 +131,19 @@ class LiveRealtimeTranslationCoordinator {
   /// locked two-language pair state once a second distinct language is
   /// detected. It never defaults an unknown source to the target language.
   String get interpreterRouteLabel => _bidirectionalRuntime.routeLabel;
+
+  /// Content-free snapshot of which realtime transcript signals the active
+  /// session has actually received. Exposes only counts and a derived state,
+  /// never any transcript/translation text, so smoke and release checks can
+  /// assert that source (original) transcript turns arrived and were not
+  /// silently replaced by translation-only output.
+  RealtimeTranscriptSignalSnapshot get transcriptSignalSnapshot {
+    return RealtimeTranscriptSignalSnapshot(
+      sourceTurnCount: _sourceTranscriptTurns,
+      outputTurnCount: _outputTranscriptTurns,
+      sourcelessFinalCount: _sourcelessFinalTurns,
+    );
+  }
 
   Future<LiveRealtimeStartResult> start({
     required OpenAiRealtimeTranslationConfig config,
@@ -458,7 +486,7 @@ class LiveRealtimeTranslationCoordinator {
         if (_shouldSuppressRealtimeTranslationForFallback(event)) {
           return;
         }
-        _commitTranscript(
+        _commitTranslationCompletion(
           _transcriptCommitter?.commitCompleted(
             event,
             forceNewSegment: _shouldStartNewRealtimeTranslationAfterFallback(
@@ -534,6 +562,69 @@ class LiveRealtimeTranslationCoordinator {
     );
   }
 
+  void _commitTranslationCompletion(Future<StoredTranscriptEntry?>? commit) {
+    if (commit == null) {
+      return;
+    }
+
+    unawaited(
+      commit
+          .then((entry) {
+            onTranscriptCommitted?.call();
+            if (entry == null) {
+              return;
+            }
+            if (entry.translatedText.trim().isNotEmpty) {
+              _outputTranscriptTurns += 1;
+            }
+            // A finalized card that carries translated output but no original
+            // source text is the "translation arrived but original source
+            // never did" failure mode from Tom's installed-app retest. Surface
+            // it as a privacy-safe, content-free signal so a release check can
+            // detect it instead of the UI silently showing a misleading
+            // completed card with "Original speech pending".
+            //
+            // This is provisional: on the dedicated translation wire a turn's
+            // translation can finalize before its source arrives. The entry id
+            // is tracked so that, if this same row later backfills original
+            // text, [_commitSourceTranscriptAndMaybeFallback] uncounts it
+            // (the valid translation-first ordering must not leave the
+            // release-checkable signal tripped). Each entry is counted at most
+            // once: a still-partial row can receive more than one output
+            // `.done` (a refinement/re-emission) before its source arrives, so
+            // counting per completion would over-count and a single backfill
+            // reversal could not zero it again.
+            if (entry.translatedText.trim().isNotEmpty &&
+                entry.originalText.trim().isEmpty &&
+                _sourcelessFinalEntryIds.add(entry.id)) {
+              _sourcelessFinalTurns += 1;
+              diagnostics.warning(
+                'live_realtime.translation_without_source',
+                fields: {
+                  'operation': 'realtime.transcript.signal',
+                  'signalState': 'translation_without_source',
+                  'hasSourceSignal': _sourceTranscriptTurns > 0,
+                  'hasOutputSignal': _outputTranscriptTurns > 0,
+                  'sourceTurnCount': _sourceTranscriptTurns,
+                  'outputTurnCount': _outputTranscriptTurns,
+                  'sourcelessFinalCount': _sourcelessFinalTurns,
+                },
+              );
+            }
+          })
+          .catchError((Object error, StackTrace stackTrace) {
+            diagnostics.warning(
+              'live_realtime.transcript_commit_failed',
+              fields: {
+                'operation': 'realtime.transcript.commit',
+                'result': 'failed',
+                'errorCode': error.runtimeType.toString(),
+              },
+            );
+          }),
+    );
+  }
+
   void _commitSourceTranscriptAndMaybeFallback(
     OpenAiRealtimeTranscriptCompleted event,
   ) {
@@ -548,6 +639,10 @@ class LiveRealtimeTranslationCoordinator {
             onTranscriptCommitted?.call();
             if (entry == null) {
               return;
+            }
+            if (entry.originalText.trim().isNotEmpty) {
+              _sourceTranscriptTurns += 1;
+              _clearSourcelessFinalForBackfilledEntry(entry);
             }
             _trackSourceTurnForFallback(entry);
           })
@@ -720,6 +815,36 @@ class LiveRealtimeTranslationCoordinator {
     _fallbackInFlightEntryIds.clear();
     _fallbackCompletedEntryIds.clear();
     _fallbackAuthoritativeEntryIds.clear();
+    _resetTranscriptSignalCounters();
+  }
+
+  /// Reverses a provisional translation-only count once the same row backfills
+  /// original text.
+  ///
+  /// On the dedicated `/v1/realtime/translations` wire a turn's translation
+  /// can finalize before its source arrives, so the translation completion
+  /// provisionally counts the row as sourceless. When the matching source
+  /// completion later writes original text into the SAME entry id, that turn
+  /// is valid (not the round-3 "translation arrived but source never did"
+  /// failure), so its sourceless-final count is reversed. This keeps
+  /// [transcriptSignalSnapshot] accurate: after a valid backfill,
+  /// `sourcelessFinalCount` returns to its prior value and
+  /// `translationArrivedWithoutSource`/`hasSourcelessFinal` are not left
+  /// falsely tripped.
+  void _clearSourcelessFinalForBackfilledEntry(StoredTranscriptEntry entry) {
+    if (!_sourcelessFinalEntryIds.remove(entry.id)) {
+      return;
+    }
+    if (_sourcelessFinalTurns > 0) {
+      _sourcelessFinalTurns -= 1;
+    }
+  }
+
+  void _resetTranscriptSignalCounters() {
+    _sourceTranscriptTurns = 0;
+    _outputTranscriptTurns = 0;
+    _sourcelessFinalTurns = 0;
+    _sourcelessFinalEntryIds.clear();
   }
 
   String _languageLabelForCode(String code) {
@@ -1062,6 +1187,60 @@ class LiveRealtimeStartupTimeoutException implements Exception {
 
   @override
   String toString() => 'LiveRealtimeStartupTimeoutException($step)';
+}
+
+/// Content-free summary of which realtime transcript signals a session has
+/// received. Carries only counts/derived flags so it can be logged, asserted
+/// in smoke checks, or surfaced in diagnostics without ever exposing
+/// transcript or translation content.
+class RealtimeTranscriptSignalSnapshot {
+  const RealtimeTranscriptSignalSnapshot({
+    required this.sourceTurnCount,
+    required this.outputTurnCount,
+    required this.sourcelessFinalCount,
+  });
+
+  /// Number of finalized source (original) transcript turns that carried text.
+  final int sourceTurnCount;
+
+  /// Number of finalized translation (output) transcript commits that carried
+  /// text. This counts output `.done` finalizations, not unique visible cards;
+  /// a long turn that crosses readable-block rolls can finalize output more
+  /// than once. It is a presence signal, so callers should only rely on
+  /// whether it is greater than zero.
+  final int outputTurnCount;
+
+  /// Number of finalized cards that had translated output but never received
+  /// any original/source text (the "translation arrived but source never did"
+  /// failure mode).
+  final int sourcelessFinalCount;
+
+  /// True when at least one source/original transcript turn arrived.
+  bool get hasSourceSignal => sourceTurnCount > 0;
+
+  /// True when at least one translation/output transcript turn arrived.
+  bool get hasOutputSignal => outputTurnCount > 0;
+
+  /// True when any finalized card carried translated output but never received
+  /// its own original/source text.
+  ///
+  /// This is the release-checkable failure state for the round-3 regression,
+  /// where the FIRST card had source + translation but LATER cards lost the
+  /// original while still translating. It is derived from
+  /// [sourcelessFinalCount] so it stays true even once an earlier source turn
+  /// has set [hasSourceSignal]; the all-output/no-source heuristic alone
+  /// cannot detect "first source works, later source missing".
+  bool get hasSourcelessFinal => sourcelessFinalCount > 0;
+
+  /// True when translation output arrived but at least one finalized card had
+  /// no original/source text, i.e. cards would render "Original speech
+  /// pending" permanently.
+  ///
+  /// Covers both the all-output/no-source case ([hasOutputSignal] with no
+  /// [hasSourceSignal]) and the round-3 case where an earlier turn had source
+  /// but a later turn finalized translation-only ([hasSourcelessFinal]).
+  bool get translationArrivedWithoutSource =>
+      hasSourcelessFinal || (hasOutputSignal && !hasSourceSignal);
 }
 
 class _RealtimeSourceTurn {

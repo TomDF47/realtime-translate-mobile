@@ -43,12 +43,20 @@ class PrivacySafeDiagnostics {
     'errorCode',
     'exportType',
     'fallbackModel',
+    // Presence-only realtime transcript signal counters. These never carry
+    // transcript/translation content; they only expose whether the dedicated
+    // translation wire actually delivered source (original) vs output
+    // (translated) transcript turns, so a release check can detect the
+    // "translation arrived but original source never did" failure mode.
+    'hasOutputSignal',
+    'hasSourceSignal',
     'isMicrophoneCaptureOpen',
     'isPlaybackQueueOpen',
     'isRealtimeSessionOpen',
     'model',
     'nextPhase',
     'operation',
+    'outputTurnCount',
     'permissionName',
     'permissionStatus',
     'previousPhase',
@@ -58,6 +66,9 @@ class PrivacySafeDiagnostics {
     'result',
     'retryAttempt',
     'scope',
+    'signalState',
+    'sourcelessFinalCount',
+    'sourceTurnCount',
     'storageArea',
     'summaryModel',
     'targetLanguage',

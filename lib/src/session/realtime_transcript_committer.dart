@@ -311,16 +311,23 @@ class LiveRealtimeTranscriptCommitter {
     }
 
     if (nextKind == OpenAiRealtimeTranscriptKind.translation) {
-      // Do not roll when this event finalizes the current block's own
-      // in-progress translation; only roll when the current translation side is
-      // already complete, so the incoming translation belongs to a new turn.
-      // Without this guard a single turn whose translation ends on a sentence
-      // boundary would orphan its own `output_transcript.done` into a new,
-      // source-less block.
-      if (isCompletion && !_translationCompleted) {
-        return false;
-      }
-      return true;
+      // Never roll a readable block on a translation event on this wire.
+      //
+      // On the dedicated `/v1/realtime/translations` wire (no item ids, no
+      // language metadata) the source and target transcripts stream on
+      // independent cadences. Once a turn's source has completed, the readable
+      // roll can arm while that turn's translation is still streaming. A later
+      // translation delta/done for the SAME turn then has no new source to
+      // distinguish it from a new turn, so rolling here would reset the
+      // segment and orphan the translation tail onto a fresh, source-less card
+      // ("Original speech pending" / "--") — exactly the round-3 failure.
+      //
+      // The completed source utterance is the only reliable turn boundary, and
+      // a genuinely new source utterance after completion already starts a new
+      // card via the new-source rule above. So a continued translation always
+      // stays on the current card; its original is preserved and the full
+      // translation is appended.
+      return false;
     }
 
     return _sourceCompleted;
@@ -381,6 +388,21 @@ class LiveRealtimeTranscriptCommitter {
 
   bool _shouldRollReadableBlock() {
     if (!_hasSourceText || !_hasTranslationText) {
+      return false;
+    }
+
+    // The dedicated `/v1/realtime/translations` wire sends no item ids and no
+    // language metadata, so the completed source utterance is the only
+    // reliable turn boundary. A single continuous utterance streams its source
+    // and target transcripts on independent cadences, and the translation side
+    // frequently crosses sentence boundaries (or grows long) while the same
+    // source utterance is still being transcribed. Rolling on the translation
+    // alone there splits one still-open turn: the next translation delta opens
+    // a fresh card whose original stays empty ("Original speech pending"),
+    // which is exactly Tom's 2026-06-01 installed-app screenshot. Only treat a
+    // readable block as complete once this turn's source has finished, so a
+    // mid-utterance translation never orphans itself onto a sourceless card.
+    if (!_sourceCompleted) {
       return false;
     }
 
