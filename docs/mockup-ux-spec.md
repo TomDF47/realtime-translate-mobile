@@ -86,13 +86,14 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - The mockup's transcript/chat assistant icon is hidden in the active issue #30 live interpreter flow so AI chat does not compete with interpretation.
 - Session status card:
   - Waveform icon.
-  - Text begins as `Listening for languages...`.
-  - First detected language text: `Heard <language>. Waiting for the other language...`.
-  - Locked pair text: `<A> <-> <B>`.
+  - Text shows the selected manual pair as `<A> <-> <B>` from session start.
+  - While connecting, text may show a short preparation label such as `Preparing live interpretation on this phone...`.
   - Status pill: `Listening`.
   - Elapsed timer: `00:05:23`.
 - Language controls:
-  - Active issue #30 MVP has no source picker, target picker, or direction switch in the live interpreter flow.
+  - The active live interpreter shows two compact language selector cards: `From` and `To`.
+  - The default pair is Italian <-> English.
+  - Do not show a direction switch in the live interpreter flow; the selected pair is bidirectional.
 - Feature toggles row:
   - Hide `Translate Text` from the active issue #30 live interpreter flow.
   - Hide read-aloud, speaker, and headphone controls until spoken bidirectional audio is safely supportable.

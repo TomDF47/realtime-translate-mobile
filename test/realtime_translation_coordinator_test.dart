@@ -1230,6 +1230,7 @@ void main() {
       expect(harness.realtimeGateway.connectCount, 2);
       final reverseConfig = harness.realtimeGateway.configs[1];
       expect(reverseConfig.targetLanguageCode, 'it');
+      expect(reverseConfig.sourceLanguageCode, 'en');
       expect(reverseConfig.sourceTranscriptionEnabled, isFalse);
       expect(harness.coordinator.interpreterRouteLabel, 'Italian <-> English');
 
@@ -1242,6 +1243,54 @@ void main() {
       );
       await _drainAsync();
       expect(harness.playbackGateway.enqueuedChunks, isNotEmpty);
+    },
+  );
+
+  test(
+    'manual source and target prelock route and start reverse audio session',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        enableBidirectionalReverseSession: true,
+      );
+      final startedAt = DateTime.utc(2026, 6, 2, 12);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Manual pair',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Italian (IT)',
+          targetLanguageLabel: 'English (US)',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      final result = await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'it',
+          targetLanguageCode: 'en',
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'it',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+      await _drainAsync();
+
+      expect(result, LiveRealtimeStartResult.started);
+      expect(harness.coordinator.interpreterRouteLabel, 'Italian <-> English');
+      expect(harness.realtimeGateway.connectCount, 2);
+      expect(harness.realtimeGateway.configs.first.sourceLanguageCode, 'it');
+      expect(harness.realtimeGateway.configs.first.targetLanguageCode, 'en');
+      final reverseConfig = harness.realtimeGateway.configs.last;
+      expect(reverseConfig.sourceLanguageCode, 'en');
+      expect(reverseConfig.targetLanguageCode, 'it');
+      expect(reverseConfig.sourceTranscriptionEnabled, isFalse);
     },
   );
 

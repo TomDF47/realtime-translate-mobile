@@ -99,6 +99,7 @@ class LiveRealtimeTranslationCoordinator {
   OpenAiRealtimeTranslationConfig? _activeConfig;
   LiveRealtimeTranscriptCommitTarget? _activeTranscriptCommitTarget;
   String? _activeInterpreterMeetingId;
+  String? _activeInterpreterRouteKey;
   BidirectionalInterpreterRuntime _bidirectionalRuntime =
       BidirectionalInterpreterRuntime();
   // Optional reverse-direction (audio-only) session for true bidirectional
@@ -173,13 +174,25 @@ class LiveRealtimeTranslationCoordinator {
     _isDisposed = false;
     final startGeneration = ++_startGeneration;
     _cancelPendingReconnect();
-    _resetInterpreterRuntimeIfNeeded(transcriptCommitTarget?.meetingId);
-    _activeConfig = config;
-    _activeTranscriptCommitTarget = transcriptCommitTarget;
+    final manualRouteKey = _manualInterpreterRouteKey(
+      config: config,
+      transcriptCommitTarget: transcriptCommitTarget,
+    );
     await _closeRealtimeResources(graceful: false, finishTranscript: true);
     if (!_isCurrentStart(startGeneration)) {
       return LiveRealtimeStartResult.failed;
     }
+
+    _resetInterpreterRuntimeIfNeeded(
+      meetingId: transcriptCommitTarget?.meetingId,
+      routeKey: manualRouteKey,
+    );
+    _activeConfig = config;
+    _activeTranscriptCommitTarget = transcriptCommitTarget;
+    _seedInterpreterRuntimeFromManualRoute(
+      config: config,
+      transcriptCommitTarget: transcriptCommitTarget,
+    );
 
     final credential = await credentialStore.readCredentialForNetworkUse();
     if (!_isCurrentStart(startGeneration)) {
@@ -227,6 +240,7 @@ class LiveRealtimeTranslationCoordinator {
         return LiveRealtimeStartResult.failed;
       }
       sessionController.markRealtimeStarted();
+      _maybeStartReverseSession();
       diagnostics.info(
         'live_realtime.streaming_started',
         fields: {
@@ -293,7 +307,7 @@ class LiveRealtimeTranslationCoordinator {
     _cancelPendingReconnect();
     _activeConfig = null;
     _activeTranscriptCommitTarget = null;
-    _resetInterpreterRuntimeIfNeeded(null);
+    _resetInterpreterRuntimeIfNeeded(meetingId: null, routeKey: null);
     await _closeRealtimeResources(graceful: true, finishTranscript: true);
     sessionController.stopMeeting();
   }
@@ -322,7 +336,7 @@ class LiveRealtimeTranslationCoordinator {
     _cancelPendingReconnect();
     _activeConfig = null;
     _activeTranscriptCommitTarget = null;
-    _resetInterpreterRuntimeIfNeeded(null);
+    _resetInterpreterRuntimeIfNeeded(meetingId: null, routeKey: null);
     await _closeRealtimeResources(graceful: false, finishTranscript: false);
     _transcriptCommitter = null;
     sessionController.stopMeeting();
@@ -798,8 +812,10 @@ class LiveRealtimeTranslationCoordinator {
         _reverseStarting = false;
         return;
       }
+      final primaryTarget = config.targetLanguageCode.trim().toLowerCase();
       final reverseConfig = config.copyWith(
         targetLanguageCode: reverseTarget,
+        sourceLanguageCode: primaryTarget,
         sourceTranscriptionEnabled: false,
       );
       session = await _connectWithTimeout(
@@ -996,12 +1012,66 @@ class LiveRealtimeTranslationCoordinator {
     }
   }
 
-  void _resetInterpreterRuntimeIfNeeded(String? meetingId) {
-    if (_activeInterpreterMeetingId == meetingId) {
+  String? _manualInterpreterRouteKey({
+    required OpenAiRealtimeTranslationConfig config,
+    required LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
+  }) {
+    final sourceCode =
+        transcriptCommitTarget?.sourceLanguageCode ?? config.sourceLanguageCode;
+    final targetCode =
+        transcriptCommitTarget?.targetLanguageCode ?? config.targetLanguageCode;
+    final normalizedSource = sourceCode.trim().toLowerCase();
+    final normalizedTarget = targetCode.trim().toLowerCase();
+    if (normalizedSource.isEmpty ||
+        normalizedTarget.isEmpty ||
+        normalizedSource == 'auto' ||
+        normalizedTarget == 'auto' ||
+        normalizedSource == normalizedTarget) {
+      return null;
+    }
+
+    return '$normalizedSource->$normalizedTarget';
+  }
+
+  void _seedInterpreterRuntimeFromManualRoute({
+    required OpenAiRealtimeTranslationConfig config,
+    required LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
+  }) {
+    final sourceCode =
+        transcriptCommitTarget?.sourceLanguageCode ?? config.sourceLanguageCode;
+    final targetCode =
+        transcriptCommitTarget?.targetLanguageCode ?? config.targetLanguageCode;
+    final normalizedSource = sourceCode.trim().toLowerCase();
+    final normalizedTarget = targetCode.trim().toLowerCase();
+    if (normalizedSource.isEmpty ||
+        normalizedTarget.isEmpty ||
+        normalizedSource == 'auto' ||
+        normalizedTarget == 'auto' ||
+        normalizedSource == normalizedTarget) {
+      return;
+    }
+
+    _bidirectionalRuntime.recordDetectedLanguage(
+      code: normalizedSource,
+      label: _languageLabelForCode(normalizedSource),
+    );
+    _bidirectionalRuntime.recordDetectedLanguage(
+      code: normalizedTarget,
+      label: _languageLabelForCode(normalizedTarget),
+    );
+  }
+
+  void _resetInterpreterRuntimeIfNeeded({
+    required String? meetingId,
+    required String? routeKey,
+  }) {
+    if (_activeInterpreterMeetingId == meetingId &&
+        _activeInterpreterRouteKey == routeKey) {
       return;
     }
 
     _activeInterpreterMeetingId = meetingId;
+    _activeInterpreterRouteKey = routeKey;
     _bidirectionalRuntime = BidirectionalInterpreterRuntime();
     _completedSourceTurns.clear();
     _fallbackInFlightEntryIds.clear();

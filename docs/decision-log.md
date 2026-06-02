@@ -2,6 +2,29 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-02 - Restore Manual Two-Language Pair Selection For Live Interpreter
+
+Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
+
+Context:
+
+- Tom's Samsung retest still did not reliably create new transcript boxes when the spoken language changed, and the issue is not limited to Italian.
+- OpenAI's realtime translation path can auto-detect source language, but the app cannot rely on receiving per-turn language metadata early enough to safely drive the UI and bidirectional fallback routing for arbitrary language pairs.
+- The previous issue #30 UI hid source/target pickers to avoid implying unsupported automatic spoken bidirectionality. That made the app brittle when language discovery did not converge on-device.
+
+Decision:
+
+- Restore explicit source and target language selectors in the active live interpreter surface. The default manual pair is Italian <-> English; users can pick any supported app source/target pair, and `Auto-detect` is no longer offered as a source choice in that manual picker.
+- Treat the selected pair as the app's locked interpreter pair from session start. The coordinator seeds `BidirectionalInterpreterRuntime` with the selected pair and restarts cleanly when the pair changes within the same active meeting.
+- Keep direction switching, `Translate Text`, read-aloud controls, speaker/headphone chips, live-header AI chat, and live-screen export controls hidden from the active live loop. The manual pair is bidirectional; users choose the two languages, not per-turn direction.
+- Keep the dedicated `/v1/realtime/translations` network request broad-input and target-output only. The selected source code is app-side routing metadata and transcript commit context; the dedicated translation session still sets only `audio.output.language` plus required input transcription/noise-reduction config.
+
+Implications:
+
+- This reduces dependence on live language discovery for the header, reverse-session startup, and text fallback routing while preserving local language detection as a transcript-row fallback when OpenAI metadata is absent.
+- No dependency, Android permission, backend route, app-owned network path, credential handling, microphone recording, or logging surface is added. The phone-only direct-OpenAI privacy boundary is unchanged.
+- Product docs and regression checks now require visible source/target selectors in the active live interpreter and absence of only the secondary controls listed above.
+
 ## 2026-06-02 - Split Source Cards On Supported-Language Changes Inside Continuous Samsung Streams
 
 Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
@@ -54,7 +77,7 @@ Implications:
 
 ## 2026-06-01 - Gate Readable-Block Rolling On Source-Utterance Completion, And Track Content-Free Source/Output Signal Evidence
 
-Status: Accepted
+Status: Partially superseded by `2026-06-02 - Restore Manual Two-Language Pair Selection For Live Interpreter`
 
 Context:
 
@@ -69,7 +92,7 @@ Decision:
 
 Rationale:
 
-- The fix is minimal and production-safe: it changes only block-boundary timing on the existing wired path, preserves automatic language detection with no manual pickers, and keeps original speech and its translation on one card for a continuous utterance.
+- The fix is minimal and production-safe: it changes only block-boundary timing on the existing wired path, preserves source-label detection as a transcript-row fallback, and keeps original speech and its translation on one card for a continuous utterance.
 - The signal counters and diagnostic give a deterministic, content-free way to detect the sourceless-final failure mode in tests and future smokes without storing transcript/translation content.
 
 Implications:
@@ -168,23 +191,23 @@ Status: Accepted
 Decision:
 
 - Redesign the active MVP live flow around a two-party interpreter rather than a user-selected source-to-target route.
-- Phase 1 is text-first: detect the first language, wait for a second distinct language, lock the pair as `<A> <-> <B>`, and translate subsequent A-to-B and B-to-A turns as text.
+- Phase 1 is text-first. As of 2026-06-02, the user manually selects the two-language pair and the app locks it from session start; transcript-row language labels still use OpenAI metadata or local detection when available.
 - Keep startup gated by encrypted local OpenAI credential availability and microphone permission.
-- Hide source/target pickers, direction switching, read-aloud controls, and speaker/headphone chips in the active live interpreter UI until spoken audio behavior is safely supportable.
+- Keep direction switching, read-aloud controls, and speaker/headphone chips hidden in the active live interpreter UI until spoken audio behavior is safely supportable. Source/target pickers are visible again under the 2026-06-02 manual-pair decision.
 - Hide the `Translate Text` toggle, live-header AI chat launcher, and live-screen export controls from the active live interpreter UI so secondary workflows do not compete with interpretation.
 - Preserve the phone-only direct OpenAI path, encrypted local transcript storage, privacy-safe diagnostics, and no-backend MVP boundary.
 
 Rationale:
 
-- A live interpreter should not require users to preselect direction or manually switch speakers.
+- A live interpreter should not require users to manually switch speakers or per-turn direction. The user now selects the two languages once.
 - The app should not imply fully automatic bidirectional spoken audio before real audio support is validated.
 - Text-first interpreter behavior can be tested through fakeable direct OpenAI seams with `store: false` while retaining existing realtime/audio seams for later validation.
 
 Implications:
 
 - Start surface copy uses `Start interpreter`.
-- Live status progresses through `Listening for languages...`, `Heard <language>. Waiting for the other language...`, and `<A> <-> <B>`.
-- Tests and regression checklists should verify no source picker, target picker, direction switch, `Translate Text` toggle, live-header AI chat, live-screen export controls, or read-aloud claims appear in the active interpreter flow.
+- Live status now starts from the selected `<A> <-> <B>` pair.
+- Tests and regression checklists should verify source/target pickers appear, while direction switch, `Translate Text` toggle, live-header AI chat, live-screen export controls, and read-aloud claims remain absent from the active interpreter flow.
 
 ## 2026-05-28 - Live Listening Pause Is Privacy-First
 

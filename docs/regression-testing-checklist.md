@@ -21,19 +21,19 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Tap `Start interpreter` without a saved credential and verify `OpenAI setup required` appears before microphone permission.
 - Save only a placeholder or current test credential through `OpenAI setup`; verify the saved value is not displayed.
 - Start an interpreter session with fake or valid local credential and granted microphone permission.
-- Verify the live screen starts with `Listening for languages...`, live status, elapsed timer, transcript area, `Stop Listening`, and `Pause Listening`.
-- Verify the active live screen does not show source picker, target picker, direction switch, `Translate Text`, read-aloud controls, speaker/headphone chips, live-header AI chat, live-screen export controls, or `Resume read-aloud meeting`.
-- Feed or fake a first detected language and verify `Heard <language>. Waiting for the other language...`.
-- Feed or fake a second distinct detected language and verify `<A> <-> <B>`.
+- Verify the live screen starts with the selected manual pair such as `Italian <-> English`, source/target language selectors, live status, elapsed timer, transcript area, `Stop Listening`, and `Pause Listening`.
+- Verify the active live screen does not show direction switch, `Translate Text`, read-aloud controls, speaker/headphone chips, live-header AI chat, live-screen export controls, or `Resume read-aloud meeting`.
+- Open both language selectors, verify `Auto-detect` is not offered as a source choice, choose a different supported source/target, and verify the status card and stored meeting route update to the new pair.
+- Feed or fake source turns in both selected languages and verify transcript rows keep original and translated text in separate fields.
 - Open the live menu and verify `Meeting history` responds while `Generate export` and `Open generated exports` remain absent from the active live menu.
 - Open AI chat from meeting history or another non-live-header entry point and close it with the close button and drag/back dismissal.
 
 ## Language Discovery
 
-- Verify no manual language picker is available in the active interpreter flow.
-- Verify first-language detection does not translate until a second distinct language is known.
-- Verify the first turn can show a delayed translation or detected-language status without leaving a blank transcript card.
-- Verify the second distinct language locks the pair.
+- Verify the manual language pair is available in the active interpreter flow.
+- Verify the selected pair is treated as locked before any source transcript event arrives.
+- Verify the first turn can show a pending translation or source-language status without leaving a blank transcript card.
+- Verify source-row labels still resolve from OpenAI metadata or deterministic local detection when available.
 - Verify later A-to-B and B-to-A fake text turns produce translated text and encrypted local transcript rows.
 
 ## Buttons And Toggles

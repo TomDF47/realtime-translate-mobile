@@ -29,13 +29,13 @@ abstract final class MockLiveTranslateData {
   ];
 
   static const listeningSession = LiveSessionViewData(
-    routeLabel: 'Listening for languages...',
+    routeLabel: 'Italian <-> English',
     elapsedLabel: '00:05:23',
     mode: LiveSessionMode.listening,
     fromLanguage: LanguageSelectorData(
       eyebrow: 'From',
-      primaryLabel: 'Auto-detect',
-      secondaryLabel: '',
+      primaryLabel: 'Italian',
+      secondaryLabel: '(IT)',
       icon: Icons.graphic_eq_rounded,
       accent: LiveAccent.teal,
     ),
@@ -76,7 +76,7 @@ abstract final class MockLiveTranslateData {
       ),
     ],
     isAtLiveEdge: true,
-    showLanguageControls: false,
+    showLanguageControls: true,
   );
 
   static const speakingPausedSession = LiveSessionViewData(

@@ -359,9 +359,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   String? _activeMeetingId;
   String? _debugRealtimeProofStatus;
   TranslationLanguage _selectedSourceLanguage =
-      LanguageSupport.autoDetectSource;
-  TranslationLanguage _selectedTargetLanguage =
-      LanguageSupport.realtimeTargetLanguages.first;
+      LanguageSupport.languageByCode('it');
+  TranslationLanguage _selectedTargetLanguage = LanguageSupport.languageByCode(
+    'en',
+  );
   bool _translateTextEnabled = true;
   bool _readAloudEnabled = true;
   Duration _recordingElapsed = Duration.zero;
@@ -518,18 +519,20 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
   Future<void> _startMeeting() async {
     _resetRecordingTimer();
-    _selectedSourceLanguage = LanguageSupport.autoDetectSource;
-    _selectedTargetLanguage = LanguageSupport.languageByCode('en');
+    _ensureSelectedLanguagesAreDistinct();
     final meetingId = 'meeting-${DateTime.now().microsecondsSinceEpoch}';
     _activeMeetingId = meetingId;
+    final initialSession = _applyLiveControls(
+      MockLiveTranslateData.listeningSession,
+    );
     setState(() => _surface = _AppSurface.listening);
-    await _persistMeetingFromSession(MockLiveTranslateData.listeningSession);
+    await _persistMeetingFromSession(initialSession);
     if (!mounted) {
       return;
     }
 
     final started = await _startRealtimeForSession(
-      MockLiveTranslateData.listeningSession,
+      initialSession,
       meetingId: meetingId,
     );
     if (!mounted) {
@@ -572,10 +575,13 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       translationOutputEnabled: _translateTextEnabled,
       readAloudOutputEnabled: _readAloudEnabled,
     );
-    const sourceLanguageCode = 'auto';
+    final sourceLanguageCode = _selectedSourceLanguage.code;
     final targetLanguageCode = _selectedTargetLanguage.code;
     final result = await _realtimeCoordinator.start(
-      config: _realtimeConfigForTarget(targetLanguageCode),
+      config: _realtimeConfigForRoute(
+        sourceLanguageCode: sourceLanguageCode,
+        targetLanguageCode: targetLanguageCode,
+      ),
       transcriptCommitTarget: meetingId == null
           ? null
           : LiveRealtimeTranscriptCommitTarget(
@@ -704,11 +710,12 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     return _startRealtimeForSession(session, meetingId: _activeMeetingId);
   }
 
-  OpenAiRealtimeTranslationConfig _realtimeConfigForTarget(
-    String targetLanguageCode,
-  ) {
+  OpenAiRealtimeTranslationConfig _realtimeConfigForRoute({
+    required String sourceLanguageCode,
+    required String targetLanguageCode,
+  }) {
     return OpenAiRealtimeTranslationConfig(
-      sourceLanguageCode: 'auto',
+      sourceLanguageCode: sourceLanguageCode,
       targetLanguageCode: targetLanguageCode,
       profile: _profileForLiveInterpretation(targetLanguageCode),
       translationOutputEnabled: _translateTextEnabled,
@@ -759,7 +766,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
   LiveSessionViewData _applyLiveControls(LiveSessionViewData base) {
     final source = _selectorForLanguage(
-      LanguageSupport.autoDetectSource,
+      _selectedSourceLanguage,
       fallback: base.fromLanguage,
       isTarget: false,
     );
@@ -777,7 +784,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       bottomControls: _bottomControlsForSession(base),
       statusLabel: _liveStatusLabel(base.mode),
       statusAccent: _liveStatusAccent(base.mode),
-      showLanguageControls: false,
+      showLanguageControls: true,
     );
   }
 
@@ -788,6 +795,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     if (_sessionController.state.phase == LiveSessionPhase.listeningPaused) {
       return 'Listening paused';
     }
+    final manualLabel = _selectedInterpreterPairLabel();
     final activeMeeting = _activeMeeting;
     final storedLabel = _interpreterLabelForTranscriptEntries(
       activeMeeting?.transcriptEntries ?? const [],
@@ -803,7 +811,14 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     if (_isRuntimeLabelMoreSpecific(runtimeLabel, storedLabel)) {
       return runtimeLabel;
     }
+    if (!_isRuntimeLabelMoreSpecific(storedLabel, manualLabel)) {
+      return manualLabel;
+    }
     return storedLabel;
+  }
+
+  String _selectedInterpreterPairLabel() {
+    return '${_selectedSourceLanguage.name} <-> ${_selectedTargetLanguage.name}';
   }
 
   bool _isRuntimeLabelMoreSpecific(String runtimeLabel, String storedLabel) {
@@ -968,11 +983,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     final nextSurface = _surfaceForMeeting(meeting);
     final session = _baseSessionForSurface(nextSurface);
     _activeMeetingId = meeting.id;
-    _selectedSourceLanguage = LanguageSupport.autoDetectSource;
     _selectedTargetLanguage = _languageFromStoredLabel(
       meeting.targetLanguageLabel,
       fallback: _selectedTargetLanguage,
     );
+    _selectedSourceLanguage = _manualSourceLanguageFromStoredLabel(
+      meeting.sourceLanguageLabel,
+      fallback: _selectedSourceLanguage,
+    );
+    _ensureSelectedLanguagesAreDistinct();
     _resetRecordingTimer();
     final isReady = await _ensureLiveSessionReady(
       nextSurface == _AppSurface.speakingPaused
@@ -1020,6 +1039,115 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     return fallback;
   }
 
+  TranslationLanguage _manualSourceLanguageFromStoredLabel(
+    String label, {
+    required TranslationLanguage fallback,
+  }) {
+    final normalized = label.toLowerCase();
+    for (final language in LanguageSupport.sourceLanguages) {
+      if (language.code != LanguageSupport.autoDetectSource.code &&
+          normalized.contains(language.name.toLowerCase())) {
+        return language;
+      }
+    }
+
+    final language = _languageFromStoredLabel(label, fallback: fallback);
+    if (language.code == LanguageSupport.autoDetectSource.code) {
+      return _defaultSourceLanguageForTarget(_selectedTargetLanguage);
+    }
+
+    return _sourceLanguageFromCode(language.code, fallback: fallback);
+  }
+
+  TranslationLanguage _sourceLanguageFromCode(
+    String code, {
+    required TranslationLanguage fallback,
+  }) {
+    try {
+      final language = LanguageSupport.languageByCode(code);
+      if (language.supportsSource &&
+          language.code != LanguageSupport.autoDetectSource.code) {
+        return language;
+      }
+    } on ArgumentError {
+      // Keep the existing in-memory language when stored metadata is stale.
+    }
+
+    return fallback;
+  }
+
+  TranslationLanguage _targetLanguageFromCode(
+    String code, {
+    required TranslationLanguage fallback,
+  }) {
+    try {
+      final language = LanguageSupport.languageByCode(code);
+      if (language.code != LanguageSupport.autoDetectSource.code &&
+          (language.supportsRealtimeTarget || language.supportsDirectFallback)) {
+        return language;
+      }
+    } on ArgumentError {
+      // Keep the existing in-memory language when stored metadata is stale.
+    }
+
+    return fallback;
+  }
+
+  TranslationLanguage _defaultSourceLanguageForTarget(
+    TranslationLanguage target,
+  ) {
+    for (final code in const ['it', 'en', 'es', 'fr', 'de', 'ja']) {
+      final language = _sourceLanguageFromCode(
+        code,
+        fallback: _selectedSourceLanguage,
+      );
+      if (language.code != target.code &&
+          language.code != LanguageSupport.autoDetectSource.code) {
+        return language;
+      }
+    }
+
+    return LanguageSupport.sourceLanguages.firstWhere(
+      (language) =>
+          language.code != target.code &&
+          language.code != LanguageSupport.autoDetectSource.code,
+    );
+  }
+
+  TranslationLanguage _defaultTargetLanguageForSource(
+    TranslationLanguage source,
+  ) {
+    for (final code in const ['en', 'it', 'es', 'fr', 'de', 'ja']) {
+      final language = _targetLanguageFromCode(
+        code,
+        fallback: _selectedTargetLanguage,
+      );
+      if (language.code != source.code) {
+        return language;
+      }
+    }
+
+    return LanguageSupport.targetLanguages.firstWhere(
+      (language) => language.code != source.code,
+    );
+  }
+
+  void _ensureSelectedLanguagesAreDistinct() {
+    _selectedSourceLanguage = _sourceLanguageFromCode(
+      _selectedSourceLanguage.code,
+      fallback: _defaultSourceLanguageForTarget(_selectedTargetLanguage),
+    );
+    _selectedTargetLanguage = _targetLanguageFromCode(
+      _selectedTargetLanguage.code,
+      fallback: _defaultTargetLanguageForSource(_selectedSourceLanguage),
+    );
+    if (_selectedSourceLanguage.code == _selectedTargetLanguage.code) {
+      _selectedTargetLanguage = _defaultTargetLanguageForSource(
+        _selectedSourceLanguage,
+      );
+    }
+  }
+
   void _openListening() {
     unawaited(_openListeningAfterPermission());
   }
@@ -1033,7 +1161,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     _sessionController.resumeListening();
-    _selectedSourceLanguage = LanguageSupport.autoDetectSource;
     setState(() => _surface = _AppSurface.listening);
   }
 
@@ -1046,6 +1173,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     final shouldUpdateTarget = _selectedTargetLanguage.code != amberTarget.code;
     if (shouldUpdateTarget) {
       _selectedTargetLanguage = amberTarget;
+      _ensureSelectedLanguagesAreDistinct();
       await _persistActiveRouteAndRestart();
       if (!mounted) {
         return;
@@ -1063,7 +1191,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     _sessionController.enterSpeakingPaused();
-    _selectedSourceLanguage = LanguageSupport.autoDetectSource;
     setState(() => _surface = _AppSurface.speakingPaused);
   }
 
@@ -1182,16 +1309,26 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     TranslationLanguage language, {
     required bool isTarget,
   }) async {
-    if (_activeMeetingId != null) {
-      return;
-    }
-
-    if (!isTarget) {
-      return;
-    }
-
+    final previousSource = _selectedSourceLanguage;
+    final previousTarget = _selectedTargetLanguage;
     setState(() {
-      _selectedTargetLanguage = language;
+      if (isTarget) {
+        _selectedTargetLanguage = language;
+        if (_selectedSourceLanguage.code == language.code) {
+          _selectedSourceLanguage = _sourceLanguageFromCode(
+            previousTarget.code,
+            fallback: _defaultSourceLanguageForTarget(language),
+          );
+        }
+      } else {
+        _selectedSourceLanguage = language;
+        if (_selectedTargetLanguage.code == language.code) {
+          _selectedTargetLanguage = _targetLanguageFromCode(
+            previousSource.code,
+            fallback: _defaultTargetLanguageForSource(language),
+          );
+        }
+      }
     });
     await _persistActiveRouteAndRestart();
   }
@@ -1203,7 +1340,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         activeMeeting.copyWith(
           sourceLanguageLabel: _languageLabel(
             _selectorForLanguage(
-              LanguageSupport.autoDetectSource,
+              _selectedSourceLanguage,
               fallback: MockLiveTranslateData.listeningSession.fromLanguage,
               isTarget: false,
             ),
@@ -1235,6 +1372,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   Future<void> _startRealtimeForSelectedRoute({
     required String meetingId,
   }) async {
+    final sourceLanguageCode = _selectedSourceLanguage.code;
     final targetLanguageCode = _selectedTargetLanguage.code;
     _realtimeCoordinator.setRuntimeOutputOptions(
       translationOutputEnabled: _translateTextEnabled,
@@ -1242,7 +1380,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
     await _realtimeCoordinator.start(
       config: OpenAiRealtimeTranslationConfig(
-        sourceLanguageCode: 'auto',
+        sourceLanguageCode: sourceLanguageCode,
         targetLanguageCode: targetLanguageCode,
         profile: _profileForLiveInterpretation(targetLanguageCode),
         translationOutputEnabled: _translateTextEnabled,
@@ -1251,7 +1389,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
         repository: _meetingRepository,
         meetingId: meetingId,
-        sourceLanguageCode: 'auto',
+        sourceLanguageCode: sourceLanguageCode,
         targetLanguageCode: targetLanguageCode,
         now: DateTime.now,
       ),
@@ -1712,7 +1850,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         sessionState: sessionState,
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: null,
-        onOpenSourceLanguageOptions: null,
+        onOpenSourceLanguageOptions: () =>
+            _showLanguageOptionsSheet(isTarget: false),
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
         onDirectionSwitch: null,
@@ -1734,7 +1873,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         sessionState: sessionState,
         onOpenMenu: _showMeetingMenu,
         onOpenAssistant: null,
-        onOpenSourceLanguageOptions: null,
+        onOpenSourceLanguageOptions: () =>
+            _showLanguageOptionsSheet(isTarget: false),
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
         onDirectionSwitch: null,
@@ -2540,11 +2680,13 @@ class _LanguageRouteRow extends StatelessWidget {
           ),
         ),
         const SizedBox(width: AppSpacing.xs),
-        DirectionSwitchButton(
-          accent: session.mode.accent,
-          onPressed: onDirectionSwitch,
-        ),
-        const SizedBox(width: AppSpacing.xs),
+        if (onDirectionSwitch != null) ...[
+          DirectionSwitchButton(
+            accent: session.mode.accent,
+            onPressed: onDirectionSwitch,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+        ],
         Expanded(
           child: LanguageSelectorCard(
             data: session.toLanguage,
@@ -2599,7 +2741,11 @@ class _LanguageOptionsSheet extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final languages = isTarget
         ? LanguageSupport.targetLanguages
-        : LanguageSupport.sourceLanguages;
+        : [
+            for (final language in LanguageSupport.sourceLanguages)
+              if (language.code != LanguageSupport.autoDetectSource.code)
+                language,
+          ];
 
     return _SheetFrame(
       child: Column(
@@ -2615,7 +2761,7 @@ class _LanguageOptionsSheet extends StatelessWidget {
           Text(
             isTarget
                 ? 'All app target languages are listed. Realtime-supported targets are marked separately from direct OpenAI fallback targets.'
-                : 'Source speech can use auto-detect or a known local language preference.',
+                : 'Choose the other language in the conversation. The app uses this pair instead of waiting to discover it from audio.',
             style: AppTextStyles.body(textTheme),
           ),
           const SizedBox(height: AppSpacing.md),
