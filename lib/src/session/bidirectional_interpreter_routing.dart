@@ -120,6 +120,11 @@ String? detectInterpreterLanguageCode(String text) {
       'iniziare',
       'buongiorno',
       'italiano',
+      'mi',
+      'piace',
+      'calcio',
+      'buono',
+      'buona',
     ]),
     'es': _languageScore(normalized, const [
       'hola',

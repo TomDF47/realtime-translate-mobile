@@ -2862,6 +2862,77 @@ void main() {
     );
 
     test(
+      'mixed English Italian English source deltas split into language cards',
+      () async {
+        final repository = LocalMeetingRepository(
+          store: MemoryEncryptedLocalStore(),
+        );
+        final committer = await committerFor(repository);
+
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hello. How are you? What are you up to? ',
+          ),
+        );
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Mi piace il calcio. Calcio e buono. ',
+          ),
+        );
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'I like soccer. Soccer is good.',
+          ),
+        );
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta:
+                "Yeah, okay, so let's just continue on with the meeting then.",
+          ),
+        );
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript:
+                "Hello. How are you? What are you up to? Mi piace il calcio. "
+                "Calcio e buono. Yeah, okay, so let's just continue on with "
+                'the meeting then.',
+          ),
+        );
+
+        final entries = (await repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries;
+
+        expect(entries, hasLength(3));
+        expect(entries[0].languageCode, 'EN');
+        expect(entries[0].originalText, 'Hello. How are you? What are you up to?');
+        expect(entries[1].languageCode, 'IT');
+        expect(
+          entries[1].originalText,
+          'Mi piace il calcio. Calcio e buono.',
+        );
+        expect(entries[1].translatedText, 'I like soccer. Soccer is good.');
+        expect(entries[2].languageCode, 'EN');
+        expect(
+          entries[2].originalText,
+          "Yeah, okay, so let's just continue on with the meeting then.",
+        );
+        expect(entries[2].originalText, isNot(contains('Mi piace')));
+      },
+    );
+
+    test(
       'English homograph marker does not falsely resolve to a foreign language',
       () async {
         final repository = LocalMeetingRepository(

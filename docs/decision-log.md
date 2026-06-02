@@ -2,6 +2,26 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-02 - Split Source Cards On Detected Language Changes Inside Continuous Samsung Streams
+
+Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
+
+Context:
+
+- Tom's Samsung retest showed one transcript card containing English, then Italian soccer speech (`Mi piace il calcio`, `Calcio e buono`), then English again. New boxes did not appear when the spoken language changed.
+- The previous committer rule intentionally avoided translation-side rolling and split source rows only after source completion on the dedicated `/v1/realtime/translations` wire. That protected against sourceless translation cards, but it was too conservative when OpenAI streamed language changes inside one continuous source transcript before a completion boundary.
+
+Decision:
+
+- Extend deterministic Italian detection with the observed markers (`mi`, `piace`, `calcio`, `buono`, `buona`) so the committer can recognize the Italian source delta from the phone run.
+- Keep source-delta language changes as a row boundary: English -> Italian -> English source deltas create separate cards even when no source completion event has arrived yet.
+- When the committer has already split source cards, ignore a later cumulative source-completion transcript if it contains the current card text plus earlier segments, instead of overwriting the current card with the full mixed-language utterance and collapsing the UI back to one box.
+
+Implications:
+
+- This is local transcript segmentation only. It adds no dependency, Android permission, backend route, OpenAI request-format change, credential handling, microphone recording, or logging surface.
+- The next physical-device debug APK should be built with `LIVE_TRANSLATE_DEBUG_EVENTS=true`; Tom's shared log contained no `LIVE_TX_EVENT` lines, so the raw wire recorder was either not enabled in that APK or not captured by the filter.
+
 ## 2026-06-01 - Two-Session Bidirectional Interpreter, Corrected Realtime Output Table, And Ground-Truth-First Live Debugging
 
 Status: Accepted as code/design direction (Flutter analyzer/tests/APK build still need the Fedora toolchain; on-device EN+IT capture still pending)

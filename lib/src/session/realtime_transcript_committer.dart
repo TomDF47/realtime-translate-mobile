@@ -188,6 +188,9 @@ class LiveRealtimeTranscriptCommitter {
     _hasTranscript = true;
     switch (kind) {
       case OpenAiRealtimeTranscriptKind.source:
+        if (_isCumulativeSourceCompletion(transcript)) {
+          return;
+        }
         _sourceBuffer
           ..clear()
           ..write(transcript);
@@ -437,6 +440,15 @@ class LiveRealtimeTranscriptCommitter {
     return _sourceBuffer.toString().trim() == candidate;
   }
 
+  bool _isCumulativeSourceCompletion(String transcript) {
+    final current = _sourceBuffer.toString().trim();
+    final candidate = transcript.trim();
+    return _entrySequence > 1 &&
+        current.length >= _minimumCumulativeCompletionCurrentLength &&
+        candidate != current &&
+        candidate.contains(current);
+  }
+
   bool _isDuplicateCompletion(OpenAiRealtimeTranscriptCompleted event) {
     final transcript = event.transcript?.trim();
     if (!_isFinal || transcript == null || transcript.isEmpty) {
@@ -468,6 +480,7 @@ class LiveRealtimeTranscriptCommitter {
 }
 
 const _readableBlockCharacterThreshold = 180;
+const _minimumCumulativeCompletionCurrentLength = 12;
 
 String? _detectLanguageCode(String text) {
   final normalized = text.toLowerCase();
@@ -547,6 +560,11 @@ const _languageMarkers = <String, List<String>>{
     'perchè',
     'sono',
     'siamo',
+    'mi',
+    'piace',
+    'calcio',
+    'buono',
+    'buona',
     'questo',
     'questa',
     'quello',
