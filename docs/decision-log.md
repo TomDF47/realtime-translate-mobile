@@ -2,7 +2,7 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
-## 2026-06-02 - Split Source Cards On Detected Language Changes Inside Continuous Samsung Streams
+## 2026-06-02 - Split Source Cards On Supported-Language Changes Inside Continuous Samsung Streams
 
 Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
 
@@ -10,11 +10,12 @@ Context:
 
 - Tom's Samsung retest showed one transcript card containing English, then Italian soccer speech (`Mi piace il calcio`, `Calcio e buono`), then English again. New boxes did not appear when the spoken language changed.
 - The previous committer rule intentionally avoided translation-side rolling and split source rows only after source completion on the dedicated `/v1/realtime/translations` wire. That protected against sourceless translation cards, but it was too conservative when OpenAI streamed language changes inside one continuous source transcript before a completion boundary.
+- The underlying product issue is not Italian-specific. If OpenAI does not emit language metadata, the app needs a local fallback that can segment the supported language set without logging or sending extra transcript content anywhere.
 
 Decision:
 
-- Extend deterministic Italian detection with the observed markers (`mi`, `piace`, `calcio`, `buono`, `buona`) so the committer can recognize the Italian source delta from the phone run.
-- Keep source-delta language changes as a row boundary: English -> Italian -> English source deltas create separate cards even when no source completion event has arrived yet.
+- Add a shared, dependency-free local detector for the app's supported language set. It uses Unicode script ranges for Japanese, Chinese, Korean, Russian, Hindi, and Arabic, plus marker sets for English, Spanish, French, Italian, German, Portuguese, Indonesian, and Vietnamese.
+- Keep source-delta language changes as a row boundary: supported-language deltas create separate cards even when no source completion event has arrived yet.
 - When the committer has already split source cards, ignore a later cumulative source-completion transcript if it contains the current card text plus earlier segments, instead of overwriting the current card with the full mixed-language utterance and collapsing the UI back to one box.
 
 Implications:

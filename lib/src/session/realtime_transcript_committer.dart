@@ -1,3 +1,4 @@
+import '../language/local_language_detector.dart';
 import '../openai/openai_realtime_translation.dart';
 import '../storage/local_meeting_repository.dart';
 import '../storage/local_storage_models.dart';
@@ -483,6 +484,10 @@ const _readableBlockCharacterThreshold = 180;
 const _minimumCumulativeCompletionCurrentLength = 12;
 
 String? _detectLanguageCode(String text) {
+  return detectLocalLanguageCode(text) ?? _legacyDetectLanguageCode(text);
+}
+
+String? _legacyDetectLanguageCode(String text) {
   final normalized = text.toLowerCase();
   if (normalized.trim().isEmpty) {
     return null;

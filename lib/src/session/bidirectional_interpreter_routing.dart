@@ -1,4 +1,5 @@
 import '../language/language_support.dart';
+import '../language/local_language_detector.dart';
 
 class InterpreterLanguage {
   const InterpreterLanguage({required this.code, required this.label});
@@ -92,6 +93,11 @@ class BidirectionalInterpreterRuntime {
 }
 
 String? detectInterpreterLanguageCode(String text) {
+  return detectLocalLanguageCode(text) ??
+      _legacyDetectInterpreterLanguageCode(text);
+}
+
+String? _legacyDetectInterpreterLanguageCode(String text) {
   final normalized = text.toLowerCase();
   if (normalized.trim().isEmpty) {
     return null;

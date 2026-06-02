@@ -2933,6 +2933,68 @@ void main() {
     );
 
     test(
+      'mixed supported-language source deltas split beyond Italian',
+      () async {
+        final repository = LocalMeetingRepository(
+          store: MemoryEncryptedLocalStore(),
+        );
+        final committer = await committerFor(repository);
+
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hello. How are you? ',
+          ),
+        );
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hola, gracias por venir. ',
+          ),
+        );
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta:
+                '\u3053\u3093\u306b\u3061\u306f\u3001'
+                '\u3042\u308a\u304c\u3068\u3046\u3054\u3056\u3044'
+                '\u307e\u3059\u3002 ',
+          ),
+        );
+        await committer.commitDelta(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Okay, please continue the meeting.',
+          ),
+        );
+
+        final entries = (await repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries;
+
+        expect(entries, hasLength(4));
+        expect([for (final entry in entries) entry.languageCode], [
+          'EN',
+          'ES',
+          'JA',
+          'EN',
+        ]);
+        expect(entries[1].originalText, 'Hola, gracias por venir.');
+        expect(
+          entries[2].originalText,
+          '\u3053\u3093\u306b\u3061\u306f\u3001'
+          '\u3042\u308a\u304c\u3068\u3046\u3054\u3056\u3044'
+          '\u307e\u3059\u3002',
+        );
+      },
+    );
+
+    test(
       'English homograph marker does not falsely resolve to a foreign language',
       () async {
         final repository = LocalMeetingRepository(
