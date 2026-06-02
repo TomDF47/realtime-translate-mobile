@@ -193,21 +193,19 @@ void main() {
       expect(backToEnglish.languageCode, 'IT');
       expect(backToEnglish.translatedText, 'We can confirm the plan.');
 
+      // Italian is now a documented realtime output language, so English ->
+      // Italian is a realtime route. The text interpreter still produces the
+      // English -> Italian text, but it no longer tags the request as a
+      // direct-OpenAI fallback route.
       final backfillDirection = harness.gateway.requests[2];
       expect(backfillDirection.sourceLanguageCode, 'en');
       expect(backfillDirection.targetLanguageCode, 'it');
-      expect(
-        backfillDirection.routeType,
-        TranslationRouteType.directOpenAiFallback,
-      );
+      expect(backfillDirection.routeType, isNull);
 
       final englishDirection = harness.gateway.requests[3];
       expect(englishDirection.sourceLanguageCode, 'en');
       expect(englishDirection.targetLanguageCode, 'it');
-      expect(
-        englishDirection.routeType,
-        TranslationRouteType.directOpenAiFallback,
-      );
+      expect(englishDirection.routeType, isNull);
 
       final italianDirection = harness.gateway.requests[4];
       expect(italianDirection.sourceLanguageCode, 'it');

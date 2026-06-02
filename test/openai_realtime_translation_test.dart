@@ -139,6 +139,31 @@ void main() {
     },
   );
 
+  test('reverse-direction session omits source input transcription', () {
+    // The reverse (B-to-A) audio session must NOT request input transcription:
+    // it only produces translated audio for the other listener. Requesting
+    // source transcripts on both sessions would emit a duplicate source
+    // transcript per utterance and create a second, sourceless card. The
+    // reverse-direction TEXT is owned by the direct OpenAI text path instead.
+    const reverseConfig = OpenAiRealtimeTranslationConfig(
+      targetLanguageCode: 'it',
+      sourceTranscriptionEnabled: false,
+    );
+
+    final sessionUpdate = reverseConfig.initialSessionUpdate();
+    final session = sessionUpdate['session']! as Map<String, Object?>;
+    final audio = session['audio']! as Map<String, Object?>;
+    final input = audio['input']! as Map<String, Object?>;
+    final output = audio['output']! as Map<String, Object?>;
+
+    expect(input.containsKey('transcription'), isFalse);
+    expect(
+      (input['noise_reduction']! as Map<String, Object?>)['type'],
+      OpenAiConfiguration.realtimeInputNoiseReduction,
+    );
+    expect(output['language'], 'it');
+  });
+
   test('parses realtime audio, transcript, lifecycle, and error events', () {
     final audio = OpenAiRealtimeEventParser.parse({
       'type': 'response.audio.delta',

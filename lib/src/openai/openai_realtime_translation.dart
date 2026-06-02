@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../diagnostics/privacy_safe_diagnostics.dart';
+import '../diagnostics/realtime_event_debug_recorder.dart';
 import 'openai_configuration.dart';
 
 typedef RealtimeWebSocketFactory =
@@ -80,6 +81,7 @@ class OpenAiRealtimeTranslationConfig {
     this.outputVoice = 'marin',
     this.translationOutputEnabled = true,
     this.readAloudOutputEnabled = true,
+    this.sourceTranscriptionEnabled = true,
   });
 
   final String sourceLanguageCode;
@@ -89,6 +91,42 @@ class OpenAiRealtimeTranslationConfig {
   final String outputVoice;
   final bool translationOutputEnabled;
   final bool readAloudOutputEnabled;
+
+  /// Whether to request the source/original transcript on the dedicated
+  /// translation endpoint by configuring `audio.input.transcription`.
+  ///
+  /// The primary interpreter session keeps this `true` so it is the single
+  /// writer of original-speech rows. A secondary reverse-direction session
+  /// (added for bidirectional output, e.g. English->Italian) sets this `false`
+  /// so it only streams translated audio + the translated transcript and never
+  /// emits a duplicate source transcript for the same audio, which would
+  /// otherwise create a second, sourceless card per utterance.
+  final bool sourceTranscriptionEnabled;
+
+  OpenAiRealtimeTranslationConfig copyWith({
+    String? targetLanguageCode,
+    String? sourceLanguageCode,
+    OpenAiRealtimeTranslationProfile? profile,
+    int? inputAudioRate,
+    String? outputVoice,
+    bool? translationOutputEnabled,
+    bool? readAloudOutputEnabled,
+    bool? sourceTranscriptionEnabled,
+  }) {
+    return OpenAiRealtimeTranslationConfig(
+      targetLanguageCode: targetLanguageCode ?? this.targetLanguageCode,
+      sourceLanguageCode: sourceLanguageCode ?? this.sourceLanguageCode,
+      profile: profile ?? this.profile,
+      inputAudioRate: inputAudioRate ?? this.inputAudioRate,
+      outputVoice: outputVoice ?? this.outputVoice,
+      translationOutputEnabled:
+          translationOutputEnabled ?? this.translationOutputEnabled,
+      readAloudOutputEnabled:
+          readAloudOutputEnabled ?? this.readAloudOutputEnabled,
+      sourceTranscriptionEnabled:
+          sourceTranscriptionEnabled ?? this.sourceTranscriptionEnabled,
+    );
+  }
 
   Uri webSocketUri({Uri? baseUri}) {
     final base =
@@ -185,18 +223,25 @@ class OpenAiRealtimeTranslationConfig {
     // reduction so the original speech and per-turn source boundaries arrive.
     // Source-language detection remains server-side and is not requested here;
     // the target output language is the only language we set.
+    //
+    // The reverse-direction session sets [sourceTranscriptionEnabled] to false
+    // so it streams only translated audio + translated transcript and never
+    // emits a duplicate source transcript for audio the primary session is
+    // already transcribing.
+    final input = <String, Object?>{
+      'noise_reduction': {
+        'type': OpenAiConfiguration.realtimeInputNoiseReduction,
+      },
+      if (sourceTranscriptionEnabled)
+        'transcription': {
+          'model': OpenAiConfiguration.translationTranscriptionModel,
+        },
+    };
     return {
       'type': 'session.update',
       'session': {
         'audio': {
-          'input': {
-            'transcription': {
-              'model': OpenAiConfiguration.translationTranscriptionModel,
-            },
-            'noise_reduction': {
-              'type': OpenAiConfiguration.realtimeInputNoiseReduction,
-            },
-          },
+          'input': input,
           'output': {'language': targetLanguageCode},
         },
       },
@@ -244,6 +289,7 @@ class OpenAiRealtimeTranslationGateway implements RealtimeTranslationGateway {
     Uri? webSocketBaseUri,
     RealtimeWebSocketFactory? webSocketFactory,
     this.diagnostics = const PrivacySafeDiagnostics(),
+    this.debugRecorder = const RealtimeEventDebugRecorder(),
   }) : webSocketBaseUri =
            webSocketBaseUri ??
            Uri.parse(OpenAiConfiguration.realtimeWebSocketBaseUrl),
@@ -255,6 +301,7 @@ class OpenAiRealtimeTranslationGateway implements RealtimeTranslationGateway {
 
   final Uri webSocketBaseUri;
   final PrivacySafeDiagnostics diagnostics;
+  final RealtimeEventDebugRecorder debugRecorder;
   final RealtimeWebSocketFactory _webSocketFactory;
 
   @override
@@ -281,6 +328,7 @@ class OpenAiRealtimeTranslationGateway implements RealtimeTranslationGateway {
       socket: socket,
       config: config,
       diagnostics: diagnostics,
+      debugRecorder: debugRecorder,
     );
     try {
       session.sendSessionUpdate();
@@ -309,6 +357,7 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
     required this._socket,
     required this.config,
     required this.diagnostics,
+    this.debugRecorder = const RealtimeEventDebugRecorder(),
   }) {
     _subscription = _socket.listen(
       _handleSocketMessage,
@@ -320,6 +369,7 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
 
   final OpenAiRealtimeTranslationConfig config;
   final PrivacySafeDiagnostics diagnostics;
+  final RealtimeEventDebugRecorder debugRecorder;
   final WebSocket _socket;
   late final StreamSubscription<dynamic> _subscription;
   final StreamController<OpenAiRealtimeEvent> _events =
@@ -420,6 +470,11 @@ class OpenAiRealtimeTranslationSession implements RealtimeTranslationSession {
   }
 
   void _handleSocketMessage(dynamic message) {
+    // Ground-truth capture (debug builds only): records the content-free shape
+    // of the real wire event before parsing, so the actual
+    // `/v1/realtime/translations` event types/fields can be confirmed instead
+    // of assumed. No-op unless built with LIVE_TRANSLATE_DEBUG_EVENTS=true.
+    debugRecorder.recordRawMessage(message);
     final event = OpenAiRealtimeEventParser.parseMessage(message);
     if (event == null || _events.isClosed) {
       return;

@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Realtime /v1/realtime/translations event sequence used to drive the",
+    "transcript committer in realtime_event_fixture_test.dart.",
+    "",
+    "These events use the DOCUMENTED OpenAI event shapes (session.input_transcript.*,",
+    "session.output_transcript.*, session.output_audio.delta) from the official",
+    "Realtime Translation guide/cookbook. The dedicated wire sends no item_id and",
+    "no per-event language field, so language is resolved by the committer.",
+    "",
+    "GROUND TRUTH TODO: replace/augment this with a redacted on-device capture",
+    "(LIVE_TX_EVENT lines from the debug recorder) once Tom runs the EN+IT phone",
+    "session. Keep the same flat, ordered event-list format so the test does not",
+    "need to change.",
+    "",
+    "Scenario: an Italian utterance (translated to the English-output session) is",
+    "followed by an English utterance (the English-output session stays silent on",
+    "output, so only the source transcript arrives for it; the reverse-direction",
+    "text is produced by the coordinator's direct OpenAI text path, not here)."
+  ],
+  "events": [
+    { "type": "session.input_transcript.delta", "delta": "Buongiorno, " },
+    { "type": "session.output_transcript.delta", "delta": "Good " },
+    { "type": "session.input_transcript.delta", "delta": "come stai?" },
+    { "type": "session.output_transcript.delta", "delta": "morning, how are you?" },
+    { "type": "session.input_transcript.done", "transcript": "Buongiorno, come stai?" },
+    { "type": "session.output_transcript.done", "transcript": "Good morning, how are you?" },
+    { "type": "session.input_transcript.delta", "delta": "Hello, what are you going to do today?" },
+    { "type": "session.input_transcript.done", "transcript": "Hello, what are you going to do today?" }
+  ]
+}

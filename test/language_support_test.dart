@@ -2,35 +2,43 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_translate_mobile/src/language/language_support.dart';
 
 void main() {
-  test('keeps realtime target language table conservative and typed', () {
+  test('realtime target table matches the 13 documented output languages', () {
     final targetCodes = [
       for (final language in LanguageSupport.realtimeTargetLanguages)
         language.code,
     ];
 
-    expect(targetCodes, containsAll(['en', 'es', 'fr']));
-    expect(targetCodes, isNot(contains('ja')));
+    // The 13 official Realtime Translation output languages.
     expect(
-      [for (final language in LanguageSupport.targetLanguages) language.code],
+      targetCodes,
       containsAll([
         'en',
         'es',
         'fr',
         'it',
         'ja',
-        'de',
-        'pt',
+        'ru',
         'zh',
+        'de',
         'ko',
-        'ar',
         'hi',
+        'id',
+        'vi',
+        'pt',
       ]),
     );
-    expect(LanguageSupport.verifiedDate, '2026-05-24');
+    // Arabic is auto-detected as a source but is not a realtime output target.
+    expect(targetCodes, isNot(contains('ar')));
+    expect(
+      [for (final language in LanguageSupport.targetLanguages) language.code],
+      containsAll(['en', 'es', 'fr', 'it', 'ja', 'de', 'pt', 'zh', 'ko', 'ar']),
+    );
+    expect(LanguageSupport.verifiedDate, '2026-06-01');
     expect(LanguageSupport.realtimeDocsUrl, startsWith('https://'));
+    expect(LanguageSupport.realtimeCookbookUrl, startsWith('https://'));
   });
 
-  test('routes unsupported targets to direct OpenAI fallback only', () {
+  test('routes non-output targets to direct OpenAI fallback only', () {
     final realtimePlan = LanguageSupport.planRoute(
       sourceCode: 'auto',
       targetCode: 'en',
@@ -39,9 +47,11 @@ void main() {
     expect(realtimePlan.availability, TranslationRouteAvailability.available);
     expect(realtimePlan.usesRealtime, isTrue);
 
+    // Arabic is not one of the 13 output languages, so it still routes to the
+    // phone-only direct OpenAI text fallback.
     final fallbackPlan = LanguageSupport.planRoute(
       sourceCode: 'en',
-      targetCode: 'ja',
+      targetCode: 'ar',
     );
     expect(fallbackPlan.type, TranslationRouteType.directOpenAiFallback);
     expect(
@@ -52,17 +62,11 @@ void main() {
     expect(fallbackPlan.userMessage, contains('phone-only direct OpenAI'));
   });
 
-  test(
-    'routes Italian output through direct OpenAI fallback until verified',
-    () {
-      final plan = LanguageSupport.planRoute(
-        sourceCode: 'en',
-        targetCode: 'it',
-      );
+  test('routes Italian output through the realtime path', () {
+    final plan = LanguageSupport.planRoute(sourceCode: 'en', targetCode: 'it');
 
-      expect(plan.type, TranslationRouteType.directOpenAiFallback);
-      expect(plan.usesRealtime, isFalse);
-      expect(plan.userMessage, contains('phone-only direct OpenAI'));
-    },
-  );
+    expect(plan.type, TranslationRouteType.realtime);
+    expect(plan.usesRealtime, isTrue);
+    expect(plan.availability, TranslationRouteAvailability.available);
+  });
 }

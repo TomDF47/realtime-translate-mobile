@@ -2,6 +2,35 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-01 - Two-Session Bidirectional Interpreter, Corrected Realtime Output Table, And Ground-Truth-First Live Debugging
+
+Status: Accepted as code/design direction (Flutter analyzer/tests/APK build still need the Fedora toolchain; on-device EN+IT capture still pending)
+
+Context:
+
+- #31 was patched four times (PRs #46/#49/#50/#51 + follow-ups), each editing `RealtimeTranscriptCommitter` block-rolling, and Tom's physical-device retests kept failing in new ways (original speech missing, all text in one box, second language never detected). The root problem was not the committer logic: the agent loop had no live ground truth (the dev emulator has no audio source, #6), so every fix was verified against synthetic injected events whose shape was assumed, not observed.
+- Re-checking the current OpenAI docs (Realtime Translation guide + cookbook, verified 2026-06-01) overturned two assumptions the prior design was built on:
+  1. `gpt-realtime-translate` natively auto-detects the source language (70+ inputs) and emits `session.input_transcript.*` source events when `audio.input.transcription` is configured. Hand-rolled keyword language detection is therefore a fallback, not the primary mechanism.
+  2. The documented two-party pattern is "two translation sessions, one per output language" ("A-to-B and B-to-A"), and Italian IS one of the 13 supported realtime output languages (Spanish, Portuguese, French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian, Vietnamese, Italian, English). The single-session-output-English + English->Italian text-fallback design was fighting the API.
+
+Decision:
+
+- Ground truth first. Add a debug-only, content-free realtime wire-event recorder (`RealtimeEventDebugRecorder`, gated by `--dart-define=LIVE_TRANSLATE_DEBUG_EVENTS=true`) hooked at the raw socket-message boundary in `OpenAiRealtimeTranslationSession`. It logs only event type, JSON key names, payload lengths, language-code values, and item-id presence (never transcript/translation/audio content) as `LIVE_TX_EVENT` lines captured via `adb logcat`. Use it to confirm the real `/v1/realtime/translations` event shape on a physical device before further tuning committer/correlation logic.
+- Correct the realtime output-language table in `language_support.dart` to the 13 documented output languages (adds Italian, German, Japanese, Chinese, Korean, Portuguese, Russian, Indonesian, Vietnamese, Hindi as realtime targets). Arabic stays a direct-OpenAI fallback target (it is an input language, not one of the 13 outputs). This supersedes the conservative "English/Spanish/French only" realtime table (`2026-05-24 - Conservative Realtime Language Table`) and the `2026-05-31 - Bidirectional Interpreter Uses Explicit Pair Direction With Text Fallback` claim that Italian realtime output is unproven.
+- Implement the documented two-party pattern as an additive, best-effort reverse session. The primary `/v1/realtime/translations` session (output = first/default language, English) remains the single writer of transcript rows. Once the pair locks, `LiveRealtimeTranslationCoordinator` opens a SECOND dedicated translation session whose output language is the OTHER detected language, with `sourceTranscriptionEnabled: false` so it is audio-only and never writes a duplicate sourceless card. It is opt-in (`enableBidirectionalReverseSession`, on in `main.dart`, default off so existing tests/behavior are preserved) and best-effort (a reverse-session failure never disturbs the primary path).
+- Reverse-direction TEXT stays owned by the direct OpenAI text path, made principled: the text fallback now fires whenever a completed source turn's language equals the primary session's configured output language (the case where the single dedicated session stays silent because the speech is already in its output language) OR the target is a non-realtime-output language. This makes reverse-direction text appear reliably whether or not the reverse-audio session is up, and is independent of the corrected language table.
+
+Rationale:
+
+- The loop wasn't converging because it was debugging blind against an architecture that fought the API. Capturing one real session and adopting the documented two-session pattern addresses the actual cause instead of the fifth downstream symptom.
+- Keeping reverse TEXT on the existing direct path (rather than correlating a second session's transcript without item ids) avoids fragile timing-based merging; the second session adds the missing reverse AUDIO without risking the transcript text path.
+
+Implications:
+
+- Phone-only direct-OpenAI privacy boundary is unchanged: two WebSocket sessions are still direct phone-to-OpenAI, no backend. Note the reverse session roughly doubles realtime translation minutes while the pair is active.
+- This work was authored on a Windows machine with no Flutter/Dart toolchain, so `flutter analyze`/`flutter test`/APK build must run on the Fedora toolchain (as all prior validation has). The reverse-session correlation and committer behavior should be reconciled against the on-device `LIVE_TX_EVENT` capture; the fixture at `test/fixtures/realtime_translation_documented_turns.json` currently holds documented shapes and is the swap-in point for the real capture.
+- #31 and #6 stay open until Tom confirms on a physical Android device that EN+IT shows original + translation per turn in both directions, boxes split per turn, and the header locks `English <-> Italian`.
+
 ## 2026-06-01 - Gate Readable-Block Rolling On Source-Utterance Completion, And Track Content-Free Source/Output Signal Evidence
 
 Status: Accepted

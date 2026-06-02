@@ -50,9 +50,15 @@ class TranslationRoutePlan {
 }
 
 abstract final class LanguageSupport {
-  static const verifiedDate = '2026-05-24';
+  // Verified against the official Realtime Translation guide and cookbook,
+  // which enumerate the 13 supported output languages (Spanish, Portuguese,
+  // French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian,
+  // Vietnamese, Italian, English) and 70+ auto-detected input languages.
+  static const verifiedDate = '2026-06-01';
   static const realtimeDocsUrl =
       'https://developers.openai.com/api/docs/guides/realtime-translation';
+  static const realtimeCookbookUrl =
+      'https://developers.openai.com/cookbook/examples/voice_solutions/realtime_translation_guide';
   static const realtimeModelUrl =
       'https://developers.openai.com/api/docs/models/gpt-realtime-translate';
   static const translationClientSecretUrl =
@@ -98,7 +104,7 @@ abstract final class LanguageSupport {
       name: 'Italian',
       regionLabel: '(IT)',
       supportsSource: true,
-      supportsRealtimeTarget: false,
+      supportsRealtimeTarget: true,
       supportsDirectFallback: true,
     ),
     TranslationLanguage(
@@ -106,7 +112,7 @@ abstract final class LanguageSupport {
       name: 'Japanese',
       regionLabel: '(JP)',
       supportsSource: true,
-      supportsRealtimeTarget: false,
+      supportsRealtimeTarget: true,
       supportsDirectFallback: true,
     ),
     TranslationLanguage(
@@ -114,7 +120,7 @@ abstract final class LanguageSupport {
       name: 'German',
       regionLabel: '(DE)',
       supportsSource: true,
-      supportsRealtimeTarget: false,
+      supportsRealtimeTarget: true,
       supportsDirectFallback: true,
     ),
     TranslationLanguage(
@@ -122,7 +128,7 @@ abstract final class LanguageSupport {
       name: 'Portuguese',
       regionLabel: '(BR)',
       supportsSource: true,
-      supportsRealtimeTarget: false,
+      supportsRealtimeTarget: true,
       supportsDirectFallback: true,
     ),
     TranslationLanguage(
@@ -130,7 +136,7 @@ abstract final class LanguageSupport {
       name: 'Chinese',
       regionLabel: '(Mandarin)',
       supportsSource: true,
-      supportsRealtimeTarget: false,
+      supportsRealtimeTarget: true,
       supportsDirectFallback: true,
     ),
     TranslationLanguage(
@@ -138,20 +144,47 @@ abstract final class LanguageSupport {
       name: 'Korean',
       regionLabel: '(KR)',
       supportsSource: true,
-      supportsRealtimeTarget: false,
+      supportsRealtimeTarget: true,
       supportsDirectFallback: true,
     ),
     TranslationLanguage(
-      code: 'ar',
-      name: 'Arabic',
-      regionLabel: '',
+      code: 'ru',
+      name: 'Russian',
+      regionLabel: '(RU)',
       supportsSource: true,
-      supportsRealtimeTarget: false,
+      supportsRealtimeTarget: true,
+      supportsDirectFallback: true,
+    ),
+    TranslationLanguage(
+      code: 'id',
+      name: 'Indonesian',
+      regionLabel: '(ID)',
+      supportsSource: true,
+      supportsRealtimeTarget: true,
+      supportsDirectFallback: true,
+    ),
+    TranslationLanguage(
+      code: 'vi',
+      name: 'Vietnamese',
+      regionLabel: '(VN)',
+      supportsSource: true,
+      supportsRealtimeTarget: true,
       supportsDirectFallback: true,
     ),
     TranslationLanguage(
       code: 'hi',
       name: 'Hindi',
+      regionLabel: '',
+      supportsSource: true,
+      supportsRealtimeTarget: true,
+      supportsDirectFallback: true,
+    ),
+    // Arabic is a supported *input* (auto-detected source) language but is not
+    // one of the 13 Realtime Translation output languages, so it stays a
+    // direct-OpenAI fallback target only.
+    TranslationLanguage(
+      code: 'ar',
+      name: 'Arabic',
       regionLabel: '',
       supportsSource: true,
       supportsRealtimeTarget: false,

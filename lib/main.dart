@@ -401,6 +401,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           OpenAiRealtimeTranslationGateway(),
       textInterpreterGateway: widget.textInterpreterGateway,
       onTranscriptCommitted: _scheduleTranscriptRefresh,
+      // Documented two-party pattern: once the pair locks, open a second
+      // dedicated translation session for the reverse direction so both
+      // participants hear live translated audio.
+      enableBidirectionalReverseSession: true,
     );
     unawaited(_loadStoredMeetings());
     unawaited(_loadOpenAiCredentialStatus());

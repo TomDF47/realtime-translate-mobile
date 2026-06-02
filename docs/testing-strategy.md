@@ -16,6 +16,22 @@ scripts/final_qa_gate.sh
 
 Use [regression-testing-checklist.md](regression-testing-checklist.md) for the concrete manual and installed-app regression pass before publishing APKs. It covers main screen controls, language selection, toggle behavior, realtime session smoke, transcript chunking, elapsed timer behavior, generated exports, and APK release sanity.
 
+## Live Realtime Wire Capture (Ground Truth)
+
+Synthetic, hand-authored realtime events are NOT proof for the live `/v1/realtime/translations` path (see the Live-Path Evidence Rule in [development-workflow.md](development-workflow.md)). To capture the real wire shape on a physical device:
+
+```bash
+# Build a debug APK with the content-free event recorder enabled.
+flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_EVENTS=true
+# Install the DEBUG apk on a physical phone (not the debug-signed release apk),
+# start an interpreter session, speak English and Italian, then capture:
+adb logcat | grep LIVE_TX_EVENT
+```
+
+Each `LIVE_TX_EVENT` line is content-free JSON: event `type`, the JSON key names present, payload lengths (never values), any language code (`en`/`it`), and item-id presence. No transcript text, translated text, or audio bytes are logged (`RealtimeEventDebugRecorder`; covered by `test/realtime_event_debug_recorder_test.dart`). Use the captured lines to confirm whether `session.input_transcript.*` source events actually arrive, whether any language field is present, and how turn boundaries land.
+
+Reconcile the capture into `test/fixtures/realtime_translation_documented_turns.json` (currently seeded with documented event shapes) and let `test/realtime_event_fixture_test.dart` drive it through the production committer. Keep wire-shape assumptions in that one swappable fixture rather than scattered across inline test literals.
+
 Issue #30 adds focused coverage for the revised two-party interpreter default: the start surface says `Start interpreter`, the active live screen hides source/target pickers, direction switching, the `Translate Text` toggle, live-header AI chat, live-screen export controls, and read-aloud claims, language discovery progresses through first-language waiting and pair-lock labels, delayed first-turn translation is backfilled after the second language is known, transcript rows preserve original and translated text separately with pending/delayed/final statuses, fake text interpreter turns translate A-to-B and B-to-A through a direct OpenAI gateway with `store: false`, and diagnostics remain payload-safe. Issue #31 adds focused coverage for `Pause Listening` / `Resume Listening`, clear `Connecting to OpenAI` startup UI, realtime nested language metadata parsing, deterministic local English/Italian/Spanish/French source-language fallback, source-language change row rolling, new source item row rolling after a completed pair, translation-first original-speech backfill, and avoiding final translated rows with empty original speech. Issue #32 adds focused English/Italian text fallback coverage: after pair lock, English turns carry an English-to-Italian direct OpenAI fallback direction and produce Italian-visible translated text, while Italian turns carry an Italian-to-English realtime-capable direction and produce English-visible translated text.
 
 Optional live OpenAI smoke, only when a credential is supplied through the process environment from an uncommitted local source:

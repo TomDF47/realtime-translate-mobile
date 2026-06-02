@@ -54,6 +54,7 @@ class LiveRealtimeTranslationCoordinator {
     this.diagnostics = const PrivacySafeDiagnostics(),
     TextInterpreterGateway? textInterpreterGateway,
     this.onTranscriptCommitted,
+    this.enableBidirectionalReverseSession = false,
   }) : playbackGateway =
            playbackGateway ?? NoopTranslatedAudioPlaybackGateway(),
        textInterpreterGateway =
@@ -78,6 +79,19 @@ class LiveRealtimeTranslationCoordinator {
   final TextInterpreterGateway textInterpreterGateway;
   final LiveRealtimeTranscriptCommitted? onTranscriptCommitted;
 
+  /// When true, once the language pair is locked the coordinator opens a second
+  /// dedicated translation session whose output language is the OTHER detected
+  /// language, so the reverse speaker also hears live translated audio.
+  ///
+  /// This follows OpenAI's documented two-party pattern ("for a two-person
+  /// call, this usually means two translation sessions: A-to-B and B-to-A").
+  /// The reverse session is audio-only (source transcription disabled) so it
+  /// never writes duplicate transcript rows, and it is best-effort: a
+  /// reverse-session failure never disturbs the primary interpreter path.
+  /// Reverse-direction TEXT is still produced by the direct OpenAI text path,
+  /// which is the single writer for that direction.
+  final bool enableBidirectionalReverseSession;
+
   RealtimeTranslationSession? _realtimeSession;
   StreamSubscription<MicrophonePcm16Chunk>? _captureSubscription;
   StreamSubscription<OpenAiRealtimeEvent>? _realtimeSubscription;
@@ -87,6 +101,13 @@ class LiveRealtimeTranslationCoordinator {
   String? _activeInterpreterMeetingId;
   BidirectionalInterpreterRuntime _bidirectionalRuntime =
       BidirectionalInterpreterRuntime();
+  // Optional reverse-direction (audio-only) session for true bidirectional
+  // translated audio. See [enableBidirectionalReverseSession].
+  RealtimeTranslationSession? _reverseSession;
+  StreamSubscription<OpenAiRealtimeEvent>? _reverseEventSubscription;
+  StreamSubscription<MicrophonePcm16Chunk>? _reverseCaptureSubscription;
+  bool _reverseStarting = false;
+  int _reverseGeneration = 0;
   final List<_RealtimeSourceTurn> _completedSourceTurns =
       <_RealtimeSourceTurn>[];
   final Set<String> _fallbackInFlightEntryIds = <String>{};
@@ -678,6 +699,7 @@ class LiveRealtimeTranslationCoordinator {
       return;
     }
 
+    _maybeStartReverseSession();
     for (final turn in List<_RealtimeSourceTurn>.of(_completedSourceTurns)) {
       _requestDirectFallbackIfNeeded(turn);
     }
@@ -687,8 +709,24 @@ class LiveRealtimeTranslationCoordinator {
     final direction = _bidirectionalRuntime.directionForSource(
       turn.sourceLanguageCode,
     );
-    if (direction == null ||
-        direction.routePlan.type != TranslationRouteType.directOpenAiFallback) {
+    if (direction == null) {
+      return;
+    }
+
+    // The single dedicated translation session is configured for ONE output
+    // language (the primary target). When a turn's source language already IS
+    // that output language, the session stays silent for it (the model does
+    // not translate speech that is already in the output language), so the
+    // reverse direction's TEXT must come from the direct OpenAI text path. This
+    // also covers non-realtime output targets (for example Arabic) that always
+    // use the text path. It is independent of whether a live reverse-audio
+    // session is up, so reverse-direction text appears reliably either way.
+    final primaryTarget = _activeConfig?.targetLanguageCode.trim().toLowerCase();
+    final sourceMatchesPrimaryOutput =
+        primaryTarget != null && turn.sourceLanguageCode == primaryTarget;
+    final isTextOnlyTarget =
+        direction.routePlan.type == TranslationRouteType.directOpenAiFallback;
+    if (!sourceMatchesPrimaryOutput && !isTextOnlyTarget) {
       return;
     }
 
@@ -700,6 +738,160 @@ class LiveRealtimeTranslationCoordinator {
     _fallbackAuthoritativeEntryIds.add(turn.entry.id);
     _fallbackInFlightEntryIds.add(turn.entry.id);
     unawaited(_translateTextFallbackTurn(turn, direction));
+  }
+
+  /// Opens the reverse-direction audio session once the pair is locked.
+  ///
+  /// The reverse session's output language is the detected language that is NOT
+  /// the primary session's output target, so the primary speaker's words are
+  /// translated back into the other participant's language as live audio. It is
+  /// audio-only (source transcription disabled) and best-effort.
+  void _maybeStartReverseSession() {
+    if (!enableBidirectionalReverseSession) {
+      return;
+    }
+    if (_reverseSession != null || _reverseStarting) {
+      return;
+    }
+    final config = _activeConfig;
+    if (config == null || !_bidirectionalRuntime.isPairLocked) {
+      return;
+    }
+
+    final primaryTarget = config.targetLanguageCode.trim().toLowerCase();
+    String? reverseTarget;
+    for (final code in _bidirectionalRuntime.languageCodes) {
+      final normalized = code.trim().toLowerCase();
+      if (normalized.isNotEmpty && normalized != primaryTarget) {
+        reverseTarget = normalized;
+        break;
+      }
+    }
+    // Only open a realtime reverse-audio session for a documented output
+    // language; a non-realtime output language keeps the reverse-direction text
+    // path only.
+    if (reverseTarget == null || !_isRealtimeOutputLanguage(reverseTarget)) {
+      return;
+    }
+
+    _reverseStarting = true;
+    unawaited(_startReverseSession(config: config, reverseTarget: reverseTarget));
+  }
+
+  bool _isRealtimeOutputLanguage(String code) {
+    try {
+      return LanguageSupport.languageByCode(code).supportsRealtimeTarget;
+    } on ArgumentError {
+      return false;
+    }
+  }
+
+  Future<void> _startReverseSession({
+    required OpenAiRealtimeTranslationConfig config,
+    required String reverseTarget,
+  }) async {
+    final generation = ++_reverseGeneration;
+    RealtimeTranslationSession? session;
+    try {
+      final credential = await credentialStore.readCredentialForNetworkUse();
+      if (credential == null || credential.isEmpty) {
+        _reverseStarting = false;
+        return;
+      }
+      final reverseConfig = config.copyWith(
+        targetLanguageCode: reverseTarget,
+        sourceTranscriptionEnabled: false,
+      );
+      session = await _connectWithTimeout(
+        config: reverseConfig,
+        credential: credential,
+      );
+      if (_isDisposed || generation != _reverseGeneration) {
+        await session.closeImmediately();
+        _reverseStarting = false;
+        return;
+      }
+
+      _reverseSession = session;
+      final boundSession = session;
+      _reverseEventSubscription = session.events.listen(
+        _handleReverseEvent,
+        onError: (Object error) {
+          unawaited(_handleReverseSessionDrop());
+        },
+      );
+      _reverseCaptureSubscription = captureGateway.chunks.listen(
+        (chunk) => boundSession.appendPcm16Audio(chunk.bytes),
+        onError: (Object error) {
+          unawaited(_handleReverseSessionDrop());
+        },
+      );
+      _reverseStarting = false;
+      diagnostics.info(
+        'live_realtime.reverse_session_started',
+        fields: {
+          'operation': 'realtime.reverse.start',
+          'realtimeProfile': reverseConfig.profile.name,
+          'targetLanguage': reverseTarget,
+          'result': 'started',
+        },
+      );
+    } catch (error) {
+      _reverseStarting = false;
+      await session?.closeImmediately();
+      diagnostics.warning(
+        'live_realtime.reverse_session_failed',
+        fields: {
+          'operation': 'realtime.reverse.start',
+          'targetLanguage': reverseTarget,
+          'result': 'failed',
+          'errorCode': error.runtimeType.toString(),
+        },
+      );
+    }
+  }
+
+  void _handleReverseEvent(OpenAiRealtimeEvent event) {
+    if (_closingIntentionally) {
+      return;
+    }
+
+    switch (event) {
+      case OpenAiRealtimeAudioDelta():
+        if (_shouldHandleTranslatedAudio()) {
+          _enqueueTranslatedAudio(event);
+        }
+      case OpenAiRealtimeError():
+        unawaited(_handleReverseSessionDrop());
+      case OpenAiRealtimeSessionClosed():
+        unawaited(_handleReverseSessionDrop());
+      default:
+        // Reverse session is audio-only: it has source transcription disabled,
+        // so it does not write transcript rows. Translated-transcript deltas it
+        // may emit are ignored here because the reverse-direction TEXT is owned
+        // by the direct OpenAI text path (the single writer for that row).
+        break;
+    }
+  }
+
+  /// Tears down the reverse session without disturbing the primary path. The
+  /// next locked-pair source turn re-arms [_maybeStartReverseSession].
+  Future<void> _handleReverseSessionDrop() async {
+    final session = _reverseSession;
+    final eventSubscription = _reverseEventSubscription;
+    final captureSubscription = _reverseCaptureSubscription;
+    _reverseSession = null;
+    _reverseEventSubscription = null;
+    _reverseCaptureSubscription = null;
+    _reverseStarting = false;
+    await _cancelSubscription(eventSubscription);
+    await _cancelSubscription(captureSubscription);
+    await session?.closeImmediately();
+  }
+
+  Future<void> _closeReverseSession() async {
+    _reverseGeneration += 1;
+    await _handleReverseSessionDrop();
   }
 
   bool _shouldSuppressRealtimeTranslationForFallback(
@@ -1125,6 +1317,7 @@ class LiveRealtimeTranslationCoordinator {
     _closingIntentionally = true;
     _processTranscriptsDuringIntentionalClose = graceful && finishTranscript;
     try {
+      await _closeReverseSession();
       await captureGateway.stop();
       await _cancelSubscription(captureSubscription);
       await playbackGateway.stop(clearQueue: true);

@@ -25,6 +25,17 @@ git status --short --branch
 - Update issue comments or acceptance criteria when scope changes.
 - Close issues only after the matching verification has run, or after skipped verification is documented with the exact blocker.
 
+## Live-Path Evidence Rule (Definition Of Done For Realtime Issues)
+
+The #31 saga (four committer patches, each verified only against synthetic injected events, each failing differently on a real device) showed that synthetic-only tests are not proof for the live realtime path. For any issue touching the realtime translate wire (`/v1/realtime/translations`), transcript commitment/block splitting, language detection, or bidirectional routing:
+
+- Do NOT treat passing unit tests that inject hand-authored `OpenAiRealtimeTranscript*` events as evidence the live path works. Those tests encode an assumed event shape.
+- The definition of done is one of:
+  1. A captured real-event fixture from a device run (the `LIVE_TX_EVENT` lines emitted by `RealtimeEventDebugRecorder` when built with `--dart-define=LIVE_TRANSLATE_DEBUG_EVENTS=true`), reconciled into `test/fixtures/` and driven through the production committer/coordinator (see [docs/testing-strategy.md](testing-strategy.md)); or
+  2. An on-device pass confirmed by Tom (original + translation per turn, both directions, correct block splitting and header).
+- When the real event shape is unknown, capture it first (Phase 1) before rewriting committer/correlation logic. Prefer fixing the upstream cause (does the wire emit the events we assume, with what fields?) over adding another downstream block-rolling heuristic.
+- Keep wire-shape assumptions in one swappable fixture, not scattered across inline test literals.
+
 ## Change Control
 
 - Keep product and architecture decisions in [docs/live-translate-build-spec.md](live-translate-build-spec.md).

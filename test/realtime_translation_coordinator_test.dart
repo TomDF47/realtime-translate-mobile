@@ -1161,6 +1161,90 @@ void main() {
     },
   );
 
+  test(
+    'bidirectional reverse session opens an audio-only B-to-A translation',
+    () async {
+      // English source turns are silent on the primary (English-output)
+      // session, so the reverse direction's TEXT comes from the text path.
+      final textGateway = _FakeTextInterpreterGateway()
+        ..results.add(
+          const TextInterpreterTurnResult(
+            detectedLanguageCode: 'it',
+            detectedLanguageLabel: 'Italian',
+            translatedText: 'Ciao, cosa stai facendo?',
+          ),
+        );
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        textInterpreterGateway: textGateway,
+        enableBidirectionalReverseSession: true,
+      );
+      final startedAt = DateTime.utc(2026, 6, 1, 5);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Bidirectional reverse',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Auto-detect',
+          targetLanguageLabel: 'English',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: config,
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'auto',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+
+      // Italian turn (detected locally from markers) establishes one language.
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          transcript: 'Buongiorno, come stai?',
+        ),
+      );
+      await _drainAsync();
+      expect(harness.realtimeGateway.connectCount, 1);
+
+      // English turn locks the pair and arms the reverse session.
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          transcript: 'Hello, what are you going to do?',
+        ),
+      );
+      await _drainAsync();
+
+      // A second dedicated translation session opens for the reverse direction
+      // (output = Italian), audio-only.
+      expect(harness.realtimeGateway.connectCount, 2);
+      final reverseConfig = harness.realtimeGateway.configs[1];
+      expect(reverseConfig.targetLanguageCode, 'it');
+      expect(reverseConfig.sourceTranscriptionEnabled, isFalse);
+      expect(harness.coordinator.interpreterRouteLabel, 'Italian <-> English');
+
+      // Reverse session translated audio plays through the shared queue.
+      harness.realtimeGateway.sessions[1].addEvent(
+        OpenAiRealtimeAudioDelta(
+          type: 'session.output_audio.delta',
+          base64Audio: base64Encode(const [9, 8, 7, 6]),
+        ),
+      );
+      await _drainAsync();
+      expect(harness.playbackGateway.enqueuedChunks, isNotEmpty);
+    },
+  );
+
   group('realtime source-signal evidence', () {
     test(
       'translation-only completion with no source raises a privacy-safe '
@@ -3043,6 +3127,7 @@ class _Harness {
     Duration startupStepTimeout = const Duration(seconds: 12),
     TextInterpreterGateway? textInterpreterGateway,
     PrivacySafeDiagnostics? diagnostics,
+    bool enableBidirectionalReverseSession = false,
   }) async {
     final harness = _Harness._(permissionStatus: permissionStatus);
     harness.coordinator = LiveRealtimeTranslationCoordinator(
@@ -3057,6 +3142,7 @@ class _Harness {
       startupStepTimeout: startupStepTimeout,
       textInterpreterGateway: textInterpreterGateway,
       diagnostics: diagnostics ?? const PrivacySafeDiagnostics(),
+      enableBidirectionalReverseSession: enableBidirectionalReverseSession,
     );
     if (seedCredential) {
       await harness.credentialStore.saveUserProvidedCredential(

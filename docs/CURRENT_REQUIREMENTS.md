@@ -121,10 +121,10 @@ The active live experience is a text-first two-party interpreter. It should disc
 - Italian must be recognized in the top status and transcript block language labels when spoken.
 - Common nested realtime language metadata must be parsed.
 - Deterministic local fallback detection must cover at least English, Italian, Spanish, and French when realtime metadata is absent.
-- The conservative realtime target table remains English, Spanish, and French until current OpenAI docs or live validation prove broader realtime target support.
-- Broader app languages such as Japanese, German, Portuguese, Chinese, Korean, Arabic, and Hindi may be shown in picker/fallback contexts outside the active auto-detect flow, but must be labeled as direct-OpenAI fallback where realtime output support is unverified.
+- The realtime target table covers the 13 documented OpenAI Realtime Translation output languages: Spanish, Portuguese, French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian, Vietnamese, Italian, and English (corrected 2026-06-01 from the earlier English/Spanish/French-only conservative table per the OpenAI cookbook).
+- Arabic and other auto-detected input languages that are not among the 13 outputs may be shown in picker/fallback contexts, but must be labeled as direct-OpenAI fallback targets.
 - Fallback behavior must be explicit in UI and must stay phone-only with direct OpenAI calls only.
-- Italian is direct-fallback target-supported for text behavior, but not currently marked as a realtime output target.
+- Italian is a realtime output target. The two-party bidirectional design uses a primary `/v1/realtime/translations` session (English output, the single transcript writer) plus an additive reverse session (Italian output, audio-only) once the pair locks; reverse-direction text is produced by the direct OpenAI text path.
 
 ## Realtime Connection, Loading, And Recovery
 
@@ -182,7 +182,7 @@ The active live experience is a text-first two-party interpreter. It should disc
 
 - What exactly triggers "after screenshotting, other options appear": Android screenshot overlay, app menu, debug overlay, lifecycle pause/resume, or a specific screenshot tool?
 - What is the `1124` block identifier: a visible timestamp, internal transcript row ID, meeting ID suffix, or UI test label?
-- What validation evidence is sufficient to promote Italian from direct text fallback target to realtime output target?
+- Resolved 2026-06-01: Italian is one of the 13 documented Realtime Translation output languages, so it is now a realtime output target (no longer text-fallback-only). Remaining validation is the on-device EN+IT bidirectional confirmation under #6/#31.
 - What exact text should be used for pending placeholders in production: `Original speech pending`, `Translation pending`, or shorter labels?
 - Should `Pause Listening` be the primary center control, or should it sit beside `Stop Listening` in a simplified bottom bar?
 - Which device/emulator path should be used for the next real microphone validation: host-audio emulator, physical Android device, or a controllable virtual audio route?
