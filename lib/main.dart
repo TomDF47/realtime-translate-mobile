@@ -364,7 +364,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     'en',
   );
   bool _translateTextEnabled = true;
-  bool _readAloudEnabled = true;
+  bool _readAloudEnabled = false;
   Duration _recordingElapsed = Duration.zero;
   DateTime? _recordingStartedAt;
   Timer? _recordingTicker;
@@ -402,10 +402,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           OpenAiRealtimeTranslationGateway(),
       textInterpreterGateway: widget.textInterpreterGateway,
       onTranscriptCommitted: _scheduleTranscriptRefresh,
-      // Documented two-party pattern: once the pair locks, open a second
-      // dedicated translation session for the reverse direction so both
-      // participants hear live translated audio.
-      enableBidirectionalReverseSession: true,
+      // Phone MVP is text-first. Translated audio/reverse audio remain behind
+      // explicit read-aloud controls until the installed live text path is
+      // proven stable on physical devices.
+      enableBidirectionalReverseSession: false,
     );
     unawaited(_loadStoredMeetings());
     unawaited(_loadOpenAiCredentialStatus());
@@ -1056,7 +1056,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     if (nextSurface == _AppSurface.speakingPaused) {
       _sessionController.enterSpeakingPaused();
     } else {
-      _sessionController.resumeListening();
+      _sessionController.resumeListening(
+        playbackQueueOpen: _readAloudEnabled,
+      );
     }
 
     await _appendContinuationToMeeting(meeting: meeting, session: session);
@@ -1202,7 +1204,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return;
     }
 
-    _sessionController.resumeListening();
+    _sessionController.resumeListening(playbackQueueOpen: _readAloudEnabled);
     setState(() => _surface = _AppSurface.listening);
   }
 
@@ -1949,7 +1951,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       readAloudOutputEnabled: true,
     );
     unawaited(_restartRealtimeIfActive());
-    _sessionController.resumeListening();
+    _sessionController.resumeListening(playbackQueueOpen: _readAloudEnabled);
     setState(() => _surface = _AppSurface.listening);
   }
 }

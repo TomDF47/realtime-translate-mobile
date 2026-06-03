@@ -2,6 +2,29 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-03 - Text-First Live Interpreter Suppresses Default Speaker And Reverse Audio
+
+Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
+
+Context:
+
+- Tom's Samsung retest of the debug release showed the manual Italian <-> English screen, but accepting the microphone prompt could fall back to a `Preparing live session` screen, English speech produced an English-to-English assistant-like translation card instead of Italian, Italian speech did not reliably start a new source/translation card, and several unexpected translated-audio outputs played.
+- The active live UI intentionally hides read-aloud controls and speaker/headphone chips, so enabling translated audio and the reverse realtime audio session by default was misleading and increased startup/audio failure surface.
+- The live wire can provide enough source delta text to label the original speech before it provides a source completion event. Waiting only for `session.input_transcript.done` leaves English-in-English-output turns vulnerable to same-language realtime output before the direct text fallback fires.
+
+Decision:
+
+- Default the active phone live interpreter to text-first: `_readAloudEnabled` starts false, the main app does not enable the best-effort reverse audio session, and the coordinator skips translated-audio playback queue startup whenever read-aloud is disabled.
+- Keep microphone capture and the primary `/v1/realtime/translations` text/transcript path active; only speaker playback/reverse audio are suppressed.
+- Let stable source deltas (sentence-ending punctuation or long text) trigger the same direct OpenAI fallback used by completed source turns when the detected source language is already the primary realtime output language or the selected target requires direct fallback.
+- Suppress no-item realtime output for a row once the direct text fallback has marked that row authoritative, so an English realtime echo cannot overwrite the Italian fallback translation.
+
+Implications:
+
+- The default tester build should be evaluated for original/translation text cards first. Audible translated output is now an explicit follow-up path, not a default release claim.
+- This adds no dependency, Android permission, backend route, app-owned network path, credential handling, microphone recording, OpenAI request format change, or logging surface. The phone-only direct-OpenAI privacy boundary is unchanged.
+- Regression coverage now includes the Samsung ordering: English source delta only, same-language realtime output, one EN original card, and Italian direct fallback translation.
+
 ## 2026-06-02 - Restore Manual Two-Language Pair Selection For Live Interpreter
 
 Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
@@ -84,7 +107,7 @@ Decision:
 
 - Ground truth first. Add a debug-only, content-free realtime wire-event recorder (`RealtimeEventDebugRecorder`, gated by `--dart-define=LIVE_TRANSLATE_DEBUG_EVENTS=true`) hooked at the raw socket-message boundary in `OpenAiRealtimeTranslationSession`. It logs only event type, JSON key names, payload lengths, language-code values, and item-id presence (never transcript/translation/audio content) as `LIVE_TX_EVENT` lines captured via `adb logcat`. Use it to confirm the real `/v1/realtime/translations` event shape on a physical device before further tuning committer/correlation logic.
 - Correct the realtime output-language table in `language_support.dart` to the 13 documented output languages (adds Italian, German, Japanese, Chinese, Korean, Portuguese, Russian, Indonesian, Vietnamese, Hindi as realtime targets). Arabic stays a direct-OpenAI fallback target (it is an input language, not one of the 13 outputs). This supersedes the conservative "English/Spanish/French only" realtime table (`2026-05-24 - Conservative Realtime Language Table`) and the `2026-05-31 - Bidirectional Interpreter Uses Explicit Pair Direction With Text Fallback` claim that Italian realtime output is unproven.
-- Implement the documented two-party pattern as an additive, best-effort reverse session. The primary `/v1/realtime/translations` session (output = first/default language, English) remains the single writer of transcript rows. Once the pair locks, `LiveRealtimeTranslationCoordinator` opens a SECOND dedicated translation session whose output language is the OTHER detected language, with `sourceTranscriptionEnabled: false` so it is audio-only and never writes a duplicate sourceless card. It is opt-in (`enableBidirectionalReverseSession`, on in `main.dart`, default off so existing tests/behavior are preserved) and best-effort (a reverse-session failure never disturbs the primary path).
+- Implement the documented two-party pattern as an additive, best-effort reverse session. The primary `/v1/realtime/translations` session (output = first/default language, English) remains the single writer of transcript rows. Once the pair locks, `LiveRealtimeTranslationCoordinator` can open a SECOND dedicated translation session whose output language is the OTHER detected language, with `sourceTranscriptionEnabled: false` so it is audio-only and never writes a duplicate sourceless card. It is opt-in (`enableBidirectionalReverseSession`) and best-effort (a reverse-session failure never disturbs the primary path). The later 2026-06-03 text-first decision keeps this disabled from the main phone UI by default.
 - Reverse-direction TEXT stays owned by the direct OpenAI text path, made principled: the text fallback now fires whenever a completed source turn's language equals the primary session's configured output language (the case where the single dedicated session stays silent because the speech is already in its output language) OR the target is a non-realtime-output language. This makes reverse-direction text appear reliably whether or not the reverse-audio session is up, and is independent of the corrected language table.
 
 Rationale:

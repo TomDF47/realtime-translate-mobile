@@ -551,6 +551,8 @@ void main() {
           .single
           .transcriptEntries;
       expect(result, LiveRealtimeStartResult.started);
+      expect(harness.playbackGateway.startCount, 0);
+      expect(harness.controller.state.isPlaybackQueueOpen, isFalse);
       expect(entries, hasLength(1));
       expect(entries.single.translatedText, 'Hello.');
       expect(harness.playbackGateway.enqueuedChunks, isEmpty);
@@ -1151,6 +1153,100 @@ void main() {
 
       // The English turn used the direct OpenAI text fallback (English ->
       // Italian) keyed off the locally detected source language.
+      expect(textGateway.requests, hasLength(1));
+      expect(textGateway.requests.single.sourceLanguageCode, 'en');
+      expect(textGateway.requests.single.targetLanguageCode, 'it');
+      expect(
+        textGateway.requests.single.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
+    },
+  );
+
+  test(
+    'English source delta triggers fallback and ignores same-language realtime output',
+    () async {
+      // Reproduces Tom's 2026-06-03 Samsung retest: the primary dedicated
+      // session is configured for English output, the user speaks English
+      // first in an Italian<->English manual pair, and the wire provides
+      // source delta text but no source completion before output text arrives.
+      // The app must not accept that English output as the translation.
+      final textGateway = _FakeTextInterpreterGateway()
+        ..results.add(
+          const TextInterpreterTurnResult(
+            detectedLanguageCode: 'en',
+            detectedLanguageLabel: 'English',
+            translatedText: 'Ciao, come stai?',
+          ),
+        );
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        textInterpreterGateway: textGateway,
+      );
+      final startedAt = DateTime.utc(2026, 6, 3, 2, 50);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Manual Italian English',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'Italian (IT)',
+          targetLanguageLabel: 'English (US)',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'it',
+          targetLanguageCode: 'en',
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'it',
+          targetLanguageCode: 'en',
+          now: () => startedAt,
+        ),
+      );
+
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hello, how are you?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Hello, how are you? Well, thank you too.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Hello, how are you? Well, thank you too.',
+          ),
+        );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.languageCode, 'EN');
+      expect(entries.single.originalText, 'Hello, how are you?');
+      expect(entries.single.translatedText, 'Ciao, come stai?');
+      expect(
+        entries.single.translatedText,
+        isNot(contains('Well, thank you too')),
+      );
       expect(textGateway.requests, hasLength(1));
       expect(textGateway.requests.single.sourceLanguageCode, 'en');
       expect(textGateway.requests.single.targetLanguageCode, 'it');

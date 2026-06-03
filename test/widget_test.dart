@@ -864,6 +864,77 @@ void main() {
     },
   );
 
+  testWidgets(
+    'live English source delta shows Italian translation without English echo',
+    (tester) async {
+      final repository = _testRepository();
+      final realtimeGateway = _FakeRealtimeTranslationGateway();
+      final textGateway = _FakeTextInterpreterGateway();
+      textGateway.results.add(
+        const TextInterpreterTurnResult(
+          detectedLanguageCode: 'en',
+          detectedLanguageLabel: 'English',
+          translatedText: 'Ciao, come stai?',
+        ),
+      );
+      await _seedCredential(repository);
+      await tester.pumpWidget(
+        LiveTranslateApp(
+          permissionGateway: _FakePermissionGateway.granted(),
+          meetingRepository: repository,
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+          realtimeTranslationGateway: realtimeGateway,
+          textInterpreterGateway: textGateway,
+        ),
+      );
+
+      await tester.tap(find.text('Start interpreter'));
+      await tester.pumpAndSettle();
+      expect(find.text('Italian <-> English'), findsOneWidget);
+
+      realtimeGateway.primarySession
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.input_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            delta: 'Hello, how are you?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptDelta(
+            type: 'session.output_transcript.delta',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            delta: 'Hello, how are you? Well, thank you too.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Hello, how are you? Well, thank you too.',
+          ),
+        );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      final entries =
+          (await repository.loadSnapshot()).meetings.single.transcriptEntries;
+      expect(entries, hasLength(1));
+      expect(entries.single.languageCode, 'EN');
+      expect(entries.single.originalText, 'Hello, how are you?');
+      expect(entries.single.translatedText, 'Ciao, come stai?');
+      expect(textGateway.requests, hasLength(1));
+      expect(textGateway.requests.single.sourceLanguageCode, 'en');
+      expect(textGateway.requests.single.targetLanguageCode, 'it');
+
+      expect(find.text('Hello, how are you?'), findsOneWidget);
+      expect(find.text('Ciao, come stai?'), findsOneWidget);
+      expect(find.textContaining('Well, thank you too'), findsNothing);
+      expect(find.text('Original speech pending'), findsNothing);
+    },
+  );
+
   testWidgets('shows reconnecting realtime recovery state on live surface', (
     tester,
   ) async {
@@ -1065,6 +1136,8 @@ void main() {
     expect(find.text('Read aloud is paused'), findsNothing);
     expect(find.text('Resume Read Aloud'), findsNothing);
     expect(find.text('Waiting for speech'), findsOneWidget);
+    expect(realtimeGateway.configs, hasLength(1));
+    expect(realtimeGateway.primaryConfig.readAloudOutputEnabled, isFalse);
 
     await tester.tap(find.byTooltip('Open menu'));
     await tester.pumpAndSettle();

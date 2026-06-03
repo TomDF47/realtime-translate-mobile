@@ -232,7 +232,7 @@ class LiveSessionController extends ChangeNotifier {
     }
   }
 
-  void resumeListening() {
+  void resumeListening({bool playbackQueueOpen = true}) {
     if (!_state.microphonePermission.isGranted) {
       return;
     }
@@ -243,7 +243,7 @@ class LiveSessionController extends ChangeNotifier {
         phase: LiveSessionPhase.listening,
         isMicrophoneCaptureOpen: true,
         isRealtimeSessionOpen: true,
-        isPlaybackQueueOpen: true,
+        isPlaybackQueueOpen: playbackQueueOpen,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
@@ -275,7 +275,7 @@ class LiveSessionController extends ChangeNotifier {
     );
   }
 
-  void markRealtimeStarted() {
+  void markRealtimeStarted({bool playbackQueueOpen = true}) {
     if (!_state.microphonePermission.isGranted) {
       return;
     }
@@ -286,7 +286,7 @@ class LiveSessionController extends ChangeNotifier {
         phase: LiveSessionPhase.listening,
         isMicrophoneCaptureOpen: true,
         isRealtimeSessionOpen: true,
-        isPlaybackQueueOpen: true,
+        isPlaybackQueueOpen: playbackQueueOpen,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
@@ -451,7 +451,7 @@ class LiveSessionController extends ChangeNotifier {
     }
   }
 
-  void markRealtimeRecovered() {
+  void markRealtimeRecovered({bool playbackQueueOpen = true}) {
     if (!_state.microphonePermission.isGranted) {
       return;
     }
@@ -462,7 +462,7 @@ class LiveSessionController extends ChangeNotifier {
         phase: LiveSessionPhase.listening,
         isMicrophoneCaptureOpen: true,
         isRealtimeSessionOpen: true,
-        isPlaybackQueueOpen: true,
+        isPlaybackQueueOpen: playbackQueueOpen,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,

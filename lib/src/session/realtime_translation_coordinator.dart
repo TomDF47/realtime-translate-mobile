@@ -123,6 +123,7 @@ class LiveRealtimeTranslationCoordinator {
   int _sourceTranscriptTurns = 0;
   int _outputTranscriptTurns = 0;
   int _sourcelessFinalTurns = 0;
+  final Set<String> _sourceTranscriptEntryIds = <String>{};
   // Ids of entries that finalized translation-only (translated text, empty
   // original) and were counted in [_sourcelessFinalTurns]. The dedicated
   // translation wire can deliver a turn's translation before its source, so
@@ -223,9 +224,14 @@ class LiveRealtimeTranslationCoordinator {
         await realtimeSession.closeImmediately();
         return LiveRealtimeStartResult.failed;
       }
-      await _startPlaybackQueue(config);
+      final playbackQueueOpen = _shouldStartTranslatedAudioPlayback(config);
+      if (playbackQueueOpen) {
+        await _startPlaybackQueue(config);
+      }
       if (!_isCurrentStart(startGeneration)) {
-        await playbackGateway.stop(clearQueue: true);
+        if (playbackQueueOpen) {
+          await playbackGateway.stop(clearQueue: true);
+        }
         await realtimeSession.closeImmediately();
         return LiveRealtimeStartResult.failed;
       }
@@ -240,7 +246,9 @@ class LiveRealtimeTranslationCoordinator {
         await _closeRealtimeResources(graceful: false, finishTranscript: false);
         return LiveRealtimeStartResult.failed;
       }
-      sessionController.markRealtimeStarted();
+      sessionController.markRealtimeStarted(
+        playbackQueueOpen: playbackQueueOpen,
+      );
       _maybeStartReverseSession();
       diagnostics.info(
         'live_realtime.streaming_started',
@@ -502,6 +510,8 @@ class LiveRealtimeTranslationCoordinator {
         }
         if (event.kind == OpenAiRealtimeTranscriptKind.source) {
           _noteSourceQueuedAfterFallbackAuthoritativeEntry(event);
+          _commitSourceDeltaAndMaybeFallback(event);
+          return;
         }
         if (_shouldSuppressRealtimeTranslationForFallback(event)) {
           return;
@@ -573,6 +583,12 @@ class LiveRealtimeTranslationCoordinator {
       return true;
     }
 
+    return _shouldStartTranslatedAudioPlayback(config);
+  }
+
+  bool _shouldStartTranslatedAudioPlayback(
+    OpenAiRealtimeTranslationConfig config,
+  ) {
     return _translationOutputEnabled &&
         _readAloudOutputEnabled &&
         config.translationOutputEnabled &&
@@ -680,10 +696,7 @@ class LiveRealtimeTranslationCoordinator {
             if (entry == null) {
               return;
             }
-            if (entry.originalText.trim().isNotEmpty) {
-              _sourceTranscriptTurns += 1;
-              _clearSourcelessFinalForBackfilledEntry(entry);
-            }
+            _noteSourceTranscriptForEntry(entry);
             _trackSourceTurnForFallback(entry);
           })
           .catchError((Object error, StackTrace stackTrace) {
@@ -697,6 +710,48 @@ class LiveRealtimeTranslationCoordinator {
             );
           }),
     );
+  }
+
+  void _commitSourceDeltaAndMaybeFallback(OpenAiRealtimeTranscriptDelta event) {
+    final commit = _transcriptCommitter?.commitDelta(event);
+    if (commit == null) {
+      return;
+    }
+
+    unawaited(
+      commit
+          .then((entry) {
+            onTranscriptCommitted?.call();
+            if (entry == null) {
+              return;
+            }
+            _noteSourceTranscriptForEntry(entry);
+            if (!_isStableSourceTextForFallback(entry.originalText)) {
+              return;
+            }
+            _requestDirectFallbackForSourceEntryIfNeeded(entry);
+          })
+          .catchError((Object error, StackTrace stackTrace) {
+            diagnostics.warning(
+              'live_realtime.transcript_commit_failed',
+              fields: {
+                'operation': 'realtime.transcript.commit',
+                'result': 'failed',
+                'errorCode': error.runtimeType.toString(),
+              },
+            );
+          }),
+    );
+  }
+
+  void _noteSourceTranscriptForEntry(StoredTranscriptEntry entry) {
+    if (entry.originalText.trim().isEmpty) {
+      return;
+    }
+    if (_sourceTranscriptEntryIds.add(entry.id)) {
+      _sourceTranscriptTurns += 1;
+    }
+    _clearSourcelessFinalForBackfilledEntry(entry);
   }
 
   void _trackSourceTurnForFallback(StoredTranscriptEntry entry) {
@@ -722,6 +777,42 @@ class LiveRealtimeTranslationCoordinator {
     for (final turn in List<_RealtimeSourceTurn>.of(_completedSourceTurns)) {
       _requestDirectFallbackIfNeeded(turn);
     }
+  }
+
+  void _requestDirectFallbackForSourceEntryIfNeeded(
+    StoredTranscriptEntry entry,
+  ) {
+    final sourceCode = entry.languageCode.trim().toLowerCase();
+    if (sourceCode.isEmpty ||
+        sourceCode == 'auto' ||
+        entry.originalText.trim().isEmpty) {
+      return;
+    }
+
+    _bidirectionalRuntime.recordDetectedLanguage(
+      code: sourceCode,
+      label: _languageLabelForCode(sourceCode),
+    );
+    if (!_bidirectionalRuntime.isPairLocked) {
+      return;
+    }
+
+    _maybeStartReverseSession();
+    _requestDirectFallbackIfNeeded(
+      _RealtimeSourceTurn(entry: entry, sourceLanguageCode: sourceCode),
+    );
+  }
+
+  bool _isStableSourceTextForFallback(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    if (RegExp(r'[.!?]\s*$').hasMatch(trimmed)) {
+      return true;
+    }
+
+    return trimmed.length >= 80;
   }
 
   void _requestDirectFallbackIfNeeded(_RealtimeSourceTurn turn) {
@@ -774,6 +865,9 @@ class LiveRealtimeTranslationCoordinator {
     }
     final config = _activeConfig;
     if (config == null || !_bidirectionalRuntime.isPairLocked) {
+      return;
+    }
+    if (!_shouldStartTranslatedAudioPlayback(config)) {
       return;
     }
 
@@ -932,7 +1026,10 @@ class LiveRealtimeTranslationCoordinator {
       _ => null,
     };
     if (itemId == null || itemId.isEmpty) {
-      return false;
+      final currentEntryId = _transcriptCommitter?.currentEntryId;
+      return currentEntryId != null &&
+          _fallbackAuthoritativeEntryIds.contains(currentEntryId) &&
+          !_sourceQueuedAfterFallbackAuthoritativeEntry;
     }
 
     final entryId = _transcriptCommitter?.entryIdForRealtimeItem(itemId);
@@ -1176,6 +1273,7 @@ class LiveRealtimeTranslationCoordinator {
     _sourceTranscriptTurns = 0;
     _outputTranscriptTurns = 0;
     _sourcelessFinalTurns = 0;
+    _sourceTranscriptEntryIds.clear();
     _sourcelessFinalEntryIds.clear();
   }
 
@@ -1317,9 +1415,14 @@ class LiveRealtimeTranslationCoordinator {
         return;
       }
 
-      await _startPlaybackQueue(config);
+      final playbackQueueOpen = _shouldStartTranslatedAudioPlayback(config);
+      if (playbackQueueOpen) {
+        await _startPlaybackQueue(config);
+      }
       if (_isDisposed || generation != _reconnectGeneration) {
-        await playbackGateway.stop(clearQueue: true);
+        if (playbackQueueOpen) {
+          await playbackGateway.stop(clearQueue: true);
+        }
         await realtimeSession.closeImmediately();
         return;
       }
@@ -1331,7 +1434,9 @@ class LiveRealtimeTranslationCoordinator {
       );
       realtimeSession = null;
       await _startMicrophoneCapture(config);
-      sessionController.markRealtimeRecovered();
+      sessionController.markRealtimeRecovered(
+        playbackQueueOpen: playbackQueueOpen,
+      );
       diagnostics.info(
         'live_realtime.reconnect_succeeded',
         fields: {
