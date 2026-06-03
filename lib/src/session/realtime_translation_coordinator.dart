@@ -114,6 +114,7 @@ class LiveRealtimeTranslationCoordinator {
   final Set<String> _fallbackInFlightEntryIds = <String>{};
   final Set<String> _fallbackCompletedEntryIds = <String>{};
   final Set<String> _fallbackAuthoritativeEntryIds = <String>{};
+  bool _sourceQueuedAfterFallbackAuthoritativeEntry = false;
   // Presence-only counters that prove what the dedicated translation wire
   // actually delivered for the active session, without retaining any
   // transcript content. They back the "translation arrived but original
@@ -499,6 +500,9 @@ class LiveRealtimeTranslationCoordinator {
         if (!_shouldHandleTranscript(event.kind)) {
           return;
         }
+        if (event.kind == OpenAiRealtimeTranscriptKind.source) {
+          _noteSourceQueuedAfterFallbackAuthoritativeEntry(event);
+        }
         if (_shouldSuppressRealtimeTranslationForFallback(event)) {
           return;
         }
@@ -515,6 +519,7 @@ class LiveRealtimeTranslationCoordinator {
           return;
         }
         if (event.kind == OpenAiRealtimeTranscriptKind.source) {
+          _noteSourceQueuedAfterFallbackAuthoritativeEntry(event);
           _commitSourceTranscriptAndMaybeFallback(event);
           return;
         }
@@ -937,6 +942,26 @@ class LiveRealtimeTranslationCoordinator {
   bool _shouldStartNewRealtimeTranslationAfterFallback(
     OpenAiRealtimeEvent event,
   ) {
+    final itemId = switch (event) {
+      OpenAiRealtimeTranscriptDelta(
+        kind: OpenAiRealtimeTranscriptKind.translation,
+        :final itemId,
+      ) =>
+        itemId,
+      OpenAiRealtimeTranscriptCompleted(
+        kind: OpenAiRealtimeTranscriptKind.translation,
+        :final itemId,
+      ) =>
+        itemId,
+      _ => null,
+    };
+    if (itemId != null && itemId.isNotEmpty) {
+      _sourceQueuedAfterFallbackAuthoritativeEntry = false;
+      final entryId = _transcriptCommitter?.entryIdForRealtimeItem(itemId);
+      return entryId != null &&
+          _fallbackAuthoritativeEntryIds.contains(entryId);
+    }
+
     final isTranslation = switch (event) {
       OpenAiRealtimeTranscriptDelta(
         kind: OpenAiRealtimeTranscriptKind.translation,
@@ -952,9 +977,46 @@ class LiveRealtimeTranslationCoordinator {
       return false;
     }
 
+    if (_sourceQueuedAfterFallbackAuthoritativeEntry) {
+      _sourceQueuedAfterFallbackAuthoritativeEntry = false;
+      return false;
+    }
+
     final currentEntryId = _transcriptCommitter?.currentEntryId;
     return currentEntryId != null &&
         _fallbackAuthoritativeEntryIds.contains(currentEntryId);
+  }
+
+  void _noteSourceQueuedAfterFallbackAuthoritativeEntry(
+    OpenAiRealtimeEvent event,
+  ) {
+    final currentEntryId = _transcriptCommitter?.currentEntryId;
+    if (currentEntryId == null ||
+        !_fallbackAuthoritativeEntryIds.contains(currentEntryId)) {
+      return;
+    }
+
+    final itemId = switch (event) {
+      OpenAiRealtimeTranscriptDelta(
+        kind: OpenAiRealtimeTranscriptKind.source,
+        :final itemId,
+      ) =>
+        itemId,
+      OpenAiRealtimeTranscriptCompleted(
+        kind: OpenAiRealtimeTranscriptKind.source,
+        :final itemId,
+      ) =>
+        itemId,
+      _ => null,
+    };
+    if (itemId != null && itemId.isNotEmpty) {
+      final eventEntryId = _transcriptCommitter?.entryIdForRealtimeItem(itemId);
+      if (eventEntryId == currentEntryId) {
+        return;
+      }
+    }
+
+    _sourceQueuedAfterFallbackAuthoritativeEntry = true;
   }
 
   Future<void> _translateTextFallbackTurn(
@@ -1077,6 +1139,7 @@ class LiveRealtimeTranslationCoordinator {
     _fallbackInFlightEntryIds.clear();
     _fallbackCompletedEntryIds.clear();
     _fallbackAuthoritativeEntryIds.clear();
+    _sourceQueuedAfterFallbackAuthoritativeEntry = false;
     _resetTranscriptSignalCounters();
   }
 
