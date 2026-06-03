@@ -376,13 +376,22 @@ void main() {
 
     expect(find.text('Pause Listening'), findsOneWidget);
     expect(find.text('Resume Listening'), findsNothing);
-    expect(realtimeGateway.sessions, hasLength(4));
+    expect(realtimeGateway.sessions, hasLength(2));
     expect(
       realtimeGateway.configs
           .where((config) => config.sourceTranscriptionEnabled)
           .length,
       2,
     );
+    expect(
+      realtimeGateway.configs
+          .where((config) => !config.sourceTranscriptionEnabled)
+          .length,
+      0,
+    );
+    for (final config in realtimeGateway.configs) {
+      expect(config.readAloudOutputEnabled, isFalse);
+    }
     expect((await repository.loadSnapshot()).meetings.single.id, meetingId);
   });
 
