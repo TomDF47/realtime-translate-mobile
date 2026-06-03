@@ -204,6 +204,7 @@ Current GitHub Actions run on pull requests and pushes to `main`:
 
 - `Docs`: `bash scripts/check-docs.sh`.
 - `Flutter`: `flutter pub get`, `flutter analyze`, `flutter test`, and `bash scripts/check-supply-chain.sh`.
+- `Android Debug APK`: manual `workflow_dispatch` only; builds a debug APK with `scripts/build_debug_apk_artifact.sh`, runs `scripts/check_apk_metadata.sh`, and uploads the APK plus SHA-256 sidecar for GitHub prerelease attachment.
 
 Android emulator smoke is intentionally local/manual because the project uses Tom's `android-pixel9-headless` machine workflow.
 

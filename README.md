@@ -74,6 +74,7 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [.env.example](.env.example): placeholder-only environment contract.
 - [.github/workflows/docs.yml](.github/workflows/docs.yml): CI docs link and secret-pattern gate.
 - [.github/workflows/flutter.yml](.github/workflows/flutter.yml): CI Flutter analysis, tests, and supply-chain gate.
+- [.github/workflows/android-debug-apk.yml](.github/workflows/android-debug-apk.yml): manual GitHub Actions debug-APK builder for phone-test prereleases; uploads the APK plus SHA-256 sidecar after the repo APK metadata preflight.
 - [scripts/check-docs.sh](scripts/check-docs.sh): docs link and secret-pattern sanity check.
 - [scripts/check-supply-chain.sh](scripts/check-supply-chain.sh): local dependency advisory, secret-pattern, and Android permission gate.
 - [scripts/build_debug_apk_artifact.sh](scripts/build_debug_apk_artifact.sh): repeatable Android APK builder/copier for debug, debug E2E, and local release artifacts; writes a clearly named APK plus SHA-256 sidecar under `/tmp` without reading OpenAI credentials and labels debug-signed release artifacts as not store-ready.
@@ -170,7 +171,7 @@ For local Android release-signing experiments, copy [android/key.properties.exam
 
 ## GitHub Issue Map
 
-The current published debug pre-release remains `debug-20260531-35642aa` until a Flutter/Android toolchain builds and publishes a fresh APK for the latest app/runtime code.
+Published phone-test builds should use debug prerelease tags named `debug-YYYYMMDD-<short-sha>`. The debug APK asset is the supported ad-hoc phone-test artifact; debug-signed release-mode APKs remain signing rehearsal artifacts only.
 
 Closed planning and implementation intake:
 

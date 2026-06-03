@@ -1,0 +1,82 @@
+name: Android Debug APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug_live_events:
+        description: Build with LIVE_TRANSLATE_DEBUG_E2E enabled
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-debug-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.44.0"
+          cache: true
+
+      - name: Write local Android properties
+        run: |
+          android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$android_sdk" ]; then
+            echo "ANDROID_HOME or ANDROID_SDK_ROOT must be set" >&2
+            exit 1
+          fi
+          {
+            echo "sdk.dir=$android_sdk"
+            echo "flutter.sdk=$(dirname "$(dirname "$(command -v flutter)")")"
+          } > android/local.properties
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build debug APK artifact
+        id: build
+        run: |
+          mkdir -p "$RUNNER_TEMP/apk"
+          args=()
+          if [[ "${{ inputs.debug_live_events }}" == "true" ]]; then
+            args+=(--debug-live-events)
+          fi
+          scripts/build_debug_apk_artifact.sh \
+            --output-dir "$RUNNER_TEMP/apk" \
+            "${args[@]}"
+          apk_path="$(find "$RUNNER_TEMP/apk" -maxdepth 1 -name '*.apk' | sort | tail -1)"
+          if [[ -z "$apk_path" ]]; then
+            echo "No APK artifact was produced" >&2
+            exit 1
+          fi
+          sha_path="$apk_path.sha256"
+          scripts/check_apk_metadata.sh --apk "$apk_path"
+          {
+            echo "apk_path=$apk_path"
+            echo "sha_path=$sha_path"
+            echo "apk_name=$(basename "$apk_path")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.apk_name }}
+          path: |
+            ${{ steps.build.outputs.apk_path }}
+            ${{ steps.build.outputs.sha_path }}
+          if-no-files-found: error
+          retention-days: 14
