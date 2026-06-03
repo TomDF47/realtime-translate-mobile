@@ -610,7 +610,7 @@ void main() {
       expect(entries.last.languageCode, 'IT');
       expect(entries.last.originalText, 'Possiamo iniziare.');
       expect(entries.last.translatedText, 'We can begin.');
-      expect(find.text('English <-> Italian'), findsOneWidget);
+      expect(find.text('Italian <-> English'), findsOneWidget);
       expect(find.text('Possiamo confermare il piano.'), findsOneWidget);
       expect(find.text('We can begin.'), findsOneWidget);
 
@@ -741,8 +741,8 @@ void main() {
       // /v1/realtime/translations wire shape. The first card must keep the
       // English original with its Italian translation; the Italian turn must be
       // a new card with the Italian original and the English translation; the
-      // header must lock English <-> Italian; and no completed card may remain
-      // on "Original speech pending".
+      // header must stay on the selected manual pair; and no completed card
+      // may remain on "Original speech pending".
       final repository = _testRepository();
       final realtimeGateway = _FakeRealtimeTranslationGateway();
       final textGateway = _FakeTextInterpreterGateway();
@@ -838,9 +838,9 @@ void main() {
       expect(entries.last.originalText, 'Buongiorno, come stai?');
       expect(entries.last.translatedText, 'Good morning, how are you?');
 
-      // Header locks the pair; it must not stay on "Heard English" or collapse
-      // to the English target only.
-      expect(find.text('English <-> Italian'), findsOneWidget);
+      // Header stays on the selected manual pair; it must not fall back to a
+      // heard-language prompt or collapse to the English target only.
+      expect(find.text('Italian <-> English'), findsOneWidget);
       expect(
         find.text('Heard English. Waiting for the other language...'),
         findsNothing,

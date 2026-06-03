@@ -956,10 +956,17 @@ class LiveRealtimeTranslationCoordinator {
       _ => null,
     };
     if (itemId != null && itemId.isNotEmpty) {
-      _sourceQueuedAfterFallbackAuthoritativeEntry = false;
+      if (_sourceQueuedAfterFallbackAuthoritativeEntry) {
+        _sourceQueuedAfterFallbackAuthoritativeEntry = false;
+        return false;
+      }
       final entryId = _transcriptCommitter?.entryIdForRealtimeItem(itemId);
-      return entryId != null &&
-          _fallbackAuthoritativeEntryIds.contains(entryId);
+      if (entryId != null && _fallbackAuthoritativeEntryIds.contains(entryId)) {
+        return true;
+      }
+      final currentEntryId = _transcriptCommitter?.currentEntryId;
+      return currentEntryId != null &&
+          _fallbackAuthoritativeEntryIds.contains(currentEntryId);
     }
 
     final isTranslation = switch (event) {
