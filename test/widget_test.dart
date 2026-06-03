@@ -619,7 +619,7 @@ void main() {
       expect(request.sourceLanguageCode, 'en');
       expect(request.targetLanguageCode, 'it');
       expect(request.routeType, TranslationRouteType.directOpenAiFallback);
-      expect(request.knownLanguageCodes, ['en', 'it']);
+      expect(request.knownLanguageCodes, ['it', 'en']);
       expect(
         textGateway.credentials.single,
         'placeholder-local-openai-credential',
