@@ -67,13 +67,14 @@ scripts/android_emulator_e2e.sh --with-live-credential
 scripts/android_emulator_e2e.sh --require-device-audio --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
+scripts/build_debug_apk_artifact.sh --wire-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 scripts/build_debug_apk_artifact.sh --release
 scripts/final_qa_gate.sh --emulator-smoke
 scripts/final_qa_gate.sh --require-store-signing
 ```
 
-`scripts/build_debug_apk_artifact.sh` copies the requested APK to `/tmp` with a commit-and-timestamp filename and writes a `.sha256` sidecar. Debug is the default; `--debug-live-events` builds the debug-only E2E proof variant; `--release` builds a release APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback. Debug-signed release artifacts are local handoff artifacts only, not store-ready builds. The script does not read the local OpenAI secret file and is suitable for local APK handoff when live OpenAI quota is blocked.
+`scripts/build_debug_apk_artifact.sh` copies the requested APK to `/tmp` with a commit-and-timestamp filename and writes a `.sha256` sidecar. Debug is the default; `--wire-events` builds with the privacy-safe `LIVE_TX_EVENT` realtime wire recorder for physical-device logcat capture; `--debug-live-events` builds the debug-only E2E proof variant; `--release` builds a release APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback. Debug-signed release artifacts are local handoff artifacts only, not store-ready builds. The script does not read the local OpenAI secret file and is suitable for local APK handoff when live OpenAI quota is blocked.
 
 `scripts/final_qa_gate.sh` is the non-live final QA wrapper. It runs the standard Flutter/docs/supply-chain gates, shell syntax checks, `git diff --check`, and fresh debug plus release APK artifact builds. Add `--emulator-smoke` when an installed-app no-credential smoke is relevant; that mode installs the fresh release artifact, verifies the setup-required gate, writes proof under `/tmp/realtime-translate-mobile-e2e-final-qa`, clears app data, and still does not read the local OpenAI secret file. Add `--release-smoke` to run the repeatable release smoke against the fresh release artifact.
 

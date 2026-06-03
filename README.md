@@ -77,7 +77,7 @@ Keep future work aligned to the GitHub issue acceptance criteria and preserve th
 - [.github/workflows/android-debug-apk.yml](.github/workflows/android-debug-apk.yml): manual GitHub Actions debug-APK builder for phone-test prereleases; uploads the APK plus SHA-256 sidecar after the repo APK metadata preflight.
 - [scripts/check-docs.sh](scripts/check-docs.sh): docs link and secret-pattern sanity check.
 - [scripts/check-supply-chain.sh](scripts/check-supply-chain.sh): local dependency advisory, secret-pattern, and Android permission gate.
-- [scripts/build_debug_apk_artifact.sh](scripts/build_debug_apk_artifact.sh): repeatable Android APK builder/copier for debug, debug E2E, and local release artifacts; writes a clearly named APK plus SHA-256 sidecar under `/tmp` without reading OpenAI credentials and labels debug-signed release artifacts as not store-ready.
+- [scripts/build_debug_apk_artifact.sh](scripts/build_debug_apk_artifact.sh): repeatable Android APK builder/copier for debug, wire-event recorder, debug E2E, and local release artifacts; writes a clearly named APK plus SHA-256 sidecar under `/tmp` without reading OpenAI credentials and labels debug-signed release artifacts as not store-ready.
 - [scripts/check_android_release_signing.sh](scripts/check_android_release_signing.sh): store-ready Android release-signing preflight; validates local uncommitted signing config and, when supplied an APK, verifies it is not Android debug-signed without printing signing material.
 - [scripts/android_pixel9_host_audio.sh](scripts/android_pixel9_host_audio.sh): repo-local Pixel 9 emulator launcher for #6/#14 audio validation attempts; starts `Pixel_9_API_36_Play` with `-allow-host-audio` and without `-no-audio`.
 - [scripts/final_qa_gate.sh](scripts/final_qa_gate.sh): one-command non-live final QA gate for Flutter analysis/tests, docs/security checks, shell syntax checks, diff whitespace checks, and fresh debug/release APK handoff artifacts; optional `--emulator-smoke` verifies the no-credential installed-app gate without reading the local OpenAI secret.
@@ -159,6 +159,7 @@ flutter run -d <android-emulator-id>
 scripts/android_emulator_e2e.sh --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
+scripts/build_debug_apk_artifact.sh --wire-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 scripts/build_debug_apk_artifact.sh --release
 scripts/final_qa_gate.sh --emulator-smoke

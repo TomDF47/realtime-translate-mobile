@@ -23,6 +23,7 @@ Synthetic, hand-authored realtime events are NOT proof for the live `/v1/realtim
 ```bash
 # Build a debug APK with the content-free event recorder enabled.
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_EVENTS=true
+scripts/build_debug_apk_artifact.sh --wire-events
 # Install the DEBUG apk on a physical phone (not the debug-signed release apk),
 # start an interpreter session, speak English and Italian, then capture:
 adb logcat | grep LIVE_TX_EVENT
@@ -141,6 +142,7 @@ scripts/android_emulator_e2e.sh --with-live-credential
 scripts/android_emulator_e2e.sh --require-device-audio --with-live-credential
 flutter build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
 scripts/build_debug_apk_artifact.sh --debug-live-events
+scripts/build_debug_apk_artifact.sh --wire-events
 scripts/android_emulator_e2e.sh --with-live-credential --debug-live-events
 scripts/build_debug_apk_artifact.sh --release
 scripts/final_qa_gate.sh --emulator-smoke
@@ -149,7 +151,7 @@ scripts/final_qa_gate.sh --require-store-signing
 
 For physical microphone or audible speaker validation, run `scripts/android_emulator_e2e.sh --require-device-audio --audio-preflight-only` first. Physical devices pass the target preflight. Emulators pass only when the selected process includes `-allow-host-audio` and does not include `-no-audio`; if no device is connected, the E2E script starts the repo-local [../scripts/android_pixel9_host_audio.sh](../scripts/android_pixel9_host_audio.sh) launcher for `Pixel_9_API_36_Play`. The check writes `audio-preflight.txt` under the artifact directory and does not install the APK, read the local OpenAI secret, launch the app, or clear app data. Add `--require-device-audio` to any later installed-app live-audio run so a no-audio emulator cannot silently produce a misleading pass. Passing preflight is target readiness only; it is not proof of physical microphone translation or audible speaker output.
 
-For APK handoff without live OpenAI quota, `scripts/build_debug_apk_artifact.sh` produces `/tmp/realtime-translate-mobile-<mode>-<commit>-<timestamp>.apk` plus a `.sha256` sidecar. Debug is the default, `--debug-live-events` produces the matching debug-only E2E proof build artifact, and `--release` produces a release-mode APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback; debug-signed release artifacts are not store-ready. The script does not read the local OpenAI secret file.
+For APK handoff without live OpenAI quota, `scripts/build_debug_apk_artifact.sh` produces `/tmp/realtime-translate-mobile-<mode>-<commit>-<timestamp>.apk` plus a `.sha256` sidecar. Debug is the default, `--wire-events` enables the privacy-safe `LIVE_TX_EVENT` realtime wire recorder for physical-device logcat capture, `--debug-live-events` produces the matching debug-only E2E proof build artifact, and `--release` produces a release-mode APK. Release artifacts are named `release-local-signed` when `android/key.properties` exists and `release-debug-signed` when the project uses the debug-signing fallback; debug-signed release artifacts are not store-ready. The script does not read the local OpenAI secret file.
 
 For a one-command non-live pre-handoff gate, `scripts/final_qa_gate.sh` runs Flutter analysis/tests, docs and supply-chain checks, shell syntax checks, `git diff --check`, and fresh debug plus release APK artifact builds. `scripts/final_qa_gate.sh --emulator-smoke` also installs the fresh release artifact and verifies the missing-credential setup gate without reading the live OpenAI secret or making a live OpenAI request. `scripts/final_qa_gate.sh --release-smoke` runs the repeatable release smoke against the fresh release artifact. `scripts/final_qa_gate.sh --require-store-signing` requires local uncommitted release signing config before release build and verifies the fresh release APK is not Android debug-signed afterward.
 

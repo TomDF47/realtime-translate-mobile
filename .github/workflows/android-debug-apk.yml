@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      wire_events:
+        description: Build with LIVE_TRANSLATE_DEBUG_EVENTS enabled for LIVE_TX_EVENT logcat capture
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -54,6 +59,9 @@ jobs:
           args=()
           if [[ "${{ inputs.debug_live_events }}" == "true" ]]; then
             args+=(--debug-live-events)
+          fi
+          if [[ "${{ inputs.wire_events }}" == "true" ]]; then
+            args+=(--wire-events)
           fi
           scripts/build_debug_apk_artifact.sh \
             --output-dir "$RUNNER_TEMP/apk" \

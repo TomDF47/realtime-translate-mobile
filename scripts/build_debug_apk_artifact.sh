@@ -7,6 +7,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}"
 BUILD_MODE="debug"
 REQUESTED_MODE="debug"
 ENABLE_DEBUG_LIVE_EVENTS=0
+ENABLE_WIRE_EVENTS=0
 SKIP_BUILD=0
 SIGNING_NOTE="debug build"
 
@@ -25,6 +26,9 @@ Options:
                        fallback, and the artifact filename will say so.
   --debug-live-events  Build with LIVE_TRANSLATE_DEBUG_E2E=true for the
                        installed-app generated-event E2E proof. Debug only.
+  --wire-events        Build with LIVE_TRANSLATE_DEBUG_EVENTS=true so the
+                       privacy-safe realtime wire recorder emits LIVE_TX_EVENT
+                       lines for physical-device logcat capture. Debug only.
   --output-dir DIR     Directory for copied APK artifacts. Defaults to /tmp.
   --skip-build         Copy the existing Flutter debug APK without rebuilding.
   --help               Show this help.
@@ -39,6 +43,10 @@ while (($#)); do
       ;;
     --debug-live-events)
       ENABLE_DEBUG_LIVE_EVENTS=1
+      shift
+      ;;
+    --wire-events)
+      ENABLE_WIRE_EVENTS=1
       shift
       ;;
     --output-dir)
@@ -69,8 +77,9 @@ export PATH="/home/tom/.local/share/flutter/bin:$PATH"
 
 cd "$PROJECT_ROOT"
 
-if [[ "$REQUESTED_MODE" == "release" ]] && ((ENABLE_DEBUG_LIVE_EVENTS)); then
-  echo "--debug-live-events is only valid for debug APK artifacts." >&2
+if [[ "$REQUESTED_MODE" == "release" ]] &&
+  ((ENABLE_DEBUG_LIVE_EVENTS || ENABLE_WIRE_EVENTS)); then
+  echo "--debug-live-events and --wire-events are only valid for debug APK artifacts." >&2
   exit 2
 fi
 
@@ -84,10 +93,22 @@ if [[ "$REQUESTED_MODE" == "release" ]]; then
     BUILD_MODE="release-debug-signed"
     SIGNING_NOTE="release build using debug signing fallback; not store-ready"
   fi
+elif ((ENABLE_DEBUG_LIVE_EVENTS && ENABLE_WIRE_EVENTS)); then
+  BUILD_ARGS=(
+    build apk --debug
+    --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true
+    --dart-define=LIVE_TRANSLATE_DEBUG_EVENTS=true
+  )
+  SOURCE_APK="$PROJECT_ROOT/build/app/outputs/flutter-apk/app-debug.apk"
+  BUILD_MODE="debug-live-events-wire-events"
 elif ((ENABLE_DEBUG_LIVE_EVENTS)); then
   BUILD_ARGS=(build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_E2E=true)
   SOURCE_APK="$PROJECT_ROOT/build/app/outputs/flutter-apk/app-debug.apk"
   BUILD_MODE="debug-live-events"
+elif ((ENABLE_WIRE_EVENTS)); then
+  BUILD_ARGS=(build apk --debug --dart-define=LIVE_TRANSLATE_DEBUG_EVENTS=true)
+  SOURCE_APK="$PROJECT_ROOT/build/app/outputs/flutter-apk/app-debug.apk"
+  BUILD_MODE="debug-wire-events"
 else
   BUILD_ARGS=(build apk --debug)
   SOURCE_APK="$PROJECT_ROOT/build/app/outputs/flutter-apk/app-debug.apk"
