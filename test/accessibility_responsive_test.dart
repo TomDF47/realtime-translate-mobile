@@ -71,11 +71,11 @@ void main() {
       expect(find.byTooltip('Open AI chat'), findsNothing);
       expect(
         find.bySemanticsLabel(RegExp('From language selector')),
-        findsNothing,
+        findsOneWidget,
       );
       expect(
         find.bySemanticsLabel(RegExp('To language selector')),
-        findsNothing,
+        findsOneWidget,
       );
       expect(find.bySemanticsLabel(RegExp('Translate Text on')), findsNothing);
       expect(find.bySemanticsLabel(RegExp('Read Aloud on')), findsNothing);
@@ -126,7 +126,15 @@ void main() {
     await tester.pumpAndSettle();
     _expectNoFlutterOverflow(tester);
 
-    expect(find.text('Listening for languages...'), findsOneWidget);
+    expect(find.text('Italian <-> English'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp('From language selector')),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel(RegExp('To language selector')),
+      findsOneWidget,
+    );
     expect(find.text('Waiting for speech'), findsOneWidget);
 
     expect(find.byTooltip('Open AI chat'), findsNothing);

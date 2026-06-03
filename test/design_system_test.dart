@@ -69,9 +69,10 @@ void main() {
       ),
     );
 
-    expect(find.text('Listening for languages...'), findsOneWidget);
+    expect(find.text('Italian <-> English'), findsOneWidget);
     expect(find.text('Listening'), findsOneWidget);
-    expect(find.text('Auto-detect'), findsOneWidget);
+    expect(find.text('Auto-detect'), findsNothing);
+    expect(find.text('Italian'), findsOneWidget);
     expect(find.text('Spanish'), findsNothing);
     expect(find.text('Translate Text'), findsOneWidget);
     expect(find.text('Live translation is ready.'), findsOneWidget);

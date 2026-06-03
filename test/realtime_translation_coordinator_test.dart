@@ -2829,6 +2829,7 @@ void main() {
   group('LiveRealtimeTranscriptCommitter language resolution', () {
     Future<LiveRealtimeTranscriptCommitter> committerFor(
       LocalMeetingRepository repository, {
+      String sourceLanguageCode = 'auto',
       String targetLanguageCode = 'en',
     }) async {
       final now = DateTime.utc(2026, 6, 1, 2);
@@ -2848,7 +2849,7 @@ void main() {
         LiveRealtimeTranscriptCommitTarget(
           repository: repository,
           meetingId: 'meeting-1',
-          sourceLanguageCode: 'auto',
+          sourceLanguageCode: sourceLanguageCode,
           targetLanguageCode: targetLanguageCode,
           now: () => now,
         ),
@@ -2885,6 +2886,34 @@ void main() {
       expect(entry.languageCode, 'auto');
       expect(entry.languageCode, isNot('EN'));
     });
+
+    test(
+      'manual source language is the fallback for ambiguous source text',
+      () async {
+        final repository = LocalMeetingRepository(
+          store: MemoryEncryptedLocalStore(),
+        );
+        final committer = await committerFor(
+          repository,
+          sourceLanguageCode: 'it',
+          targetLanguageCode: 'en',
+        );
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'OK 42.',
+          ),
+        );
+
+        final entry = (await repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries
+            .single;
+        expect(entry.languageCode, 'IT');
+      },
+    );
 
     test(
       'single distinctive Italian marker resolves to IT for short phrases',

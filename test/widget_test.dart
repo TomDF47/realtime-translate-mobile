@@ -196,7 +196,10 @@ void main() {
     expect(find.text('Source languages'), findsOneWidget);
     expect(find.text('Auto-detect'), findsNothing);
 
-    await tester.tap(find.text('Spanish'));
+    final spanishOption = find.text('Spanish (ES)');
+    await tester.ensureVisible(spanishOption);
+    await tester.pumpAndSettle();
+    await tester.tap(spanishOption);
     await tester.pumpAndSettle();
 
     expect(find.text('Spanish <-> English'), findsOneWidget);
@@ -241,12 +244,18 @@ void main() {
 
       await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('English (US)'));
+      final englishSourceOption = find.text('English (US)');
+      await tester.ensureVisible(englishSourceOption);
+      await tester.pumpAndSettle();
+      await tester.tap(englishSourceOption);
       await tester.pumpAndSettle();
 
       await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Arabic'));
+      final arabicTargetOption = find.text('Arabic');
+      await tester.ensureVisible(arabicTargetOption);
+      await tester.pumpAndSettle();
+      await tester.tap(arabicTargetOption);
       await tester.pumpAndSettle();
 
       expect(find.text('English <-> Arabic'), findsOneWidget);
@@ -367,7 +376,13 @@ void main() {
 
     expect(find.text('Pause Listening'), findsOneWidget);
     expect(find.text('Resume Listening'), findsNothing);
-    expect(realtimeGateway.sessions, hasLength(2));
+    expect(realtimeGateway.sessions, hasLength(4));
+    expect(
+      realtimeGateway.configs
+          .where((config) => config.sourceTranscriptionEnabled)
+          .length,
+      2,
+    );
     expect((await repository.loadSnapshot()).meetings.single.id, meetingId);
   });
 

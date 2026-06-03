@@ -234,9 +234,10 @@ class LiveRealtimeTranscriptCommitter {
     final entry = StoredTranscriptEntry(
       id: _entryId,
       meetingId: target.meetingId,
-      // Never default an unknown source language to the target language; an
-      // unresolved source stays neutral ('auto') so the live header and block
-      // language chips do not collapse every turn to the target language.
+      // Never default an unknown source language to the target language. If the
+      // route has an explicit manual source, use that as the last resort;
+      // auto-detect sessions stay neutral ('auto') until metadata or local
+      // detection resolves the source.
       languageCode: (resolvedSourceLanguage == null ||
               resolvedSourceLanguage.isEmpty)
           ? 'auto'
@@ -387,7 +388,17 @@ class LiveRealtimeTranscriptCommitter {
   /// target language.
   String? _resolveSourceLanguageCode() {
     return _detectedSourceLanguageCode ??
-        _detectLanguageCode(_sourceBuffer.toString());
+        _detectLanguageCode(_sourceBuffer.toString()) ??
+        _manualSourceLanguageCode();
+  }
+
+  String? _manualSourceLanguageCode() {
+    final normalized = target.sourceLanguageCode.trim().toLowerCase();
+    if (normalized.isEmpty || normalized == 'auto') {
+      return null;
+    }
+
+    return normalized;
   }
 
   bool _shouldRollReadableBlock() {
