@@ -577,10 +577,14 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
     final sourceLanguageCode = _selectedSourceLanguage.code;
     final targetLanguageCode = _selectedTargetLanguage.code;
+    final realtimeTargetLanguageCode = _realtimeOutputLanguageCodeForRoute(
+      sourceLanguageCode: sourceLanguageCode,
+      targetLanguageCode: targetLanguageCode,
+    );
     final result = await _realtimeCoordinator.start(
       config: _realtimeConfigForRoute(
         sourceLanguageCode: sourceLanguageCode,
-        targetLanguageCode: targetLanguageCode,
+        targetLanguageCode: realtimeTargetLanguageCode,
       ),
       transcriptCommitTarget: meetingId == null
           ? null
@@ -723,6 +727,26 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
   }
 
+  String _realtimeOutputLanguageCodeForRoute({
+    required String sourceLanguageCode,
+    required String targetLanguageCode,
+  }) {
+    try {
+      final target = LanguageSupport.languageByCode(targetLanguageCode);
+      if (target.supportsRealtimeTarget) {
+        return target.code;
+      }
+      final source = LanguageSupport.languageByCode(sourceLanguageCode);
+      if (source.supportsRealtimeTarget) {
+        return source.code;
+      }
+    } on ArgumentError {
+      // Let the normal realtime recovery path surface stale language metadata.
+    }
+
+    return targetLanguageCode;
+  }
+
   OpenAiRealtimeTranslationProfile _profileForLiveInterpretation(
     String targetLanguageCode,
   ) {
@@ -784,8 +808,26 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       bottomControls: _bottomControlsForSession(base),
       statusLabel: _liveStatusLabel(base.mode),
       statusAccent: _liveStatusAccent(base.mode),
+      languageRouteNotice: _languageRouteNotice(),
       showLanguageControls: true,
     );
+  }
+
+  String? _languageRouteNotice() {
+    final target = _selectedTargetLanguage;
+    if (target.supportsRealtimeTarget) {
+      return null;
+    }
+
+    final realtimeOutputLanguage = _realtimeOutputLanguageCodeForRoute(
+      sourceLanguageCode: _selectedSourceLanguage.code,
+      targetLanguageCode: target.code,
+    );
+    final realtimeOutput = LanguageSupport.languageByCode(
+      realtimeOutputLanguage,
+    );
+    return '${target.name} uses direct OpenAI text fallback. Live audio stays '
+        'on ${realtimeOutput.name} when that direction is available.';
   }
 
   String _interpreterRouteLabel() {
@@ -1374,6 +1416,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }) async {
     final sourceLanguageCode = _selectedSourceLanguage.code;
     final targetLanguageCode = _selectedTargetLanguage.code;
+    final realtimeTargetLanguageCode = _realtimeOutputLanguageCodeForRoute(
+      sourceLanguageCode: sourceLanguageCode,
+      targetLanguageCode: targetLanguageCode,
+    );
     _realtimeCoordinator.setRuntimeOutputOptions(
       translationOutputEnabled: _translateTextEnabled,
       readAloudOutputEnabled: _readAloudEnabled,
@@ -1381,8 +1427,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     await _realtimeCoordinator.start(
       config: OpenAiRealtimeTranslationConfig(
         sourceLanguageCode: sourceLanguageCode,
-        targetLanguageCode: targetLanguageCode,
-        profile: _profileForLiveInterpretation(targetLanguageCode),
+        targetLanguageCode: realtimeTargetLanguageCode,
+        profile: _profileForLiveInterpretation(realtimeTargetLanguageCode),
         translationOutputEnabled: _translateTextEnabled,
         readAloudOutputEnabled: _readAloudEnabled,
       ),
@@ -2329,6 +2375,10 @@ class LiveSessionScreen extends StatelessWidget {
               onOpenSourceLanguageOptions: onOpenSourceLanguageOptions,
               onOpenTargetLanguageOptions: onOpenTargetLanguageOptions,
             ),
+            if (session.languageRouteNotice != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              _LanguageRouteNotice(label: session.languageRouteNotice!),
+            ],
             const SizedBox(height: AppSpacing.xs),
           ],
           if (session.features.isNotEmpty)
@@ -2694,6 +2744,53 @@ class _LanguageRouteRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _LanguageRouteNotice extends StatelessWidget {
+  const _LanguageRouteNotice({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Semantics(
+      container: true,
+      label: 'Language route notice',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.amber.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: AppColors.amber.withValues(alpha: 0.72)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.info_outline_rounded,
+              size: 18,
+              color: AppColors.amber,
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Expanded(
+              child: Text(
+                label,
+                style: AppTextStyles.compact(
+                  textTheme,
+                ).copyWith(color: AppColors.textPrimary),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -192,6 +192,7 @@ class LiveSessionViewData {
     this.showLanguageControls = true,
     this.statusLabel,
     this.statusAccent,
+    this.languageRouteNotice,
   });
 
   final String routeLabel;
@@ -207,6 +208,7 @@ class LiveSessionViewData {
   final bool showLanguageControls;
   final String? statusLabel;
   final LiveAccent? statusAccent;
+  final String? languageRouteNotice;
 
   LiveSessionViewData copyWith({
     String? routeLabel,
@@ -222,6 +224,7 @@ class LiveSessionViewData {
     bool? showLanguageControls,
     String? statusLabel,
     LiveAccent? statusAccent,
+    String? languageRouteNotice,
   }) {
     return LiveSessionViewData(
       routeLabel: routeLabel ?? this.routeLabel,
@@ -237,6 +240,7 @@ class LiveSessionViewData {
       showLanguageControls: showLanguageControls ?? this.showLanguageControls,
       statusLabel: statusLabel ?? this.statusLabel,
       statusAccent: statusAccent ?? this.statusAccent,
+      languageRouteNotice: languageRouteNotice ?? this.languageRouteNotice,
     );
   }
 }

@@ -211,6 +211,75 @@ void main() {
     );
   });
 
+  testWidgets(
+    'fallback-only target keeps realtime output on paired realtime language',
+    (tester) async {
+      final repository = _testRepository();
+      final realtimeGateway = _FakeRealtimeTranslationGateway();
+      final textGateway = _FakeTextInterpreterGateway()
+        ..results.add(
+          const TextInterpreterTurnResult(
+            detectedLanguageCode: 'en',
+            detectedLanguageLabel: 'English',
+            translatedText: 'Arabic fallback translation.',
+          ),
+        );
+      await _seedCredential(repository);
+      await tester.pumpWidget(
+        LiveTranslateApp(
+          permissionGateway: _FakePermissionGateway.granted(),
+          meetingRepository: repository,
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+          realtimeTranslationGateway: realtimeGateway,
+          textInterpreterGateway: textGateway,
+        ),
+      );
+
+      await tester.tap(find.text('Start interpreter'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('English (US)'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Arabic'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('English <-> Arabic'), findsOneWidget);
+      expect(
+        find.textContaining('Arabic uses direct OpenAI text fallback'),
+        findsOneWidget,
+      );
+      final primaryConfig = realtimeGateway.primaryConfig;
+      expect(primaryConfig.sourceLanguageCode, 'en');
+      expect(primaryConfig.targetLanguageCode, 'en');
+
+      realtimeGateway.primarySession.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          languageCode: 'en',
+          transcript: 'We can confirm the plan.',
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(textGateway.requests, hasLength(1));
+      expect(textGateway.requests.single.sourceLanguageCode, 'en');
+      expect(textGateway.requests.single.targetLanguageCode, 'ar');
+      expect(
+        textGateway.requests.single.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
+      expect(find.text('Arabic fallback translation.'), findsOneWidget);
+    },
+  );
+
   testWidgets('shows live connecting surface while realtime starts', (
     tester,
   ) async {

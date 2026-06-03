@@ -13,10 +13,10 @@ Scope: repo-wide code, architecture, privacy, testing, and UI/UX pass after the 
 
 | ID | Priority | Status | Finding | Remediation |
 | --- | --- | --- | --- | --- |
-| DR-01 | High | Planned | `docs/architecture.md` still contains stale auto-detect and "Italian is fallback-only" language that conflicts with the accepted manual pair and 13-language realtime target table. | Rewrite the stale architecture sections to match manual pair selection, the corrected realtime output list, and direct text fallback semantics. |
-| DR-02 | High | Planned | Fallback-only targets such as Arabic are selectable and labeled in the sheet, but the active realtime config still tries to output that unsupported target through `/v1/realtime/translations`. | Route the primary realtime session to the realtime-capable language in the pair when the selected target is fallback-only, while keeping transcript/text fallback routing keyed to the user-selected pair. |
-| DR-03 | Medium | Planned | After choosing a fallback-only target, the active live surface no longer visibly reminds the user which direction is text fallback. | Add a compact live route notice for fallback-only targets. |
-| DR-04 | Medium | Planned | Supplied mockup filenames do not match the visible screens, which makes UI review easy to misread. | Rename the four JPGs to match their contents and update docs links. |
+| DR-01 | High | Fixed | `docs/architecture.md` still contains stale auto-detect and "Italian is fallback-only" language that conflicts with the accepted manual pair and 13-language realtime target table. | Rewrote the stale architecture sections to match manual pair selection, the corrected realtime output list, and direct text fallback semantics. |
+| DR-02 | High | Fixed | Fallback-only targets such as Arabic are selectable and labeled in the sheet, but the active realtime config still tries to output that unsupported target through `/v1/realtime/translations`. | Routed the primary realtime session to the realtime-capable language in the pair when the selected target is fallback-only, while keeping transcript/text fallback routing keyed to the user-selected pair. |
+| DR-03 | Medium | Fixed | After choosing a fallback-only target, the active live surface no longer visibly reminds the user which direction is text fallback. | Added a compact live route notice for fallback-only targets. |
+| DR-04 | Medium | Fixed | Supplied mockup filenames do not match the visible screens, which makes UI review easy to misread. | Renamed the JPGs to match their contents and updated docs links. |
 
 ## Keep Open For Follow-Up
 

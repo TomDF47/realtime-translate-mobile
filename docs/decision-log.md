@@ -25,6 +25,29 @@ Implications:
 - No dependency, Android permission, backend route, app-owned network path, credential handling, microphone recording, or logging surface is added. The phone-only direct-OpenAI privacy boundary is unchanged.
 - Product docs and regression checks now require visible source/target selectors in the active live interpreter and absence of only the secondary controls listed above.
 
+## 2026-06-03 - Fallback-Only Targets Use The Realtime-Capable Paired Language For Audio
+
+Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
+
+Context:
+
+- The target picker intentionally shows all app target languages, including broader phone-only fallback targets.
+- Arabic is source-supported and direct-fallback target-supported, but it is not one of the 13 documented Realtime Translation output languages.
+- Before this fix, selecting a pair such as English <-> Arabic still configured the primary `/v1/realtime/translations` session with `audio.output.language = ar`, even though the UI labeled Arabic as a direct OpenAI fallback target.
+
+Decision:
+
+- Keep fallback-only targets selectable, but do not send unsupported realtime output languages to the dedicated realtime translation session.
+- If the selected target supports realtime output, the primary realtime session outputs that selected target.
+- If the selected target is fallback-only, the primary realtime session outputs the realtime-capable language on the other side of the pair, and the fallback-only direction uses the existing phone-only direct OpenAI text interpreter with `store: false`.
+- Show a compact live route notice after the language selectors when the selected target is fallback-only.
+
+Implications:
+
+- English <-> Arabic starts realtime output in English, so Arabic speech can translate to English through realtime while English speech uses direct OpenAI text fallback to Arabic.
+- This adds no dependency, Android permission, backend route, app-owned network path, credential handling, microphone recording, or logging surface.
+- The installed-app physical microphone/audio proof for fallback-only target pairs remains under #6.
+
 ## 2026-06-02 - Split Source Cards On Supported-Language Changes Inside Continuous Samsung Streams
 
 Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)

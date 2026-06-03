@@ -40,9 +40,9 @@ Build an Android-first, iOS-compatible Flutter app for a two-party live interpre
 
 Supplied mockups:
 
-- [assets/mockups/01-welcome-sign-in.jpg](../assets/mockups/01-welcome-sign-in.jpg)
-- [assets/mockups/02-live-listening-teal.jpg](../assets/mockups/02-live-listening-teal.jpg)
-- [assets/mockups/03-transcript-assistant.jpg](../assets/mockups/03-transcript-assistant.jpg)
+- [assets/mockups/01-live-listening-teal.jpg](../assets/mockups/01-live-listening-teal.jpg)
+- [assets/mockups/02-transcript-assistant.jpg](../assets/mockups/02-transcript-assistant.jpg)
+- [assets/mockups/03-welcome-local-setup.jpg](../assets/mockups/03-welcome-local-setup.jpg)
 - [assets/mockups/04-speaking-paused-amber.jpg](../assets/mockups/04-speaking-paused-amber.jpg)
 
 ## MVP User Flow
@@ -165,6 +165,8 @@ Implementation requirements:
 Current implementation note: language support was verified again on 2026-05-26 against the official OpenAI Realtime overview and Realtime Translation guide. The official docs confirm the dedicated `/v1/realtime/translations` endpoint, streaming translated audio plus transcript deltas, one session per output language, and the `audio.output.language` target parameter, but they do not publish an authoritative target-language enum. The official docs list `gpt-realtime-2` as the standard voice-agent Realtime model and `gpt-realtime-translate` as the model to use when the app should translate what a human says. The app keeps `gpt-realtime-2` configured only as an explicit compatibility/experimental profile for future voice-agent validation, while microphone streaming for the MVP live-interpretation surface uses `gpt-realtime-translate`. The app uses a conservative realtime target table of English, Spanish, and French, while the target picker shows all app target languages and labels broader targets such as Italian and Japanese as direct-OpenAI fallback targets. Fallback must not use AWS, an app backend, cloud sync, or server-side transcript handling.
 
 Updated 2026-06-01: the OpenAI Realtime Translation cookbook enumerates 13 supported output languages (Spanish, Portuguese, French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian, Vietnamese, Italian, English), so the conservative English/Spanish/French-only realtime table was corrected to mark all 13 (including Italian) as realtime output targets in `language_support.dart`. Arabic remains a direct-OpenAI fallback target because it is an auto-detected input language but not one of the 13 outputs. This supersedes the "Italian is direct-fallback only" stance for realtime output.
+
+Updated 2026-06-03: fallback-only targets stay selectable and explicit. If a selected target such as Arabic is not a realtime output language, the live surface shows a direct OpenAI text-fallback notice, the primary realtime session outputs the realtime-capable language on the other side of the pair so source transcripts and supported audio direction still work, and the fallback-only direction uses the phone-only direct OpenAI text path with `store: false`.
 
 ## Meeting Management Requirements
 
@@ -315,6 +317,6 @@ Deferred V2/future issues:
 
 - Final Android signing certificate details; tracked in #24 for store-ready release handoff.
 - The accepted credential/session implementation details for user-provided OpenAI credential material, including UX, encrypted storage reset/removal, and credential-invalid recovery.
-- Current OpenAI Realtime Translation docs do not expose an authoritative target output language enum. The MVP currently uses the conservative English/Spanish/French realtime table while still showing all app target languages with direct-OpenAI fallback labels for broader targets.
+- The installed-app physical microphone/audio behavior for fallback-only target pairs, such as English <-> Arabic, still needs device validation under #6 after the 2026-06-03 fallback routing fix.
 - Real physical microphone/audio behavior for the dedicated `gpt-realtime-translate` live route under installed-app streaming.
 - Whether diagnostics/crash reporting is included in MVP or deferred.

@@ -23,9 +23,9 @@ Tom has supplied four Android mockups covering the welcome screen, teal listenin
 
 The source image files are in [assets/mockups](../assets/mockups):
 
-- [01-welcome-sign-in.jpg](../assets/mockups/01-welcome-sign-in.jpg)
-- [02-live-listening-teal.jpg](../assets/mockups/02-live-listening-teal.jpg)
-- [03-transcript-assistant.jpg](../assets/mockups/03-transcript-assistant.jpg)
+- [01-live-listening-teal.jpg](../assets/mockups/01-live-listening-teal.jpg)
+- [02-transcript-assistant.jpg](../assets/mockups/02-transcript-assistant.jpg)
+- [03-welcome-local-setup.jpg](../assets/mockups/03-welcome-local-setup.jpg)
 - [04-speaking-paused-amber.jpg](../assets/mockups/04-speaking-paused-amber.jpg)
 
 The revised MVP keeps the visual direction but adapts sign-in affordances into phone-local setup/start-meeting behavior. Google/Microsoft sign-in is V2/future.
