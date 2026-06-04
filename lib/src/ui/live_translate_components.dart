@@ -405,6 +405,10 @@ class LanguageSelectorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accentColor = AppColors.forAccent(data.accent);
+    final displayLabel = [
+      data.primaryLabel,
+      data.secondaryLabel,
+    ].where((part) => part.trim().isNotEmpty).join(' ');
     final label =
         '${data.eyebrow} language selector: ${data.primaryLabel} ${data.secondaryLabel}'
             .trim();
@@ -432,24 +436,19 @@ class LanguageSelectorCard extends StatelessWidget {
                     ),
                   ),
                   CircleAvatar(
+                    radius: 18,
                     backgroundColor: accentColor.withValues(alpha: 0.18),
                     foregroundColor: accentColor,
-                    child: Icon(data.icon),
+                    child: Icon(data.icon, size: 20),
                   ),
                   if (onTap != null)
                     const Icon(Icons.keyboard_arrow_down_rounded),
                 ],
               ),
-              const SizedBox(height: AppSpacing.xs),
+              const SizedBox(height: AppSpacing.xxs),
               Text(
-                data.primaryLabel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.label(Theme.of(context).textTheme),
-              ),
-              Text(
-                data.secondaryLabel,
-                maxLines: 1,
+                displayLabel,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: AppTextStyles.label(Theme.of(context).textTheme),
               ),
@@ -462,7 +461,7 @@ class LanguageSelectorCard extends StatelessWidget {
     return _Surface(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
-        vertical: AppSpacing.sm,
+        vertical: AppSpacing.xs,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -511,15 +510,15 @@ class _SpokenOutputCheckbox extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.chip),
         onTap: onChanged == null ? null : () => onChanged!(!isEnabled),
         child: SizedBox(
-          height: 30,
+          height: 28,
           child: Row(
             children: [
               SizedBox(
-                width: 28,
-                height: 28,
+                width: 26,
+                height: 26,
                 child: IgnorePointer(
                   child: Transform.scale(
-                    scale: 0.82,
+                    scale: 0.78,
                     child: Checkbox(
                       value: isEnabled,
                       onChanged: onChanged == null ? null : (_) {},

@@ -1316,7 +1316,9 @@ void main() {
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.denied(),
         meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
       ),
     );
 
