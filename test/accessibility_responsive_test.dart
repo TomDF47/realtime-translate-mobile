@@ -154,7 +154,7 @@ void main() {
     expect(find.text('Open generated exports'), findsNothing);
     expect(find.textContaining('stay encrypted on this device'), findsNothing);
     expect(find.byTooltip('Add recipient'), findsNothing);
-    expect(find.byType(Checkbox), findsNothing);
+    expect(find.byType(Checkbox), findsNWidgets(2));
     expect(find.text('recipient@example.com'), findsNothing);
   });
 }

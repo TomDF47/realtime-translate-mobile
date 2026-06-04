@@ -443,10 +443,14 @@ class LanguageSelectorCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.xs),
               Text(
                 data.primaryLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: AppTextStyles.label(Theme.of(context).textTheme),
               ),
               Text(
                 data.secondaryLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: AppTextStyles.label(Theme.of(context).textTheme),
               ),
             ],
@@ -456,12 +460,15 @@ class LanguageSelectorCard extends StatelessWidget {
     );
 
     return _Surface(
-      padding: const EdgeInsets.all(AppSpacing.md),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           languagePicker,
-          const SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xxs),
           _SpokenOutputCheckbox(
             languageLabel: data.primaryLabel,
             isEnabled: data.spokenOutputEnabled,
@@ -503,29 +510,39 @@ class _SpokenOutputCheckbox extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadii.chip),
         onTap: onChanged == null ? null : () => onChanged!(!isEnabled),
-        child: Row(
-          children: [
-            IgnorePointer(
-              child: Checkbox(
-                value: isEnabled,
-                onChanged: onChanged == null ? null : (_) {},
-                activeColor: accentColor,
-                checkColor: AppColors.background,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
+        child: SizedBox(
+          height: 30,
+          child: Row(
+            children: [
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: IgnorePointer(
+                  child: Transform.scale(
+                    scale: 0.82,
+                    child: Checkbox(
+                      value: isEnabled,
+                      onChanged: onChanged == null ? null : (_) {},
+                      activeColor: accentColor,
+                      checkColor: AppColors.background,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ),
               ),
-            ),
-            Flexible(
-              child: Text(
-                'Output voice',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.compact(
-                  Theme.of(context).textTheme,
-                ).copyWith(color: AppColors.textSecondary),
+              Flexible(
+                child: Text(
+                  'Output voice',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.compact(
+                    Theme.of(context).textTheme,
+                  ).copyWith(color: AppColors.textSecondary),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

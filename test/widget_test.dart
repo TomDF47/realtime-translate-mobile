@@ -966,6 +966,8 @@ void main() {
 
       // Both cards render their original speech; nothing stays pending.
       expect(find.text(englishParagraph), findsOneWidget);
+      await tester.drag(find.byType(ListView).last, const Offset(0, -300));
+      await tester.pumpAndSettle();
       expect(find.text('Buongiorno, come stai?'), findsOneWidget);
       expect(find.text('Buongiorno a tutti.'), findsOneWidget);
       expect(find.text('Good morning, how are you?'), findsOneWidget);
@@ -1264,7 +1266,7 @@ void main() {
     expect(find.text('Generate export'), findsNothing);
     expect(find.text('Open generated exports'), findsNothing);
     expect(find.byTooltip('Add recipient'), findsNothing);
-    expect(find.byType(Checkbox), findsNothing);
+    expect(find.byType(Checkbox), findsNWidgets(2));
     expect(find.text('recipient@example.com'), findsNothing);
   });
 
@@ -1321,6 +1323,10 @@ void main() {
     await tester.tap(find.text('Start interpreter'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Listening paused'), findsWidgets);
+    await tester.tap(find.bySemanticsLabel('Resume listening'));
+    await tester.pumpAndSettle();
+
     expect(find.text('Microphone access needed'), findsOneWidget);
     expect(find.text('Try microphone permission again'), findsOneWidget);
     expect(
@@ -1350,6 +1356,8 @@ void main() {
     );
 
     await tester.tap(find.text('Start interpreter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Resume listening'));
     await tester.pumpAndSettle();
     expect((await repository.loadSnapshot()).meetings, hasLength(1));
     expect(captureGateway.isCapturing, isTrue);

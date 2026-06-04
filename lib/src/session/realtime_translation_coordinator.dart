@@ -292,7 +292,7 @@ class LiveRealtimeTranslationCoordinator {
       );
       sessionController.applyRealtimeRecoveryDecision(decision);
       if (decision.shouldRetry) {
-        _scheduleReconnect(decision);
+        _scheduleReconnect(decision, keepPaused: startPaused);
       }
       return LiveRealtimeStartResult.failed;
     }
@@ -324,6 +324,7 @@ class LiveRealtimeTranslationCoordinator {
               retryAttempt: retryAttempt,
               delay: Duration.zero,
             ),
+            keepPaused: false,
           );
         }
         break;
@@ -1421,6 +1422,9 @@ class LiveRealtimeTranslationCoordinator {
         failure: failure,
         retryAttempt: sessionController.state.realtimeRetryAttempt + 1,
       );
+      final shouldStayPaused =
+          sessionController.state.phase == LiveSessionPhase.listeningPaused &&
+          !sessionController.state.isMicrophoneCaptureOpen;
       final shouldScheduleReconnect = allowReconnect && decision.shouldRetry;
       await _closeRealtimeResources(
         graceful: false,
@@ -1428,14 +1432,17 @@ class LiveRealtimeTranslationCoordinator {
       );
       sessionController.applyRealtimeRecoveryDecision(decision);
       if (shouldScheduleReconnect) {
-        _scheduleReconnect(decision);
+        _scheduleReconnect(decision, keepPaused: shouldStayPaused);
       }
     } finally {
       _handlingFailure = false;
     }
   }
 
-  void _scheduleReconnect(OpenAiRealtimeReconnectDecision decision) {
+  void _scheduleReconnect(
+    OpenAiRealtimeReconnectDecision decision, {
+    required bool keepPaused,
+  }) {
     final config = _activeConfig;
     if (config == null || _isDisposed) {
       return;
@@ -1450,6 +1457,7 @@ class LiveRealtimeTranslationCoordinator {
         decision: decision,
         config: config,
         transcriptCommitTarget: transcriptCommitTarget,
+        keepPaused: keepPaused,
       ),
     );
   }
@@ -1463,6 +1471,7 @@ class LiveRealtimeTranslationCoordinator {
     required OpenAiRealtimeReconnectDecision decision,
     required OpenAiRealtimeTranslationConfig config,
     required LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
+    required bool keepPaused,
   }) async {
     await _waitForReconnectDelay(decision.delay);
     if (_isDisposed || generation != _reconnectGeneration) {
@@ -1493,8 +1502,9 @@ class LiveRealtimeTranslationCoordinator {
       }
 
       final shouldStayPaused =
-          sessionController.state.phase == LiveSessionPhase.listeningPaused &&
-          !sessionController.state.isMicrophoneCaptureOpen;
+          keepPaused ||
+          (sessionController.state.phase == LiveSessionPhase.listeningPaused &&
+              !sessionController.state.isMicrophoneCaptureOpen);
       final playbackQueueOpen =
           !shouldStayPaused && _shouldStartTranslatedAudioPlayback(config);
       if (playbackQueueOpen) {
