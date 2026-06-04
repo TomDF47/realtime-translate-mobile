@@ -364,10 +364,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     'en',
   );
   bool _translateTextEnabled = true;
-  bool _readAloudEnabled = false;
+  bool _sourceSpokenOutputEnabled = false;
+  bool _targetSpokenOutputEnabled = false;
   Duration _recordingElapsed = Duration.zero;
   DateTime? _recordingStartedAt;
   Timer? _recordingTicker;
+
+  bool get _anySpokenOutputEnabled {
+    return _sourceSpokenOutputEnabled || _targetSpokenOutputEnabled;
+  }
 
   @override
   void initState() {
@@ -402,10 +407,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           OpenAiRealtimeTranslationGateway(),
       textInterpreterGateway: widget.textInterpreterGateway,
       onTranscriptCommitted: _scheduleTranscriptRefresh,
-      // Phone MVP is text-first. Translated audio/reverse audio remain behind
-      // explicit read-aloud controls until the installed live text path is
-      // proven stable on physical devices.
-      enableBidirectionalReverseSession: false,
+      // Spoken output stays opt-in per language side. The reverse session is
+      // enabled only when that side's checkbox is on.
+      enableBidirectionalReverseSession: true,
     );
     unawaited(_loadStoredMeetings());
     unawaited(_loadOpenAiCredentialStatus());
@@ -534,6 +538,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     final started = await _startRealtimeForSession(
       initialSession,
       meetingId: meetingId,
+      startPaused: true,
     );
     if (!mounted) {
       return;
@@ -570,22 +575,25 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   Future<bool> _startRealtimeForSession(
     LiveSessionViewData _, {
     String? meetingId,
+    bool startPaused = false,
   }) async {
-    _realtimeCoordinator.setRuntimeOutputOptions(
-      translationOutputEnabled: _translateTextEnabled,
-      readAloudOutputEnabled: _readAloudEnabled,
-    );
     final sourceLanguageCode = _selectedSourceLanguage.code;
     final targetLanguageCode = _selectedTargetLanguage.code;
     final realtimeTargetLanguageCode = _realtimeOutputLanguageCodeForRoute(
       sourceLanguageCode: sourceLanguageCode,
       targetLanguageCode: targetLanguageCode,
     );
+    _configureRuntimeOutputForRoute(
+      sourceLanguageCode: sourceLanguageCode,
+      targetLanguageCode: targetLanguageCode,
+      realtimeTargetLanguageCode: realtimeTargetLanguageCode,
+    );
     final result = await _realtimeCoordinator.start(
       config: _realtimeConfigForRoute(
         sourceLanguageCode: sourceLanguageCode,
         targetLanguageCode: realtimeTargetLanguageCode,
       ),
+      startPaused: startPaused,
       transcriptCommitTarget: meetingId == null
           ? null
           : LiveRealtimeTranscriptCommitTarget(
@@ -605,7 +613,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return false;
     }
 
-    if (result == LiveRealtimeStartResult.started) {
+    if (result == LiveRealtimeStartResult.started ||
+        result == LiveRealtimeStartResult.preparedPaused) {
       return true;
     }
 
@@ -625,6 +634,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     setState(() {
+      if (_activeMeetingId == null &&
+          snapshot.recentLanguageRoutes.isNotEmpty) {
+        _applyRecentLanguageRoute(snapshot.recentLanguageRoutes.first);
+      }
       _storedMeetings = _deletedMeetingIds.isEmpty
           ? snapshot.meetings
           : [
@@ -632,6 +645,20 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
                 if (!_deletedMeetingIds.contains(meeting.id)) meeting,
             ];
     });
+  }
+
+  void _applyRecentLanguageRoute(LanguageRoutePreference route) {
+    _selectedTargetLanguage = _languageFromStoredLabel(
+      route.targetLanguageLabel,
+      fallback: _selectedTargetLanguage,
+    );
+    _selectedSourceLanguage = _manualSourceLanguageFromStoredLabel(
+      route.sourceLanguageLabel,
+      fallback: _selectedSourceLanguage,
+    );
+    _ensureSelectedLanguagesAreDistinct();
+    _sourceSpokenOutputEnabled = route.sourceSpokenOutputEnabled;
+    _targetSpokenOutputEnabled = route.targetSpokenOutputEnabled;
   }
 
   bool _transcriptRefreshScheduled = false;
@@ -695,14 +722,33 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         now: now,
       ),
     );
+    await _persistRecentLanguageRoute(updatedAt: now);
+    await _loadStoredMeetings();
+  }
+
+  Future<void> _persistRecentLanguageRoute({DateTime? updatedAt}) async {
+    final now = updatedAt ?? DateTime.now().toUtc();
     await _meetingRepository.saveRecentLanguageRoute(
       LanguageRoutePreference(
-        sourceLanguageLabel: _languageLabel(session.fromLanguage),
-        targetLanguageLabel: _languageLabel(session.toLanguage),
+        sourceLanguageLabel: _languageLabel(
+          _selectorForLanguage(
+            _selectedSourceLanguage,
+            fallback: MockLiveTranslateData.listeningSession.fromLanguage,
+            isTarget: false,
+          ),
+        ),
+        targetLanguageLabel: _languageLabel(
+          _selectorForLanguage(
+            _selectedTargetLanguage,
+            fallback: MockLiveTranslateData.listeningSession.toLanguage,
+            isTarget: true,
+          ),
+        ),
         updatedAt: now,
+        sourceSpokenOutputEnabled: _sourceSpokenOutputEnabled,
+        targetSpokenOutputEnabled: _targetSpokenOutputEnabled,
       ),
     );
-    await _loadStoredMeetings();
   }
 
   Future<bool> _ensureLiveSessionReady(LiveSessionViewData session) async {
@@ -718,13 +764,82 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     required String sourceLanguageCode,
     required String targetLanguageCode,
   }) {
+    final primarySpokenOutputEnabled = _primarySpokenOutputEnabledForRoute(
+      sourceLanguageCode: sourceLanguageCode,
+      targetLanguageCode: _selectedTargetLanguage.code,
+      realtimeTargetLanguageCode: targetLanguageCode,
+    );
     return OpenAiRealtimeTranslationConfig(
       sourceLanguageCode: sourceLanguageCode,
       targetLanguageCode: targetLanguageCode,
       profile: _profileForLiveInterpretation(targetLanguageCode),
       translationOutputEnabled: _translateTextEnabled,
-      readAloudOutputEnabled: _readAloudEnabled,
+      readAloudOutputEnabled: primarySpokenOutputEnabled,
     );
+  }
+
+  void _configureRuntimeOutputForRoute({
+    required String sourceLanguageCode,
+    required String targetLanguageCode,
+    required String realtimeTargetLanguageCode,
+  }) {
+    _realtimeCoordinator.setRuntimeOutputOptions(
+      translationOutputEnabled: _translateTextEnabled,
+      primaryReadAloudOutputEnabled: _primarySpokenOutputEnabledForRoute(
+        sourceLanguageCode: sourceLanguageCode,
+        targetLanguageCode: targetLanguageCode,
+        realtimeTargetLanguageCode: realtimeTargetLanguageCode,
+      ),
+      reverseReadAloudOutputEnabled: _reverseSpokenOutputEnabledForRoute(
+        sourceLanguageCode: sourceLanguageCode,
+        targetLanguageCode: targetLanguageCode,
+        realtimeTargetLanguageCode: realtimeTargetLanguageCode,
+      ),
+    );
+  }
+
+  void _configureRuntimeOutputForSelectedRoute() {
+    final sourceLanguageCode = _selectedSourceLanguage.code;
+    final targetLanguageCode = _selectedTargetLanguage.code;
+    final realtimeTargetLanguageCode = _realtimeOutputLanguageCodeForRoute(
+      sourceLanguageCode: sourceLanguageCode,
+      targetLanguageCode: targetLanguageCode,
+    );
+    _configureRuntimeOutputForRoute(
+      sourceLanguageCode: sourceLanguageCode,
+      targetLanguageCode: targetLanguageCode,
+      realtimeTargetLanguageCode: realtimeTargetLanguageCode,
+    );
+  }
+
+  bool _primarySpokenOutputEnabledForRoute({
+    required String sourceLanguageCode,
+    required String targetLanguageCode,
+    required String realtimeTargetLanguageCode,
+  }) {
+    final realtimeTarget = realtimeTargetLanguageCode.trim().toLowerCase();
+    if (realtimeTarget == targetLanguageCode.trim().toLowerCase()) {
+      return _sourceSpokenOutputEnabled;
+    }
+    if (realtimeTarget == sourceLanguageCode.trim().toLowerCase()) {
+      return _targetSpokenOutputEnabled;
+    }
+    return false;
+  }
+
+  bool _reverseSpokenOutputEnabledForRoute({
+    required String sourceLanguageCode,
+    required String targetLanguageCode,
+    required String realtimeTargetLanguageCode,
+  }) {
+    final realtimeTarget = realtimeTargetLanguageCode.trim().toLowerCase();
+    if (realtimeTarget == targetLanguageCode.trim().toLowerCase()) {
+      return _targetSpokenOutputEnabled;
+    }
+    if (realtimeTarget == sourceLanguageCode.trim().toLowerCase()) {
+      return _sourceSpokenOutputEnabled;
+    }
+    return false;
   }
 
   String _realtimeOutputLanguageCodeForRoute({
@@ -834,9 +949,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     if (_sessionController.state.phase == LiveSessionPhase.connecting) {
       return 'Preparing live interpretation on this phone...';
     }
-    if (_sessionController.state.phase == LiveSessionPhase.listeningPaused) {
-      return 'Listening paused';
-    }
     final manualLabel = _selectedInterpreterPairLabel();
     final activeMeeting = _activeMeeting;
     final storedLabel = _interpreterLabelForTranscriptEntries(
@@ -919,6 +1031,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           : language.regionLabel,
       icon: fallback.icon,
       accent: fallback.accent,
+      spokenOutputEnabled: isTarget
+          ? _targetSpokenOutputEnabled
+          : _sourceSpokenOutputEnabled,
     );
   }
 
@@ -938,7 +1053,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   ) {
     return [
       for (final control in _activeListeningControls(base.bottomControls))
-        if (control.label == 'Pause Read Aloud' && !_readAloudEnabled)
+        if (control.label == 'Pause Read Aloud' && !_anySpokenOutputEnabled)
           const BottomControlActionData(
             label: 'Resume Read Aloud',
             icon: Icons.play_arrow_rounded,
@@ -1057,7 +1172,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       _sessionController.enterSpeakingPaused();
     } else {
       _sessionController.resumeListening(
-        playbackQueueOpen: _readAloudEnabled,
+        playbackQueueOpen: _anySpokenOutputEnabled,
       );
     }
 
@@ -1204,7 +1319,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return;
     }
 
-    _sessionController.resumeListening(playbackQueueOpen: _readAloudEnabled);
+    _sessionController.resumeListening(
+      playbackQueueOpen: _anySpokenOutputEnabled,
+    );
     setState(() => _surface = _AppSurface.listening);
   }
 
@@ -1266,12 +1383,12 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     if (action.label == 'Pause Read Aloud') {
-      _setReadAloudEnabled(false);
+      _setAllSpokenOutputEnabled(false);
       return;
     }
 
     if (action.label == 'Resume Read Aloud') {
-      _setReadAloudEnabled(true);
+      _setAllSpokenOutputEnabled(true);
       _openListening();
     }
   }
@@ -1312,8 +1429,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   void _toggleFeature(String label) {
     if (label == 'Translate Text') {
       _setTranslateTextEnabled(!_translateTextEnabled);
-    } else if (label == 'Read Aloud') {
-      _setReadAloudEnabled(!_readAloudEnabled);
     }
   }
 
@@ -1323,23 +1438,22 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     setState(() => _translateTextEnabled = enabled);
-    _realtimeCoordinator.setRuntimeOutputOptions(
-      translationOutputEnabled: _translateTextEnabled,
-      readAloudOutputEnabled: _readAloudEnabled,
-    );
+    _configureRuntimeOutputForSelectedRoute();
     unawaited(_restartRealtimeIfActive());
   }
 
-  void _setReadAloudEnabled(bool enabled) {
-    if (_readAloudEnabled == enabled) {
+  void _setAllSpokenOutputEnabled(bool enabled) {
+    if (_sourceSpokenOutputEnabled == enabled &&
+        _targetSpokenOutputEnabled == enabled) {
       return;
     }
 
-    setState(() => _readAloudEnabled = enabled);
-    _realtimeCoordinator.setRuntimeOutputOptions(
-      translationOutputEnabled: _translateTextEnabled,
-      readAloudOutputEnabled: _readAloudEnabled,
-    );
+    setState(() {
+      _sourceSpokenOutputEnabled = enabled;
+      _targetSpokenOutputEnabled = enabled;
+    });
+    _configureRuntimeOutputForSelectedRoute();
+    unawaited(_persistRecentLanguageRoute());
     if (enabled) {
       unawaited(_restartRealtimeIfActive());
     } else {
@@ -1347,6 +1461,28 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       _sessionController.enterSpeakingPaused();
       setState(() => _surface = _AppSurface.speakingPaused);
     }
+  }
+
+  void _setSpokenOutputEnabled({
+    required bool isTarget,
+    required bool enabled,
+  }) {
+    final current = isTarget
+        ? _targetSpokenOutputEnabled
+        : _sourceSpokenOutputEnabled;
+    if (current == enabled) {
+      return;
+    }
+
+    setState(() {
+      if (isTarget) {
+        _targetSpokenOutputEnabled = enabled;
+      } else {
+        _sourceSpokenOutputEnabled = enabled;
+      }
+    });
+    _configureRuntimeOutputForSelectedRoute();
+    unawaited(_persistActiveRouteAndRestart());
   }
 
   Future<void> _selectLanguage(
@@ -1401,6 +1537,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       );
       await _loadStoredMeetings();
     }
+    await _persistRecentLanguageRoute();
     await _restartRealtimeIfActive();
   }
 
@@ -1422,17 +1559,25 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       sourceLanguageCode: sourceLanguageCode,
       targetLanguageCode: targetLanguageCode,
     );
-    _realtimeCoordinator.setRuntimeOutputOptions(
-      translationOutputEnabled: _translateTextEnabled,
-      readAloudOutputEnabled: _readAloudEnabled,
+    _configureRuntimeOutputForRoute(
+      sourceLanguageCode: sourceLanguageCode,
+      targetLanguageCode: targetLanguageCode,
+      realtimeTargetLanguageCode: realtimeTargetLanguageCode,
     );
+    final shouldStartPaused =
+        _sessionController.state.phase == LiveSessionPhase.listeningPaused &&
+        !_sessionController.state.isMicrophoneCaptureOpen;
     await _realtimeCoordinator.start(
       config: OpenAiRealtimeTranslationConfig(
         sourceLanguageCode: sourceLanguageCode,
         targetLanguageCode: realtimeTargetLanguageCode,
         profile: _profileForLiveInterpretation(realtimeTargetLanguageCode),
         translationOutputEnabled: _translateTextEnabled,
-        readAloudOutputEnabled: _readAloudEnabled,
+        readAloudOutputEnabled: _primarySpokenOutputEnabledForRoute(
+          sourceLanguageCode: sourceLanguageCode,
+          targetLanguageCode: targetLanguageCode,
+          realtimeTargetLanguageCode: realtimeTargetLanguageCode,
+        ),
       ),
       transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
         repository: _meetingRepository,
@@ -1441,6 +1586,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
         targetLanguageCode: targetLanguageCode,
         now: DateTime.now,
       ),
+      startPaused: shouldStartPaused,
     );
   }
 
@@ -1902,11 +2048,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
             _showLanguageOptionsSheet(isTarget: false),
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
+        onSourceSpokenOutputChanged: (enabled) =>
+            _setSpokenOutputEnabled(isTarget: false, enabled: enabled),
+        onTargetSpokenOutputChanged: (enabled) =>
+            _setSpokenOutputEnabled(isTarget: true, enabled: enabled),
         onDirectionSwitch: null,
         onRetryLiveSession: _openListening,
         onBottomAction: _handleBottomAction,
         onFeatureToggle: _toggleFeature,
-        onQueuePrimaryAction: () => _setReadAloudEnabled(true),
+        onQueuePrimaryAction: () => _setAllSpokenOutputEnabled(true),
         onQueueSecondaryAction: _skipQueuedReadAloudToLive,
         onJumpToLive: _jumpToLive,
         debugHarness: _debugE2eHarnessEnabled
@@ -1925,11 +2075,15 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
             _showLanguageOptionsSheet(isTarget: false),
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
+        onSourceSpokenOutputChanged: (enabled) =>
+            _setSpokenOutputEnabled(isTarget: false, enabled: enabled),
+        onTargetSpokenOutputChanged: (enabled) =>
+            _setSpokenOutputEnabled(isTarget: true, enabled: enabled),
         onDirectionSwitch: null,
         onRetryLiveSession: _openSpeakingPaused,
         onBottomAction: _handleBottomAction,
         onFeatureToggle: _toggleFeature,
-        onQueuePrimaryAction: () => _setReadAloudEnabled(true),
+        onQueuePrimaryAction: () => _setAllSpokenOutputEnabled(true),
         onQueueSecondaryAction: _skipQueuedReadAloudToLive,
         onJumpToLive: _jumpToLive,
         debugHarness: _debugE2eHarnessEnabled
@@ -1943,15 +2097,17 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   void _skipQueuedReadAloudToLive() {
-    if (!_readAloudEnabled) {
-      setState(() => _readAloudEnabled = true);
+    if (!_anySpokenOutputEnabled) {
+      setState(() {
+        _sourceSpokenOutputEnabled = true;
+        _targetSpokenOutputEnabled = true;
+      });
     }
-    _realtimeCoordinator.setRuntimeOutputOptions(
-      translationOutputEnabled: _translateTextEnabled,
-      readAloudOutputEnabled: true,
-    );
+    _configureRuntimeOutputForSelectedRoute();
     unawaited(_restartRealtimeIfActive());
-    _sessionController.resumeListening(playbackQueueOpen: _readAloudEnabled);
+    _sessionController.resumeListening(
+      playbackQueueOpen: _anySpokenOutputEnabled,
+    );
     setState(() => _surface = _AppSurface.listening);
   }
 }
@@ -2316,6 +2472,8 @@ class LiveSessionScreen extends StatelessWidget {
     required this.onOpenAssistant,
     required this.onOpenSourceLanguageOptions,
     required this.onOpenTargetLanguageOptions,
+    required this.onSourceSpokenOutputChanged,
+    required this.onTargetSpokenOutputChanged,
     required this.onDirectionSwitch,
     required this.onRetryLiveSession,
     required this.onBottomAction,
@@ -2332,6 +2490,8 @@ class LiveSessionScreen extends StatelessWidget {
   final VoidCallback? onOpenAssistant;
   final VoidCallback? onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
+  final ValueChanged<bool> onSourceSpokenOutputChanged;
+  final ValueChanged<bool> onTargetSpokenOutputChanged;
   final VoidCallback? onDirectionSwitch;
   final VoidCallback onRetryLiveSession;
   final ValueChanged<BottomControlActionData> onBottomAction;
@@ -2376,6 +2536,8 @@ class LiveSessionScreen extends StatelessWidget {
               onDirectionSwitch: onDirectionSwitch,
               onOpenSourceLanguageOptions: onOpenSourceLanguageOptions,
               onOpenTargetLanguageOptions: onOpenTargetLanguageOptions,
+              onSourceSpokenOutputChanged: onSourceSpokenOutputChanged,
+              onTargetSpokenOutputChanged: onTargetSpokenOutputChanged,
             ),
             if (session.languageRouteNotice != null) ...[
               const SizedBox(height: AppSpacing.xs),
@@ -2442,8 +2604,8 @@ class _LiveStateNoticeBanner extends StatelessWidget {
     final accentColor = AppColors.forAccent(accent);
     final title = isConnecting ? 'Connecting to OpenAI' : 'Listening paused';
     final body = isConnecting
-        ? 'Preparing live interpretation on this phone. Recording starts after the secure realtime session is ready.'
-        : 'Microphone capture, realtime streaming, and translated audio are stopped. Transcript history stays on this device.';
+        ? 'Preparing live interpretation on this phone. Recording starts only when you resume listening.'
+        : 'OpenAI stays connected in the background. Microphone capture and translated audio are stopped until you resume.';
 
     return Semantics(
       container: true,
@@ -2713,12 +2875,16 @@ class _LanguageRouteRow extends StatelessWidget {
     required this.onDirectionSwitch,
     required this.onOpenSourceLanguageOptions,
     required this.onOpenTargetLanguageOptions,
+    required this.onSourceSpokenOutputChanged,
+    required this.onTargetSpokenOutputChanged,
   });
 
   final LiveSessionViewData session;
   final VoidCallback? onDirectionSwitch;
   final VoidCallback? onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
+  final ValueChanged<bool> onSourceSpokenOutputChanged;
+  final ValueChanged<bool> onTargetSpokenOutputChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -2729,6 +2895,7 @@ class _LanguageRouteRow extends StatelessWidget {
           child: LanguageSelectorCard(
             data: session.fromLanguage,
             onTap: onOpenSourceLanguageOptions,
+            onSpokenOutputChanged: onSourceSpokenOutputChanged,
           ),
         ),
         const SizedBox(width: AppSpacing.xs),
@@ -2743,6 +2910,7 @@ class _LanguageRouteRow extends StatelessWidget {
           child: LanguageSelectorCard(
             data: session.toLanguage,
             onTap: onOpenTargetLanguageOptions,
+            onSpokenOutputChanged: onTargetSpokenOutputChanged,
           ),
         ),
       ],

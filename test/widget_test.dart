@@ -110,11 +110,10 @@ void main() {
     await tester.tap(find.text('Start interpreter'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Italian <-> English'), findsOneWidget);
+    expect(find.text('Listening paused'), findsWidgets);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
-    expect(find.text('Listening'), findsOneWidget);
-    expect(find.text('Pause Listening'), findsOneWidget);
-    expect(find.bySemanticsLabel('Pause listening'), findsOneWidget);
+    expect(find.text('Resume Listening'), findsOneWidget);
+    expect(find.bySemanticsLabel('Resume listening'), findsOneWidget);
     expect(find.text('Translate Text'), findsNothing);
     expect(find.text('Waiting for speech'), findsOneWidget);
     expect(
@@ -147,6 +146,110 @@ void main() {
     expect(find.text('Open generated exports'), findsNothing);
   });
 
+  testWidgets('language cards show spoken output checkboxes off by default', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+      ),
+    );
+
+    await tester.tap(find.text('Start interpreter'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Output voice'), findsNWidgets(2));
+    expect(
+      find.bySemanticsLabel('Output spoken translation for Italian off'),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel('Output spoken translation for English off'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('spoken output checkbox persists with last language route', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    await _seedCredential(repository);
+
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+      ),
+    );
+    await tester.tap(find.text('Start interpreter'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('English (US)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('English (US)'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Italian (IT)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Italian (IT)'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.bySemanticsLabel('Output spoken translation for English off'),
+    );
+    await tester.pumpAndSettle();
+
+    var snapshot = await repository.loadSnapshot();
+    var route = snapshot.recentLanguageRoutes.first;
+    expect(route.sourceLanguageLabel, 'English (US)');
+    expect(route.targetLanguageLabel, 'Italian (IT)');
+    expect(route.sourceSpokenOutputEnabled, isTrue);
+    expect(route.targetSpokenOutputEnabled, isFalse);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start interpreter'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('English <-> Italian'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel('Output spoken translation for English on'),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel('Output spoken translation for Italian off'),
+      findsOneWidget,
+    );
+
+    snapshot = await repository.loadSnapshot();
+    route = snapshot.recentLanguageRoutes.first;
+    expect(route.sourceSpokenOutputEnabled, isTrue);
+  });
+
   testWidgets('starts interpreter with manual language pair controls', (
     tester,
   ) async {
@@ -165,7 +268,7 @@ void main() {
 
     await tester.tap(find.text('Start interpreter'));
     await tester.pumpAndSettle();
-    expect(find.text('Italian <-> English'), findsOneWidget);
+    expect(find.text('Listening paused'), findsWidgets);
     final primaryConfig = realtimeGateway.configs.firstWhere(
       (config) => config.sourceTranscriptionEnabled,
     );
@@ -187,7 +290,7 @@ void main() {
     expect(find.text('Switch'), findsNothing);
     expect(find.text('Read Aloud'), findsNothing);
     expect(find.text('Pause Read Aloud'), findsNothing);
-    expect(find.text('Pause Listening'), findsOneWidget);
+    expect(find.text('Resume Listening'), findsOneWidget);
     expect(find.bySemanticsLabel('Translate Text on'), findsNothing);
     expect(realtimeGateway.configs.length, initialRealtimeConfigCount);
 
@@ -202,7 +305,12 @@ void main() {
     await tester.tap(spanishOption);
     await tester.pumpAndSettle();
 
-    expect(find.text('Spanish <-> English'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('From language selector: Spanish \\(ES\\)'),
+      ),
+      findsOneWidget,
+    );
     final restartedPrimaryConfig = realtimeGateway.configs.lastWhere(
       (config) => config.sourceTranscriptionEnabled,
     );
@@ -319,7 +427,7 @@ void main() {
     expect(find.text('Connecting to OpenAI'), findsOneWidget);
     expect(
       find.text(
-        'Preparing live interpretation on this phone. Recording starts after the secure realtime session is ready.',
+        'Preparing live interpretation on this phone. Recording starts only when you resume listening.',
       ),
       findsOneWidget,
     );
@@ -328,7 +436,9 @@ void main() {
     realtimeGateway.completeConnect();
     await tester.pumpAndSettle();
 
-    expect(find.text('Listening'), findsOneWidget);
+    expect(find.text('Listening paused'), findsWidgets);
+    expect(find.text('Paused'), findsOneWidget);
+    expect(find.text('Resume Listening'), findsOneWidget);
   });
 
   testWidgets('pause and resume listening controls keep meeting transcript', (
@@ -349,9 +459,10 @@ void main() {
 
     await tester.tap(find.text('Start interpreter'));
     await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Resume listening'));
+    await tester.pumpAndSettle();
     final meetingId = (await repository.loadSnapshot()).meetings.single.id;
     await _appendStoredTranscriptLine(repository, meetingId);
-    realtimeGateway.sessions.first.delayGracefulClose();
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pumpAndSettle();
 
@@ -366,22 +477,20 @@ void main() {
       find.text('They agreed to meet on Tuesday at 10 AM.'),
       findsOneWidget,
     );
-    expect(realtimeGateway.sessions.first.closeGracefullyCount, 1);
-
-    realtimeGateway.sessions.first.completeGracefulClose();
-    await tester.pumpAndSettle();
+    expect(realtimeGateway.sessions.first.closeGracefullyCount, 0);
+    expect(realtimeGateway.sessions.first.closeImmediatelyCount, 0);
 
     await tester.tap(find.bySemanticsLabel('Resume listening'));
     await tester.pumpAndSettle();
 
     expect(find.text('Pause Listening'), findsOneWidget);
     expect(find.text('Resume Listening'), findsNothing);
-    expect(realtimeGateway.sessions, hasLength(2));
+    expect(realtimeGateway.sessions, hasLength(1));
     expect(
       realtimeGateway.configs
           .where((config) => config.sourceTranscriptionEnabled)
           .length,
-      2,
+      1,
     );
     expect(
       realtimeGateway.configs
@@ -1435,6 +1544,8 @@ Widget _liveSessionHarness(LiveSessionState state) {
       onOpenAssistant: () {},
       onOpenSourceLanguageOptions: () {},
       onOpenTargetLanguageOptions: () {},
+      onSourceSpokenOutputChanged: (_) {},
+      onTargetSpokenOutputChanged: (_) {},
       onDirectionSwitch: () {},
       onRetryLiveSession: () {},
       onBottomAction: (_) {},

@@ -89,6 +89,166 @@ void main() {
     expect(harness.realtimeGateway.session.createResponseCount, 0);
   });
 
+  test('warm start connects realtime while remaining paused until resume', () async {
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+    );
+
+    final result = await harness.coordinator.start(
+      config: config,
+      startPaused: true,
+    );
+
+    expect(result, LiveRealtimeStartResult.preparedPaused);
+    expect(harness.permissionGateway.requestCount, 0);
+    expect(harness.realtimeGateway.connectCount, 1);
+    expect(harness.captureGateway.startCount, 0);
+    expect(harness.captureGateway.isCapturing, isFalse);
+    expect(harness.controller.state.phase, LiveSessionPhase.listeningPaused);
+    expect(harness.controller.state.isRealtimeSessionOpen, isTrue);
+    expect(harness.controller.state.isMicrophoneCaptureOpen, isFalse);
+
+    final resumed = await harness.coordinator.resumeListening();
+
+    expect(resumed, LiveRealtimeStartResult.started);
+    expect(harness.permissionGateway.requestCount, 1);
+    expect(harness.realtimeGateway.connectCount, 1);
+    expect(harness.captureGateway.startCount, 1);
+    expect(harness.captureGateway.isCapturing, isTrue);
+    expect(harness.controller.state.phase, LiveSessionPhase.listening);
+  });
+
+  test('warm paused audio delta is ignored while playback is closed', () async {
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+    );
+
+    final result = await harness.coordinator.start(
+      config: config,
+      startPaused: true,
+    );
+    harness.realtimeGateway.session.addEvent(
+      OpenAiRealtimeAudioDelta(
+        type: 'session.output_audio.delta',
+        base64Audio: base64Encode([4, 5, 6, 7]),
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(result, LiveRealtimeStartResult.preparedPaused);
+    expect(harness.playbackGateway.startCount, 0);
+    expect(harness.playbackGateway.enqueuedChunks, isEmpty);
+    expect(harness.realtimeGateway.session.closeImmediatelyCount, 0);
+    expect(harness.controller.state.phase, LiveSessionPhase.listeningPaused);
+    expect(harness.controller.state.isRealtimeSessionOpen, isTrue);
+  });
+
+  test(
+    'hung translated-audio playback resume enters bounded recovery',
+    () async {
+      final reconnectDelays = <Duration>[];
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectDelay: (delay) {
+          reconnectDelays.add(delay);
+          return Completer<void>().future;
+        },
+        startupStepTimeout: const Duration(milliseconds: 1),
+      );
+
+      await harness.coordinator.start(config: config, startPaused: true);
+      harness.playbackGateway.hangStart = true;
+
+      final result = await harness.coordinator.resumeListening();
+      await _drainAsync();
+
+      expect(result, LiveRealtimeStartResult.failed);
+      expect(harness.playbackGateway.startCount, 1);
+      expect(harness.captureGateway.startCount, 0);
+      expect(harness.captureGateway.isCapturing, isFalse);
+      expect(harness.controller.state.phase, LiveSessionPhase.reconnecting);
+      expect(reconnectDelays, hasLength(1));
+    },
+  );
+
+  test('hung microphone capture resume enters bounded recovery', () async {
+    final reconnectDelays = <Duration>[];
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+      reconnectDelay: (delay) {
+        reconnectDelays.add(delay);
+        return Completer<void>().future;
+      },
+      startupStepTimeout: const Duration(milliseconds: 1),
+    );
+
+    await harness.coordinator.start(config: config, startPaused: true);
+    harness.captureGateway.hangStart = true;
+
+    final result = await harness.coordinator.resumeListening();
+    await _drainAsync();
+
+    expect(result, LiveRealtimeStartResult.failed);
+    expect(harness.playbackGateway.startCount, 1);
+    expect(harness.playbackGateway.isOpen, isFalse);
+    expect(harness.captureGateway.startCount, 1);
+    expect(harness.captureGateway.isCapturing, isFalse);
+    expect(harness.controller.state.phase, LiveSessionPhase.reconnecting);
+    expect(reconnectDelays, hasLength(1));
+  });
+
+  test('pause stops microphone capture but keeps realtime session warm', () async {
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+    );
+
+    await harness.coordinator.start(config: config);
+    await harness.coordinator.pauseListening();
+
+    expect(harness.controller.state.phase, LiveSessionPhase.listeningPaused);
+    expect(harness.captureGateway.isCapturing, isFalse);
+    expect(harness.controller.state.isRealtimeSessionOpen, isTrue);
+    expect(harness.realtimeGateway.session.closeGracefullyCount, 0);
+    expect(harness.realtimeGateway.session.closeImmediatelyCount, 0);
+  });
+
+  test(
+    'retryable failure while warm paused reconnects without starting capture',
+    () async {
+      final reconnectDelays = <Duration>[];
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        reconnectDelay: (delay) async {
+          reconnectDelays.add(delay);
+        },
+      );
+
+      await harness.coordinator.start(config: config, startPaused: true);
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeSessionClosed(type: 'socket.closed'),
+      );
+      await _drainAsync();
+
+      expect(reconnectDelays, hasLength(1));
+      expect(harness.realtimeGateway.connectCount, 2);
+      expect(harness.permissionGateway.requestCount, 0);
+      expect(harness.captureGateway.startCount, 0);
+      expect(harness.captureGateway.isCapturing, isFalse);
+      expect(harness.playbackGateway.startCount, 0);
+      expect(harness.controller.state.phase, LiveSessionPhase.listeningPaused);
+      expect(harness.controller.state.isRealtimeSessionOpen, isTrue);
+      expect(harness.controller.state.isMicrophoneCaptureOpen, isFalse);
+
+      final resumed = await harness.coordinator.resumeListening();
+
+      expect(resumed, LiveRealtimeStartResult.started);
+      expect(harness.permissionGateway.requestCount, 1);
+      expect(harness.captureGateway.startCount, 1);
+      expect(harness.realtimeGateway.connectCount, 2);
+    },
+  );
+
   test(
     'initial realtime connect timeout enters visible reconnecting state',
     () async {
@@ -1258,6 +1418,141 @@ void main() {
   );
 
   test(
+    'English then Italian manual pair logs separate translated cards',
+    () async {
+      final textGateway = _FakeTextInterpreterGateway()
+        ..results.add(
+          const TextInterpreterTurnResult(
+            detectedLanguageCode: 'it',
+            detectedLanguageLabel: 'Italian',
+            translatedText: "Hi Sarah, I'm well. And you?",
+          ),
+        );
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        textInterpreterGateway: textGateway,
+      );
+      final startedAt = DateTime.utc(2026, 6, 4, 8, 54);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'English Italian conversation',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'English (US)',
+          targetLanguageLabel: 'Italian (IT)',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          now: () => startedAt,
+        ),
+      );
+
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'turn-en-1',
+            languageCode: 'en',
+            transcript: 'Hi Marco, how are you today?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            itemId: 'turn-en-1',
+            transcript: 'Ciao Marco, come stai oggi?',
+          ),
+        );
+      await _drainAsync();
+
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'turn-it-2',
+          languageCode: 'it',
+          transcript: 'Ciao Sarah, sto bene. E tu?',
+        ),
+      );
+      await _drainAsync();
+
+      final entries = (await harness.repository.loadSnapshot())
+          .meetings
+          .single
+          .transcriptEntries;
+      expect(entries, hasLength(2));
+      expect(entries[0].languageCode, 'EN');
+      expect(entries[0].originalText, 'Hi Marco, how are you today?');
+      expect(entries[0].translatedText, 'Ciao Marco, come stai oggi?');
+      expect(entries[1].languageCode, 'IT');
+      expect(entries[1].originalText, 'Ciao Sarah, sto bene. E tu?');
+      expect(entries[1].translatedText, "Hi Sarah, I'm well. And you?");
+      expect(textGateway.requests, hasLength(1));
+      expect(textGateway.requests.single.sourceLanguageCode, 'it');
+      expect(textGateway.requests.single.targetLanguageCode, 'en');
+      expect(
+        textGateway.requests.single.routeType,
+        TranslationRouteType.directOpenAiFallback,
+      );
+    },
+  );
+
+  test(
+    'target-side spoken output opens only the reverse audio session',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        enableBidirectionalReverseSession: true,
+      );
+      harness.coordinator.setRuntimeOutputOptions(
+        translationOutputEnabled: true,
+        primaryReadAloudOutputEnabled: false,
+        reverseReadAloudOutputEnabled: true,
+      );
+
+      final result = await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          readAloudOutputEnabled: false,
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          now: () => DateTime.utc(2026, 6, 4, 9),
+        ),
+      );
+      await _drainAsync();
+
+      expect(result, LiveRealtimeStartResult.started);
+      expect(harness.playbackGateway.startCount, 1);
+      expect(harness.realtimeGateway.connectCount, 2);
+      expect(harness.realtimeGateway.configs.first.sourceTranscriptionEnabled, isTrue);
+      final reverseConfig = harness.realtimeGateway.configs.last;
+      expect(reverseConfig.sourceTranscriptionEnabled, isFalse);
+      expect(reverseConfig.sourceLanguageCode, 'it');
+      expect(reverseConfig.targetLanguageCode, 'en');
+    },
+  );
+
+  test(
     'bidirectional reverse session opens an audio-only B-to-A translation',
     () async {
       // English source turns are silent on the primary (English-output)
@@ -1274,6 +1569,11 @@ void main() {
         permissionStatus: MicrophonePermissionStatus.granted,
         textInterpreterGateway: textGateway,
         enableBidirectionalReverseSession: true,
+      );
+      harness.coordinator.setRuntimeOutputOptions(
+        translationOutputEnabled: true,
+        primaryReadAloudOutputEnabled: false,
+        reverseReadAloudOutputEnabled: true,
       );
       final startedAt = DateTime.utc(2026, 6, 1, 5);
       await harness.repository.upsertMeeting(
@@ -1348,6 +1648,11 @@ void main() {
       final harness = await _Harness.create(
         permissionStatus: MicrophonePermissionStatus.granted,
         enableBidirectionalReverseSession: true,
+      );
+      harness.coordinator.setRuntimeOutputOptions(
+        translationOutputEnabled: true,
+        primaryReadAloudOutputEnabled: false,
+        reverseReadAloudOutputEnabled: true,
       );
       final startedAt = DateTime.utc(2026, 6, 2, 12);
       await harness.repository.upsertMeeting(
@@ -2261,11 +2566,12 @@ void main() {
     expect(harness.controller.state.phase, LiveSessionPhase.listeningPaused);
     expect(harness.captureGateway.isCapturing, isFalse);
     expect(harness.playbackGateway.isOpen, isFalse);
+    expect(harness.controller.state.isRealtimeSessionOpen, isTrue);
 
     final result = await harness.coordinator.resumeListening();
     expect(result, LiveRealtimeStartResult.started);
     expect(harness.controller.state.phase, LiveSessionPhase.listening);
-    expect(harness.realtimeGateway.connectCount, 2);
+    expect(harness.realtimeGateway.connectCount, 1);
     expect(
       (await harness.repository.loadSnapshot())
           .meetings

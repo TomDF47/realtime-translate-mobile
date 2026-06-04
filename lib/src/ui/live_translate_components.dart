@@ -391,10 +391,16 @@ class StatusPill extends StatelessWidget {
 }
 
 class LanguageSelectorCard extends StatelessWidget {
-  const LanguageSelectorCard({super.key, required this.data, this.onTap});
+  const LanguageSelectorCard({
+    super.key,
+    required this.data,
+    this.onTap,
+    this.onSpokenOutputChanged,
+  });
 
   final LanguageSelectorData data;
   final VoidCallback? onTap;
+  final ValueChanged<bool>? onSpokenOutputChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -402,41 +408,7 @@ class LanguageSelectorCard extends StatelessWidget {
     final label =
         '${data.eyebrow} language selector: ${data.primaryLabel} ${data.secondaryLabel}'
             .trim();
-    final card = _Surface(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  data.eyebrow,
-                  style: AppTextStyles.compact(Theme.of(context).textTheme),
-                ),
-              ),
-              CircleAvatar(
-                backgroundColor: accentColor.withValues(alpha: 0.18),
-                foregroundColor: accentColor,
-                child: Icon(data.icon),
-              ),
-              if (onTap != null) const Icon(Icons.keyboard_arrow_down_rounded),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            data.primaryLabel,
-            style: AppTextStyles.label(Theme.of(context).textTheme),
-          ),
-          Text(
-            data.secondaryLabel,
-            style: AppTextStyles.label(Theme.of(context).textTheme),
-          ),
-        ],
-      ),
-    );
-
-    return Semantics(
+    final languagePicker = Semantics(
       container: true,
       button: onTap != null,
       label: label,
@@ -444,7 +416,117 @@ class LanguageSelectorCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadii.card),
         onTap: onTap,
-        child: card,
+        child: SizedBox(
+          width: double.infinity,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      data.eyebrow,
+                      style: AppTextStyles.compact(
+                        Theme.of(context).textTheme,
+                      ),
+                    ),
+                  ),
+                  CircleAvatar(
+                    backgroundColor: accentColor.withValues(alpha: 0.18),
+                    foregroundColor: accentColor,
+                    child: Icon(data.icon),
+                  ),
+                  if (onTap != null)
+                    const Icon(Icons.keyboard_arrow_down_rounded),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                data.primaryLabel,
+                style: AppTextStyles.label(Theme.of(context).textTheme),
+              ),
+              Text(
+                data.secondaryLabel,
+                style: AppTextStyles.label(Theme.of(context).textTheme),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return _Surface(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          languagePicker,
+          const SizedBox(height: AppSpacing.xs),
+          _SpokenOutputCheckbox(
+            languageLabel: data.primaryLabel,
+            isEnabled: data.spokenOutputEnabled,
+            accentColor: accentColor,
+            onChanged: onSpokenOutputChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SpokenOutputCheckbox extends StatelessWidget {
+  const _SpokenOutputCheckbox({
+    required this.languageLabel,
+    required this.isEnabled,
+    required this.accentColor,
+    required this.onChanged,
+  });
+
+  final String languageLabel;
+  final bool isEnabled;
+  final Color accentColor;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final stateLabel = isEnabled ? 'on' : 'off';
+    final semanticLabel =
+        'Output spoken translation for $languageLabel $stateLabel';
+
+    return Semantics(
+      container: true,
+      button: onChanged != null,
+      checked: isEnabled,
+      excludeSemantics: true,
+      label: semanticLabel,
+      onTap: onChanged == null ? null : () => onChanged!(!isEnabled),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.chip),
+        onTap: onChanged == null ? null : () => onChanged!(!isEnabled),
+        child: Row(
+          children: [
+            IgnorePointer(
+              child: Checkbox(
+                value: isEnabled,
+                onChanged: onChanged == null ? null : (_) {},
+                activeColor: accentColor,
+                checkColor: AppColors.background,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+            Flexible(
+              child: Text(
+                'Output voice',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.compact(
+                  Theme.of(context).textTheme,
+                ).copyWith(color: AppColors.textSecondary),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

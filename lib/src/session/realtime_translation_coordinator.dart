@@ -23,6 +23,7 @@ typedef LiveRealtimeTranscriptCommitted = void Function();
 
 enum LiveRealtimeStartResult {
   started,
+  preparedPaused,
   missingCredential,
   permissionNotGranted,
   failed,
@@ -136,7 +137,8 @@ class LiveRealtimeTranslationCoordinator {
   bool _handlingFailure = false;
   bool _isDisposed = false;
   bool _translationOutputEnabled = true;
-  bool _readAloudOutputEnabled = true;
+  bool _primaryReadAloudOutputEnabled = true;
+  bool _reverseReadAloudOutputEnabled = false;
   int _startGeneration = 0;
   int _reconnectGeneration = 0;
   Timer? _pendingReconnectTimer;
@@ -172,6 +174,7 @@ class LiveRealtimeTranslationCoordinator {
   Future<LiveRealtimeStartResult> start({
     required OpenAiRealtimeTranslationConfig config,
     LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
+    bool startPaused = false,
   }) async {
     _isDisposed = false;
     final startGeneration = ++_startGeneration;
@@ -205,13 +208,17 @@ class LiveRealtimeTranslationCoordinator {
       return LiveRealtimeStartResult.missingCredential;
     }
 
-    await sessionController.startMeeting();
-    if (!_isCurrentStart(startGeneration)) {
-      return LiveRealtimeStartResult.failed;
-    }
-    if (sessionController.state.microphonePermission !=
-        MicrophonePermissionStatus.granted) {
-      return LiveRealtimeStartResult.permissionNotGranted;
+    if (startPaused) {
+      sessionController.preparePausedMeeting();
+    } else {
+      await sessionController.startMeeting();
+      if (!_isCurrentStart(startGeneration)) {
+        return LiveRealtimeStartResult.failed;
+      }
+      if (sessionController.state.microphonePermission !=
+          MicrophonePermissionStatus.granted) {
+        return LiveRealtimeStartResult.permissionNotGranted;
+      }
     }
 
     RealtimeTranslationSession? realtimeSession;
@@ -224,7 +231,8 @@ class LiveRealtimeTranslationCoordinator {
         await realtimeSession.closeImmediately();
         return LiveRealtimeStartResult.failed;
       }
-      final playbackQueueOpen = _shouldStartTranslatedAudioPlayback(config);
+      final playbackQueueOpen =
+          !startPaused && _shouldStartTranslatedAudioPlayback(config);
       if (playbackQueueOpen) {
         await _startPlaybackQueue(config);
       }
@@ -241,14 +249,23 @@ class LiveRealtimeTranslationCoordinator {
         resetTranscriptCommitter: true,
       );
       realtimeSession = null;
-      await _startMicrophoneCapture(config);
-      if (!_isCurrentStart(startGeneration)) {
-        await _closeRealtimeResources(graceful: false, finishTranscript: false);
-        return LiveRealtimeStartResult.failed;
+      if (startPaused) {
+        sessionController.markRealtimePreparedPaused(
+          playbackQueueOpen: playbackQueueOpen,
+        );
+      } else {
+        await _startMicrophoneCapture(config);
+        if (!_isCurrentStart(startGeneration)) {
+          await _closeRealtimeResources(
+            graceful: false,
+            finishTranscript: false,
+          );
+          return LiveRealtimeStartResult.failed;
+        }
+        sessionController.markRealtimeStarted(
+          playbackQueueOpen: playbackQueueOpen,
+        );
       }
-      sessionController.markRealtimeStarted(
-        playbackQueueOpen: playbackQueueOpen,
-      );
       _maybeStartReverseSession();
       diagnostics.info(
         'live_realtime.streaming_started',
@@ -260,7 +277,9 @@ class LiveRealtimeTranslationCoordinator {
           'result': 'started',
         },
       );
-      return LiveRealtimeStartResult.started;
+      return startPaused
+          ? LiveRealtimeStartResult.preparedPaused
+          : LiveRealtimeStartResult.started;
     } catch (error) {
       await realtimeSession?.closeImmediately();
       await _closeRealtimeResources(graceful: false, finishTranscript: true);
@@ -324,14 +343,44 @@ class LiveRealtimeTranslationCoordinator {
   Future<void> pauseListening() async {
     _startGeneration += 1;
     _cancelPendingReconnect();
-    sessionController.pauseListening();
-    await _closeRealtimeResources(graceful: true, finishTranscript: true);
+    await captureGateway.stop();
+    await playbackGateway.stop(clearQueue: true);
+    sessionController.pauseListening(
+      keepRealtimeSessionOpen: _realtimeSession != null,
+    );
   }
 
   Future<LiveRealtimeStartResult> resumeListening() async {
     final config = _activeConfig;
     if (config == null) {
       return LiveRealtimeStartResult.failed;
+    }
+
+    if (_realtimeSession != null && !captureGateway.isCapturing) {
+      final permissionGranted = await sessionController
+          .requestMicrophoneForListening();
+      if (!permissionGranted) {
+        await _closeRealtimeResources(graceful: false, finishTranscript: false);
+        return LiveRealtimeStartResult.permissionNotGranted;
+      }
+      try {
+        final playbackQueueOpen = _shouldStartTranslatedAudioPlayback(config);
+        if (playbackQueueOpen && !playbackGateway.isOpen) {
+          await _startPlaybackQueue(config);
+        }
+        await _startMicrophoneCapture(config);
+        sessionController.markRealtimeStarted(
+          playbackQueueOpen: playbackQueueOpen,
+        );
+        _maybeStartReverseSession();
+        return LiveRealtimeStartResult.started;
+      } catch (error) {
+        await _handleRealtimeFailure(
+          OpenAiRealtimeFailure.fromSocketError(error),
+          allowReconnect: true,
+        );
+        return LiveRealtimeStartResult.failed;
+      }
     }
 
     return start(
@@ -352,16 +401,23 @@ class LiveRealtimeTranslationCoordinator {
   }
 
   Future<void> pauseReadAloudOutput() {
-    _readAloudOutputEnabled = false;
+    _primaryReadAloudOutputEnabled = false;
+    _reverseReadAloudOutputEnabled = false;
+    unawaited(_closeReverseSession());
     return playbackGateway.stop(clearQueue: true);
   }
 
   void setRuntimeOutputOptions({
     required bool translationOutputEnabled,
-    required bool readAloudOutputEnabled,
+    required bool primaryReadAloudOutputEnabled,
+    required bool reverseReadAloudOutputEnabled,
   }) {
     _translationOutputEnabled = translationOutputEnabled;
-    _readAloudOutputEnabled = readAloudOutputEnabled;
+    _primaryReadAloudOutputEnabled = primaryReadAloudOutputEnabled;
+    _reverseReadAloudOutputEnabled = reverseReadAloudOutputEnabled;
+    if (!reverseReadAloudOutputEnabled) {
+      unawaited(_closeReverseSession());
+    }
   }
 
   Future<LiveRealtimeDebugProofResult>
@@ -545,7 +601,7 @@ class LiveRealtimeTranslationCoordinator {
           ),
         );
       case OpenAiRealtimeAudioDelta():
-        if (!_shouldHandleTranslatedAudio()) {
+        if (!_shouldHandlePrimaryTranslatedAudio(null)) {
           return;
         }
         _enqueueTranslatedAudio(event);
@@ -577,22 +633,38 @@ class LiveRealtimeTranslationCoordinator {
         (_activeConfig?.translationOutputEnabled ?? true);
   }
 
-  bool _shouldHandleTranslatedAudio() {
-    final config = _activeConfig;
-    if (config == null) {
-      return true;
+  bool _shouldHandlePrimaryTranslatedAudio(
+    OpenAiRealtimeTranslationConfig? config,
+  ) {
+    final effectiveConfig = config ?? _activeConfig;
+    if (effectiveConfig == null) {
+      return _translationOutputEnabled && _primaryReadAloudOutputEnabled;
     }
 
-    return _shouldStartTranslatedAudioPlayback(config);
+    return _translationOutputEnabled &&
+        _primaryReadAloudOutputEnabled &&
+        effectiveConfig.translationOutputEnabled &&
+        effectiveConfig.readAloudOutputEnabled;
+  }
+
+  bool _shouldHandleReverseTranslatedAudio(
+    OpenAiRealtimeTranslationConfig? config,
+  ) {
+    final effectiveConfig = config ?? _activeConfig;
+    if (effectiveConfig == null) {
+      return _translationOutputEnabled && _reverseReadAloudOutputEnabled;
+    }
+
+    return _translationOutputEnabled &&
+        _reverseReadAloudOutputEnabled &&
+        effectiveConfig.translationOutputEnabled;
   }
 
   bool _shouldStartTranslatedAudioPlayback(
     OpenAiRealtimeTranslationConfig config,
   ) {
-    return _translationOutputEnabled &&
-        _readAloudOutputEnabled &&
-        config.translationOutputEnabled &&
-        config.readAloudOutputEnabled;
+    return _shouldHandlePrimaryTranslatedAudio(config) ||
+        _shouldHandleReverseTranslatedAudio(config);
   }
 
   void _commitTranscript(Future<StoredTranscriptEntry?>? commit) {
@@ -867,7 +939,7 @@ class LiveRealtimeTranslationCoordinator {
     if (config == null || !_bidirectionalRuntime.isPairLocked) {
       return;
     }
-    if (!_shouldStartTranslatedAudioPlayback(config)) {
+    if (!_shouldHandleReverseTranslatedAudio(config)) {
       return;
     }
 
@@ -915,6 +987,7 @@ class LiveRealtimeTranslationCoordinator {
       final reverseConfig = config.copyWith(
         targetLanguageCode: reverseTarget,
         sourceLanguageCode: primaryTarget,
+        readAloudOutputEnabled: true,
         sourceTranscriptionEnabled: false,
       );
       session = await _connectWithTimeout(
@@ -973,7 +1046,7 @@ class LiveRealtimeTranslationCoordinator {
 
     switch (event) {
       case OpenAiRealtimeAudioDelta():
-        if (_shouldHandleTranslatedAudio()) {
+        if (_shouldHandleReverseTranslatedAudio(null)) {
           _enqueueTranslatedAudio(event);
         }
       case OpenAiRealtimeError():
@@ -1315,6 +1388,10 @@ class LiveRealtimeTranslationCoordinator {
   Future<void> _decodeAndEnqueueTranslatedAudio(
     OpenAiRealtimeAudioDelta event,
   ) async {
+    if (!playbackGateway.isOpen) {
+      return;
+    }
+
     final bytes = base64Decode(event.base64Audio);
     if (bytes.isEmpty) {
       return;
@@ -1415,7 +1492,11 @@ class LiveRealtimeTranslationCoordinator {
         return;
       }
 
-      final playbackQueueOpen = _shouldStartTranslatedAudioPlayback(config);
+      final shouldStayPaused =
+          sessionController.state.phase == LiveSessionPhase.listeningPaused &&
+          !sessionController.state.isMicrophoneCaptureOpen;
+      final playbackQueueOpen =
+          !shouldStayPaused && _shouldStartTranslatedAudioPlayback(config);
       if (playbackQueueOpen) {
         await _startPlaybackQueue(config);
       }
@@ -1433,10 +1514,15 @@ class LiveRealtimeTranslationCoordinator {
         resetTranscriptCommitter: false,
       );
       realtimeSession = null;
-      await _startMicrophoneCapture(config);
-      sessionController.markRealtimeRecovered(
-        playbackQueueOpen: playbackQueueOpen,
-      );
+      if (shouldStayPaused) {
+        sessionController.markRealtimePreparedPaused();
+      } else {
+        await _startMicrophoneCapture(config);
+        sessionController.markRealtimeRecovered(
+          playbackQueueOpen: playbackQueueOpen,
+        );
+      }
+      _maybeStartReverseSession();
       diagnostics.info(
         'live_realtime.reconnect_succeeded',
         fields: {

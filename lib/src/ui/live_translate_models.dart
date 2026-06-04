@@ -91,6 +91,7 @@ class LanguageSelectorData {
     required this.secondaryLabel,
     required this.icon,
     required this.accent,
+    this.spokenOutputEnabled = false,
   });
 
   final String eyebrow;
@@ -98,6 +99,7 @@ class LanguageSelectorData {
   final String secondaryLabel;
   final IconData icon;
   final LiveAccent accent;
+  final bool spokenOutputEnabled;
 }
 
 class FeatureChipData {

@@ -26,3 +26,7 @@ DerivedData/
 # Python tooling artifacts (e.g. scripts/check-supply-chain.py bytecode cache)
 __pycache__/
 *.pyc
+
+# Local agent/test artifacts
+artifacts/
+.codex-remote-attachments/

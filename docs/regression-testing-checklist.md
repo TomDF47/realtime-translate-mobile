@@ -21,10 +21,13 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Tap `Start interpreter` without a saved credential and verify `OpenAI setup required` appears before microphone permission.
 - Save only a placeholder or current test credential through `OpenAI setup`; verify the saved value is not displayed.
 - Start an interpreter session with fake or valid local credential and granted microphone permission.
-- Verify the live screen starts with the selected manual pair such as `Italian <-> English`, source/target language selectors, live status, elapsed timer, transcript area, `Stop Listening`, and `Pause Listening`.
-- Verify the active live screen does not show direction switch, `Translate Text`, read-aloud controls, speaker/headphone chips, live-header AI chat, live-screen export controls, or `Resume read-aloud meeting`.
+- Verify the live screen starts paused but warm-connected with the selected manual pair such as `Italian <-> English`, source/target language selectors, elapsed timer, transcript area, `Stop Listening`, and `Resume Listening`.
+- Verify both language cards show an `Output voice` checkbox, both unchecked by default on a clean route.
+- Verify the active live screen does not show direction switch, `Translate Text`, legacy global read-aloud controls, speaker/headphone chips, live-header AI chat, live-screen export controls, or `Resume read-aloud meeting`.
 - Open both language selectors, verify `Auto-detect` is not offered as a source choice, choose a different supported source/target, and verify the status card and stored meeting route update to the new pair.
+- Check one side's `Output voice` box, leave the other side unchecked, restart the app, start interpreter, and verify the language pair and checkbox states are restored.
 - Feed or fake source turns in both selected languages and verify transcript rows keep original and translated text in separate fields.
+- For an English <-> Italian pair, verify English speech creates an EN card with English original and Italian translation, then Italian speech creates an IT card with Italian original and English translation.
 - Open the live menu and verify `Meeting history` responds while `Generate export` and `Open generated exports` remain absent from the active live menu.
 - Open AI chat from meeting history or another non-live-header entry point and close it with the close button and drag/back dismissal.
 
@@ -39,7 +42,10 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 ## Buttons And Toggles
 
 - Verify `Translate Text` is absent from the active interpreter flow before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
-- Verify read-aloud, pause/resume read-aloud, speaker/headphone state, and switch-direction controls are hidden in the active interpreter flow before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
+- Verify legacy read-aloud, pause/resume read-aloud, speaker/headphone state, and switch-direction controls are hidden in the active interpreter flow before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
+- Verify `Output voice` checkboxes remain available in the `From` and `To` cards before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
+- Tap `Resume Listening`; verify microphone permission is requested only at resume time and the bottom control changes to `Pause Listening`.
+- Tap `Pause Listening`; verify microphone capture and translated audio stop, the active meeting remains visible, and `Resume Listening` reuses the warm realtime session when available.
 - Tap `Stop Listening`; verify capture/realtime/playback resources close and the setup screen returns.
 - If `Jump to Live` is visible, tap it and verify the list returns to the latest transcript entry or shows the latest-state confirmation.
 - In AI chat, tap prompt chips, send, helpful, not helpful, regenerate, and close; verify no control is inert.
@@ -55,7 +61,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 ## Transcript Chunking And Timer
 
-- Latest Tom feedback regression: start a live meeting from setup and verify the app immediately moves to the live surface with a `Connecting` or microphone-permission state instead of looking stalled on the start screen.
+- Latest Tom feedback regression: start a live meeting from setup and verify the app immediately moves to the live surface with `Connecting to OpenAI` followed by `Listening paused`, not a stalled start screen or an indefinite preparing screen.
 - Verify the elapsed timer starts at `00:00` for a new active meeting.
 - Verify the timer advances only while microphone capture is open.
 - Verify the timer pauses during stopped/offline/reconnecting/backgrounded states.
