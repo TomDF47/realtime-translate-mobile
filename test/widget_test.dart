@@ -195,16 +195,16 @@ void main() {
 
     await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('English (US)'));
+    await tester.ensureVisible(find.text('English (US)').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('English (US)'));
+    await tester.tap(find.text('English (US)').last);
     await tester.pumpAndSettle();
 
     await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Italian (IT)'));
+    await tester.ensureVisible(find.text('Italian (IT)').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Italian (IT)'));
+    await tester.tap(find.text('Italian (IT)').last);
     await tester.pumpAndSettle();
 
     await tester.tap(
@@ -352,7 +352,7 @@ void main() {
 
       await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
       await tester.pumpAndSettle();
-      final englishSourceOption = find.text('English (US)');
+      final englishSourceOption = find.text('English (US)').last;
       await tester.ensureVisible(englishSourceOption);
       await tester.pumpAndSettle();
       await tester.tap(englishSourceOption);
@@ -360,7 +360,7 @@ void main() {
 
       await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
       await tester.pumpAndSettle();
-      final arabicTargetOption = find.text('Arabic');
+      final arabicTargetOption = find.text('Arabic').last;
       await tester.ensureVisible(arabicTargetOption);
       await tester.pumpAndSettle();
       await tester.tap(arabicTargetOption);
