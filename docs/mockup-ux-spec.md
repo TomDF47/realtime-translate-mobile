@@ -94,7 +94,7 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - The active live interpreter shows two compact language selector cards: `From` and `To`.
   - The default pair is Italian <-> English.
   - Do not show a direction switch in the live interpreter flow; the selected pair is bidirectional.
-  - Each language card includes a compact `Output voice` checkbox under the language labels. The checkbox is off by default, persists with the recent language route, and controls whether that side's translated text is spoken after that speaker talks.
+  - Each language card includes a compact `Output voice` checkbox under the language labels. The checkbox is off by default, persists with the recent language route, and controls whether that side's finalized translated text is spoken after that speaker talks. Spoken output is one utterance at a time.
 - Feature toggles row:
   - Hide `Translate Text` from the active issue #30 live interpreter flow.
   - Hide legacy global read-aloud, speaker, and headphone controls. Spoken output belongs to the per-language `Output voice` checkboxes instead of a global read-aloud toggle.
@@ -123,7 +123,7 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
 ### Required States
 
 - Listening status is visually active and calm, not alarming.
-- Paused/warm-connected status is clear but not alarming; it should communicate that OpenAI is connected while microphone capture and translated audio are stopped.
+- Paused/warm-connected status is clear but not alarming; it should communicate that OpenAI is connected while microphone capture, realtime audio playback, and phone-local spoken output are stopped.
 - Toggle states must be clear without requiring explanatory text.
 - Transcript list should support scrolling behind the fixed bottom control bar with safe bottom padding.
 - `Jump to Live` appears when the list is not pinned to the latest transcript entry.

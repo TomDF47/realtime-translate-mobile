@@ -16,6 +16,7 @@ import 'live_session_controller.dart';
 import 'microphone_capture.dart';
 import 'microphone_permission.dart';
 import 'realtime_transcript_committer.dart';
+import 'spoken_translation_output.dart';
 import 'translated_audio_playback.dart';
 
 typedef LiveRealtimeReconnectDelay = Future<void> Function(Duration delay);
@@ -54,10 +55,13 @@ class LiveRealtimeTranslationCoordinator {
     this.startupStepTimeout = const Duration(seconds: 10),
     this.diagnostics = const PrivacySafeDiagnostics(),
     TextInterpreterGateway? textInterpreterGateway,
+    SpokenTranslationOutputGateway? spokenOutputGateway,
     this.onTranscriptCommitted,
     this.enableBidirectionalReverseSession = false,
   }) : playbackGateway =
            playbackGateway ?? NoopTranslatedAudioPlaybackGateway(),
+       spokenOutputGateway =
+           spokenOutputGateway ?? NoopSpokenTranslationOutputGateway(),
        textInterpreterGateway =
            textInterpreterGateway ?? OpenAiResponsesTextInterpreterGateway();
 
@@ -78,6 +82,7 @@ class LiveRealtimeTranslationCoordinator {
 
   final PrivacySafeDiagnostics diagnostics;
   final TextInterpreterGateway textInterpreterGateway;
+  final SpokenTranslationOutputGateway spokenOutputGateway;
   final LiveRealtimeTranscriptCommitted? onTranscriptCommitted;
 
   /// When true, once the language pair is locked the coordinator opens a second
@@ -139,6 +144,10 @@ class LiveRealtimeTranslationCoordinator {
   bool _translationOutputEnabled = true;
   bool _primaryReadAloudOutputEnabled = true;
   bool _reverseReadAloudOutputEnabled = false;
+  bool _sourceSpokenOutputEnabled = false;
+  bool _targetSpokenOutputEnabled = false;
+  int _spokenOutputGeneration = 0;
+  final Set<String> _spokenOutputEntryIds = <String>{};
   int _startGeneration = 0;
   int _reconnectGeneration = 0;
   Timer? _pendingReconnectTimer;
@@ -333,17 +342,21 @@ class LiveRealtimeTranslationCoordinator {
 
   Future<void> stop() async {
     _startGeneration += 1;
+    _spokenOutputGeneration += 1;
     _cancelPendingReconnect();
     _activeConfig = null;
     _activeTranscriptCommitTarget = null;
     _resetInterpreterRuntimeIfNeeded(meetingId: null, routeKey: null);
+    await spokenOutputGateway.stop();
     await _closeRealtimeResources(graceful: true, finishTranscript: true);
     sessionController.stopMeeting();
   }
 
   Future<void> pauseListening() async {
     _startGeneration += 1;
+    _spokenOutputGeneration += 1;
     _cancelPendingReconnect();
+    await spokenOutputGateway.stop();
     await captureGateway.stop();
     await playbackGateway.stop(clearQueue: true);
     sessionController.pauseListening(
@@ -392,10 +405,12 @@ class LiveRealtimeTranslationCoordinator {
 
   Future<void> discardActiveSession() async {
     _startGeneration += 1;
+    _spokenOutputGeneration += 1;
     _cancelPendingReconnect();
     _activeConfig = null;
     _activeTranscriptCommitTarget = null;
     _resetInterpreterRuntimeIfNeeded(meetingId: null, routeKey: null);
+    await spokenOutputGateway.stop();
     await _closeRealtimeResources(graceful: false, finishTranscript: false);
     _transcriptCommitter = null;
     sessionController.stopMeeting();
@@ -404,20 +419,31 @@ class LiveRealtimeTranslationCoordinator {
   Future<void> pauseReadAloudOutput() {
     _primaryReadAloudOutputEnabled = false;
     _reverseReadAloudOutputEnabled = false;
+    _sourceSpokenOutputEnabled = false;
+    _targetSpokenOutputEnabled = false;
+    _spokenOutputGeneration += 1;
+    unawaited(spokenOutputGateway.stop());
     unawaited(_closeReverseSession());
     return playbackGateway.stop(clearQueue: true);
   }
 
   void setRuntimeOutputOptions({
     required bool translationOutputEnabled,
-    required bool primaryReadAloudOutputEnabled,
-    required bool reverseReadAloudOutputEnabled,
+    required bool sourceSpokenOutputEnabled,
+    required bool targetSpokenOutputEnabled,
   }) {
     _translationOutputEnabled = translationOutputEnabled;
-    _primaryReadAloudOutputEnabled = primaryReadAloudOutputEnabled;
-    _reverseReadAloudOutputEnabled = reverseReadAloudOutputEnabled;
-    if (!reverseReadAloudOutputEnabled) {
-      unawaited(_closeReverseSession());
+    _sourceSpokenOutputEnabled = sourceSpokenOutputEnabled;
+    _targetSpokenOutputEnabled = targetSpokenOutputEnabled;
+    // Normal interpreter spoken output is generated from finalized translated
+    // text through [spokenOutputGateway]. Keep realtime audio playback disabled
+    // so two checked language cards cannot start two concurrent audio streams.
+    _primaryReadAloudOutputEnabled = false;
+    _reverseReadAloudOutputEnabled = false;
+    unawaited(_closeReverseSession());
+    if (!sourceSpokenOutputEnabled && !targetSpokenOutputEnabled) {
+      _spokenOutputGeneration += 1;
+      unawaited(spokenOutputGateway.stop());
     }
   }
 
@@ -537,7 +563,7 @@ class LiveRealtimeTranslationCoordinator {
       },
     );
     _captureSubscription = captureGateway.chunks.listen(
-      (chunk) => realtimeSession.appendPcm16Audio(chunk.bytes),
+      (chunk) => unawaited(_handlePrimaryCaptureChunk(chunk, realtimeSession)),
       onError: (error) {
         unawaited(
           _handleRealtimeFailure(
@@ -550,6 +576,27 @@ class LiveRealtimeTranslationCoordinator {
         );
       },
     );
+  }
+
+  Future<void> _handlePrimaryCaptureChunk(
+    MicrophonePcm16Chunk chunk,
+    RealtimeTranslationSession realtimeSession,
+  ) async {
+    if (!identical(_realtimeSession, realtimeSession)) {
+      return;
+    }
+
+    if (spokenOutputGateway.isSpeaking) {
+      if (!_isLikelySpeechInterrupt(chunk)) {
+        return;
+      }
+      await _interruptSpokenOutput();
+      if (!identical(_realtimeSession, realtimeSession)) {
+        return;
+      }
+    }
+
+    realtimeSession.appendPcm16Audio(chunk.bytes);
   }
 
   void _handleRealtimeEvent(OpenAiRealtimeEvent event) {
@@ -566,6 +613,7 @@ class LiveRealtimeTranslationCoordinator {
           return;
         }
         if (event.kind == OpenAiRealtimeTranscriptKind.source) {
+          unawaited(_interruptSpokenOutput());
           _noteSourceQueuedAfterFallbackAuthoritativeEntry(event);
           _commitSourceDeltaAndMaybeFallback(event);
           return;
@@ -586,6 +634,7 @@ class LiveRealtimeTranslationCoordinator {
           return;
         }
         if (event.kind == OpenAiRealtimeTranscriptKind.source) {
+          unawaited(_interruptSpokenOutput());
           _noteSourceQueuedAfterFallbackAuthoritativeEntry(event);
           _commitSourceTranscriptAndMaybeFallback(event);
           return;
@@ -706,6 +755,7 @@ class LiveRealtimeTranslationCoordinator {
             if (entry.translatedText.trim().isNotEmpty) {
               _outputTranscriptTurns += 1;
             }
+            _speakTranslatedEntryIfNeeded(entry);
             // A finalized card that carries translated output but no original
             // source text is the "translation arrived but original source
             // never did" failure mode from Tom's installed-app retest. Surface
@@ -771,6 +821,7 @@ class LiveRealtimeTranslationCoordinator {
             }
             _noteSourceTranscriptForEntry(entry);
             _trackSourceTurnForFallback(entry);
+            _speakTranslatedEntryIfNeeded(entry);
           })
           .catchError((Object error, StackTrace stackTrace) {
             diagnostics.warning(
@@ -1234,6 +1285,9 @@ class LiveRealtimeTranslationCoordinator {
           status: 'final',
         ),
       );
+      _speakTranslatedEntryIfNeeded(
+        turn.entry.copyWith(translatedText: translatedText, status: 'final'),
+      );
       _fallbackCompletedEntryIds.add(turn.entry.id);
       onTranscriptCommitted?.call();
     } on TextInterpreterCredentialException {
@@ -1317,6 +1371,7 @@ class LiveRealtimeTranslationCoordinator {
     _fallbackInFlightEntryIds.clear();
     _fallbackCompletedEntryIds.clear();
     _fallbackAuthoritativeEntryIds.clear();
+    _spokenOutputEntryIds.clear();
     _sourceQueuedAfterFallbackAuthoritativeEntry = false;
     _resetTranscriptSignalCounters();
   }
@@ -1357,6 +1412,155 @@ class LiveRealtimeTranslationCoordinator {
     } on ArgumentError {
       return code.toUpperCase();
     }
+  }
+
+  void _speakTranslatedEntryIfNeeded(StoredTranscriptEntry entry) {
+    if (!_translationOutputEnabled) {
+      return;
+    }
+    final originalText = entry.originalText.trim();
+    final translatedText = entry.translatedText.trim();
+    if (originalText.isEmpty || translatedText.isEmpty) {
+      return;
+    }
+
+    final sourceCode = entry.languageCode.trim().toLowerCase();
+    if (sourceCode.isEmpty || sourceCode == 'auto') {
+      return;
+    }
+
+    final routeSide = _routeSideForSourceLanguage(sourceCode);
+    if (routeSide == null || !_spokenOutputEnabledForSide(routeSide)) {
+      return;
+    }
+
+    final direction = _bidirectionalRuntime.directionForSource(sourceCode);
+    final outputLanguageCode =
+        direction?.targetLanguageCode ?? _fallbackOutputLanguageFor(sourceCode);
+    if (outputLanguageCode == null || outputLanguageCode.trim().isEmpty) {
+      return;
+    }
+    if (!_spokenOutputEntryIds.add(entry.id)) {
+      return;
+    }
+
+    final utterance = SpokenTranslationUtterance(
+      id: '${entry.id}-${DateTime.now().microsecondsSinceEpoch}',
+      routeSide: routeSide,
+      sourceLanguageCode: sourceCode,
+      outputLanguageCode: outputLanguageCode.trim().toLowerCase(),
+      text: translatedText,
+    );
+    final generation = ++_spokenOutputGeneration;
+    unawaited(_speakTranslatedUtterance(utterance, generation));
+  }
+
+  SpokenTranslationRouteSide? _routeSideForSourceLanguage(String sourceCode) {
+    final target = _activeTranscriptCommitTarget;
+    if (target == null) {
+      return null;
+    }
+    final selectedSource = target.sourceLanguageCode.trim().toLowerCase();
+    final selectedTarget = target.targetLanguageCode.trim().toLowerCase();
+    if (sourceCode == selectedSource) {
+      return SpokenTranslationRouteSide.source;
+    }
+    if (sourceCode == selectedTarget) {
+      return SpokenTranslationRouteSide.target;
+    }
+    return null;
+  }
+
+  bool _spokenOutputEnabledForSide(SpokenTranslationRouteSide side) {
+    return switch (side) {
+      SpokenTranslationRouteSide.source => _sourceSpokenOutputEnabled,
+      SpokenTranslationRouteSide.target => _targetSpokenOutputEnabled,
+    };
+  }
+
+  String? _fallbackOutputLanguageFor(String sourceCode) {
+    final target = _activeTranscriptCommitTarget;
+    if (target == null) {
+      return null;
+    }
+    final selectedSource = target.sourceLanguageCode.trim().toLowerCase();
+    final selectedTarget = target.targetLanguageCode.trim().toLowerCase();
+    if (sourceCode == selectedSource) {
+      return selectedTarget;
+    }
+    if (sourceCode == selectedTarget) {
+      return selectedSource;
+    }
+    return null;
+  }
+
+  Future<void> _speakTranslatedUtterance(
+    SpokenTranslationUtterance utterance,
+    int generation,
+  ) async {
+    try {
+      await spokenOutputGateway.stop();
+      if (_isDisposed || generation != _spokenOutputGeneration) {
+        return;
+      }
+      await spokenOutputGateway.speak(utterance);
+    } catch (error) {
+      diagnostics.warning(
+        'spoken_output.failed',
+        fields: {
+          'operation': 'spokenOutput.speak',
+          'resource': 'spokenOutput',
+          'result': 'failed',
+          'errorCode': error.runtimeType.toString(),
+          'targetLanguage': utterance.outputLanguageCode,
+        },
+      );
+    }
+  }
+
+  Future<void> _interruptSpokenOutput() async {
+    if (!spokenOutputGateway.isSpeaking) {
+      return;
+    }
+
+    _spokenOutputGeneration += 1;
+    try {
+      await spokenOutputGateway.stop();
+    } catch (error) {
+      diagnostics.warning(
+        'spoken_output.stop_failed',
+        fields: {
+          'operation': 'spokenOutput.stop',
+          'resource': 'spokenOutput',
+          'result': 'failed',
+          'errorCode': error.runtimeType.toString(),
+        },
+      );
+    }
+  }
+
+  bool _isLikelySpeechInterrupt(MicrophonePcm16Chunk chunk) {
+    final data = ByteData.sublistView(chunk.bytes);
+    final sampleCount = data.lengthInBytes ~/ 2;
+    if (sampleCount == 0) {
+      return false;
+    }
+
+    const rmsThreshold = 1200;
+    const peakThreshold = 5000;
+    var squareSum = 0;
+    var peak = 0;
+    for (var offset = 0; offset + 1 < data.lengthInBytes; offset += 2) {
+      final sample = data.getInt16(offset, Endian.little);
+      final magnitude = sample.abs();
+      if (magnitude > peak) {
+        peak = magnitude;
+      }
+      squareSum += sample * sample;
+    }
+
+    return peak >= peakThreshold ||
+        squareSum >= sampleCount * rmsThreshold * rmsThreshold;
   }
 
   void _enqueueTranslatedAudio(OpenAiRealtimeAudioDelta event) {
@@ -1654,11 +1858,13 @@ class LiveRealtimeTranslationCoordinator {
     _realtimeSession = null;
     _realtimeSubscription = null;
     _captureSubscription = null;
+    _spokenOutputGeneration += 1;
 
     _closingIntentionally = true;
     _processTranscriptsDuringIntentionalClose = graceful && finishTranscript;
     try {
       await _closeReverseSession();
+      await spokenOutputGateway.stop();
       await captureGateway.stop();
       await _cancelSubscription(captureSubscription);
       await playbackGateway.stop(clearQueue: true);

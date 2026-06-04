@@ -14,6 +14,7 @@ import 'package:realtime_translate_mobile/src/mock/mock_live_translate_data.dart
 import 'package:realtime_translate_mobile/src/session/live_session_controller.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
+import 'package:realtime_translate_mobile/src/session/spoken_translation_output.dart';
 import 'package:realtime_translate_mobile/src/session/translated_audio_playback.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
@@ -248,6 +249,72 @@ void main() {
     snapshot = await repository.loadSnapshot();
     route = snapshot.recentLanguageRoutes.first;
     expect(route.sourceSpokenOutputEnabled, isTrue);
+  });
+
+  testWidgets('restored spoken output speaks first translation without cycling', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    final spokenOutputGateway = _FakeSpokenTranslationOutputGateway();
+    await _seedCredential(repository);
+    await repository.saveRecentLanguageRoute(
+      LanguageRoutePreference(
+        sourceLanguageLabel: 'English (US)',
+        targetLanguageLabel: 'Italian (IT)',
+        updatedAt: DateTime.utc(2026, 6, 4, 12),
+        sourceSpokenOutputEnabled: true,
+      ),
+    );
+
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+        spokenTranslationOutputGateway: spokenOutputGateway,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start interpreter'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('English <-> Italian'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel('Output spoken translation for English on'),
+      findsOneWidget,
+    );
+    expect(realtimeGateway.primaryConfig.readAloudOutputEnabled, isFalse);
+
+    realtimeGateway.primarySession
+      ..addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'turn-en-1',
+          languageCode: 'en',
+          transcript: 'Hi Marco, how are you today?',
+        ),
+      )
+      ..addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.output_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          itemId: 'turn-en-1',
+          transcript: 'Ciao Marco, come stai oggi?',
+        ),
+      );
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pumpAndSettle();
+
+    expect(spokenOutputGateway.utterances, hasLength(1));
+    expect(spokenOutputGateway.utterances.single.outputLanguageCode, 'it');
+    expect(
+      spokenOutputGateway.utterances.single.text,
+      'Ciao Marco, come stai oggi?',
+    );
   });
 
   testWidgets('starts interpreter with manual language pair controls', (
@@ -1714,6 +1781,26 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
     if (completer != null && !completer.isCompleted) {
       completer.complete();
     }
+  }
+}
+
+class _FakeSpokenTranslationOutputGateway
+    implements SpokenTranslationOutputGateway {
+  final List<SpokenTranslationUtterance> utterances = [];
+  bool _isSpeaking = false;
+
+  @override
+  bool get isSpeaking => _isSpeaking;
+
+  @override
+  Future<void> speak(SpokenTranslationUtterance utterance) async {
+    utterances.add(utterance);
+    _isSpeaking = false;
+  }
+
+  @override
+  Future<void> stop() async {
+    _isSpeaking = false;
   }
 }
 

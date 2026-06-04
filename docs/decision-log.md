@@ -2,7 +2,7 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
-## 2026-06-04 - Warm Paused Startup With Per-Side Spoken Output Opt-In
+## 2026-06-04 - Warm Paused Startup With Serialized Phone-Local Spoken Output
 
 Status: Accepted as code direction (local Windows checkout still relies on CI/Fedora for Flutter analyzer, tests, APK build, and installed-device proof)
 
@@ -11,24 +11,28 @@ Context:
 - Tom's Samsung retest showed the app could create English and Italian transcript boxes after a pause/resume cycle, but startup and language changes were still fragile: the first microphone permission flow could fall back to a preparing screen, English-to-Italian speech sometimes wrote English into the translation field, and unexpected translated audio played.
 - The desired interpreter contract is a manual two-language pair, not automatic pair discovery. For English <-> Italian, English speech should create an EN card with English original and Italian translation; Italian speech should create an IT card with Italian original and English translation.
 - Spoken output should be available, but it is not the default. Users need side-specific control because each speaker may or may not want the phone to speak the translation after their own utterances.
+- Tom's next spoken-output retest showed two simultaneous voices when both checkboxes were checked, app speech feeding the microphone, janky output, persisted checkboxes not enabling audio until cycled, and an Italian-to-English turn with incomplete translation.
 
 Decision:
 
 - Starting an interpreter with a saved OpenAI credential opens the live screen in `listeningPaused`, connects the primary `/v1/realtime/translations` session in the background, and does not request microphone permission or start capture until the user taps `Resume Listening`.
-- Pausing listening stops microphone capture and translated-audio playback, but keeps the realtime session warm when available. Resume reuses the warm session and only requests microphone permission/capture at that point.
+- Pausing listening stops microphone capture, legacy realtime audio playback, and any in-progress spoken output, but keeps the realtime session warm when available. Resume reuses the warm session and only requests microphone permission/capture at that point.
 - Each active `From` and `To` language card has an `Output voice` checkbox. Both checkboxes default off, persist with the recent language route, and are restored across sessions like the language pair.
 - The checkbox on the side whose speaker just talked controls whether the app speaks that turn's translated text. In an English <-> Italian pair, checking English speaks the Italian translation after English speech; checking Italian speaks the English translation after Italian speech.
-- The primary translated-audio path is enabled only for the selected side whose translation is produced by the primary realtime output language. The reverse audio-only session is enabled only when the opposite side's checkbox requires spoken output. Text transcript cards remain the single source of truth and still use direct OpenAI text fallback for reverse/text-only directions.
+- The active UI speaks finalized translated card text through a fakeable phone-local output gateway backed on Android by TextToSpeech. It does not open simultaneous primary/reverse realtime audio output for normal spoken-output behavior.
+- Spoken output is serialized: a new source utterance stops any prior voice, and the coordinator deduplicates each finalized card so one turn produces at most one spoken output.
+- Microphone chunks are suppressed while app TTS is speaking so the phone does not immediately translate its own speaker output. A loud PCM16 speech interrupt stops TTS and resumes forwarding the new human speech to OpenAI. Android capture enables platform acoustic echo cancellation and noise suppression when available.
+- Text transcript cards remain the single source of truth and still use direct OpenAI text fallback for reverse/text-only directions.
 
 Implications:
 
 - The active UI remains text-first by default while allowing intentional spoken translation output without reintroducing hidden global read-aloud controls.
 - This adds no dependency, Android permission, backend route, app-owned network path, credential handling change, microphone recording persistence, or logging surface. The phone-only direct-OpenAI privacy boundary is unchanged.
-- Regression coverage must include warm paused startup, pause/resume warm reuse, per-side checkbox persistence, English then Italian separate cards, and reverse-audio startup only when the matching side is checked.
+- Regression coverage must include warm paused startup, pause/resume warm reuse, per-side checkbox persistence, restored checkbox state activating before the first spoken turn, English then Italian separate cards, one spoken utterance per finalized card, no reverse realtime audio session for active UI spoken output, previous voice interruption on new speech, and microphone suppression during app speech.
 
 ## 2026-06-03 - Text-First Live Interpreter Suppresses Default Speaker And Reverse Audio
 
-Status: Partially superseded by `2026-06-04 - Warm Paused Startup With Per-Side Spoken Output Opt-In`
+Status: Partially superseded by `2026-06-04 - Warm Paused Startup With Serialized Phone-Local Spoken Output`
 
 Context:
 
@@ -38,7 +42,7 @@ Context:
 
 Decision:
 
-- Default the active phone live interpreter to text-first: at that point the legacy `_readAloudEnabled` flag started false, the main app did not enable the best-effort reverse audio session, and the coordinator skipped translated-audio playback queue startup whenever read-aloud was disabled. The 2026-06-04 decision supersedes the global flag with per-side `Output voice` checkboxes and opens reverse audio only for checked-side spoken output.
+- Default the active phone live interpreter to text-first: at that point the legacy `_readAloudEnabled` flag started false, the main app did not enable the best-effort reverse audio session, and the coordinator skipped translated-audio playback queue startup whenever read-aloud was disabled. The 2026-06-04 decision supersedes the global flag with per-side `Output voice` checkboxes and serialized phone-local TTS, leaving reverse realtime audio closed in normal active UI operation.
 - Keep microphone capture and the primary `/v1/realtime/translations` text/transcript path active; only speaker playback/reverse audio are suppressed.
 - Let stable source deltas (sentence-ending punctuation or long text) trigger the same direct OpenAI fallback used by completed source turns when the detected source language is already the primary realtime output language or the selected target requires direct fallback.
 - Suppress no-item realtime output for a row once the direct text fallback has marked that row authoritative, so an English realtime echo cannot overwrite the Italian fallback translation.
@@ -68,7 +72,7 @@ Decision:
 
 Implications:
 
-- This reduces dependence on live language discovery for the header, reverse-session startup, and text fallback routing while preserving local language detection as a transcript-row fallback when OpenAI metadata is absent.
+- This reduces dependence on live language discovery for the header, spoken-output routing, and text fallback routing while preserving local language detection as a transcript-row fallback when OpenAI metadata is absent.
 - No dependency, Android permission, backend route, app-owned network path, credential handling, microphone recording, or logging surface is added. The phone-only direct-OpenAI privacy boundary is unchanged.
 - Product docs and regression checks now require visible source/target selectors in the active live interpreter and absence of only the secondary controls listed above.
 
@@ -651,7 +655,7 @@ Rationale:
 
 Implications:
 
-- Real audible translated-audio validation still requires a real streaming session or controllable translated-audio source; do not claim spoken end-to-end translation from fake PCM16 queue tests.
+- Real audible translated-audio validation still requires a real streaming session or controllable translated-audio source; do not claim spoken end-to-end translation from fake PCM16 queue tests. For the active 2026-06-04 UI path, audible spoken-output validation is now Android TextToSpeech from finalized translated card text.
 - Future iOS output must stay behind the same gateway and receive equivalent privacy/security review.
 - Any future playback package, resampler, audio effects SDK, route-management permission, or persisted audio cache must update the cybersecurity report and rerun supply-chain checks.
 

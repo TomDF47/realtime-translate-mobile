@@ -15,6 +15,7 @@ import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
 import 'package:realtime_translate_mobile/src/session/realtime_translation_coordinator.dart';
 import 'package:realtime_translate_mobile/src/session/realtime_transcript_committer.dart';
+import 'package:realtime_translate_mobile/src/session/spoken_translation_output.dart';
 import 'package:realtime_translate_mobile/src/session/translated_audio_playback.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
@@ -88,6 +89,34 @@ void main() {
     expect(harness.realtimeGateway.session.commitInputAudioBufferCount, 0);
     expect(harness.realtimeGateway.session.createResponseCount, 0);
   });
+
+  test(
+    'suppresses capture during spoken output until local speech interrupts it',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+
+      await harness.coordinator.start(config: config);
+      harness.spokenOutputGateway.startSpeakingForTest();
+      harness.captureGateway.addChunk([0, 0, 0, 0]);
+      await _drainAsync();
+
+      expect(harness.realtimeGateway.session.appendedChunks, isEmpty);
+
+      harness.spokenOutputGateway.startSpeakingForTest();
+      harness.captureGateway.addChunk([0, 32, 0, 32]);
+      await _drainAsync();
+
+      expect(harness.spokenOutputGateway.stopCount, greaterThanOrEqualTo(1));
+      expect(harness.realtimeGateway.session.appendedChunks.single, [
+        0,
+        32,
+        0,
+        32,
+      ]);
+    },
+  );
 
   test('warm start connects realtime while remaining paused until resume', () async {
     final harness = await _Harness.create(
@@ -1513,7 +1542,7 @@ void main() {
   );
 
   test(
-    'target-side spoken output opens only the reverse audio session',
+    'target-side spoken output does not open a reverse realtime audio session',
     () async {
       final harness = await _Harness.create(
         permissionStatus: MicrophonePermissionStatus.granted,
@@ -1521,8 +1550,8 @@ void main() {
       );
       harness.coordinator.setRuntimeOutputOptions(
         translationOutputEnabled: true,
-        primaryReadAloudOutputEnabled: false,
-        reverseReadAloudOutputEnabled: true,
+        sourceSpokenOutputEnabled: false,
+        targetSpokenOutputEnabled: true,
       );
 
       final result = await harness.coordinator.start(
@@ -1542,27 +1571,102 @@ void main() {
       await _drainAsync();
 
       expect(result, LiveRealtimeStartResult.started);
-      expect(harness.playbackGateway.startCount, 1);
-      expect(harness.realtimeGateway.connectCount, 2);
-      expect(harness.realtimeGateway.configs.first.sourceTranscriptionEnabled, isTrue);
-      final reverseConfig = harness.realtimeGateway.configs.last;
-      expect(reverseConfig.sourceTranscriptionEnabled, isFalse);
-      expect(reverseConfig.sourceLanguageCode, 'it');
-      expect(reverseConfig.targetLanguageCode, 'en');
+      expect(harness.playbackGateway.startCount, 0);
+      expect(harness.realtimeGateway.connectCount, 1);
+      expect(
+        harness.realtimeGateway.configs.single.sourceTranscriptionEnabled,
+        isTrue,
+      );
     },
   );
 
   test(
-    'bidirectional reverse session opens an audio-only B-to-A translation',
+    'per-side spoken output speaks finalized card text without reverse audio',
     () async {
-      // English source turns are silent on the primary (English-output)
-      // session, so the reverse direction's TEXT comes from the text path.
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        enableBidirectionalReverseSession: true,
+      );
+      harness.coordinator.setRuntimeOutputOptions(
+        translationOutputEnabled: true,
+        sourceSpokenOutputEnabled: true,
+        targetSpokenOutputEnabled: true,
+      );
+      final startedAt = DateTime.utc(2026, 6, 4, 10);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Serialized spoken output',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'English (US)',
+          targetLanguageLabel: 'Italian (IT)',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      final result = await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          readAloudOutputEnabled: false,
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          now: () => startedAt,
+        ),
+      );
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'turn-en-1',
+            languageCode: 'en',
+            transcript: 'Hi Marco, how are you today?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            itemId: 'turn-en-1',
+            transcript: 'Ciao Marco, come stai oggi?',
+          ),
+        );
+      await _drainAsync();
+
+      expect(result, LiveRealtimeStartResult.started);
+      expect(harness.realtimeGateway.connectCount, 1);
+      expect(harness.playbackGateway.startCount, 0);
+      expect(harness.playbackGateway.enqueuedChunks, isEmpty);
+      expect(harness.spokenOutputGateway.utterances, hasLength(1));
+      expect(harness.spokenOutputGateway.utterances.single.routeSide,
+          SpokenTranslationRouteSide.source);
+      expect(
+        harness.spokenOutputGateway.utterances.single.outputLanguageCode,
+        'it',
+      );
+      expect(
+        harness.spokenOutputGateway.utterances.single.text,
+        'Ciao Marco, come stai oggi?',
+      );
+    },
+  );
+
+  test(
+    'new source speech interrupts current voice and speaks next final text',
+    () async {
       final textGateway = _FakeTextInterpreterGateway()
         ..results.add(
           const TextInterpreterTurnResult(
             detectedLanguageCode: 'it',
             detectedLanguageLabel: 'Italian',
-            translatedText: 'Ciao, cosa stai facendo?',
+            translatedText: 'I am well. And you?',
           ),
         );
       final harness = await _Harness.create(
@@ -1572,126 +1676,91 @@ void main() {
       );
       harness.coordinator.setRuntimeOutputOptions(
         translationOutputEnabled: true,
-        primaryReadAloudOutputEnabled: false,
-        reverseReadAloudOutputEnabled: true,
+        sourceSpokenOutputEnabled: true,
+        targetSpokenOutputEnabled: true,
       );
-      final startedAt = DateTime.utc(2026, 6, 1, 5);
+      harness.spokenOutputGateway.holdSpeechOpen = true;
+      final startedAt = DateTime.utc(2026, 6, 4, 11);
       await harness.repository.upsertMeeting(
         StoredMeeting(
           id: 'meeting-1',
-          title: 'Bidirectional reverse',
+          title: 'Interrupt spoken output',
           createdAt: startedAt,
           updatedAt: startedAt,
-          sourceLanguageLabel: 'Auto-detect',
-          targetLanguageLabel: 'English',
+          sourceLanguageLabel: 'English (US)',
+          targetLanguageLabel: 'Italian (IT)',
           transcriptEntries: const [],
           summaryMetadata: const StoredSummaryMetadata.empty(),
         ),
       );
 
       await harness.coordinator.start(
-        config: config,
-        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
-          repository: harness.repository,
-          meetingId: 'meeting-1',
-          sourceLanguageCode: 'auto',
-          targetLanguageCode: 'en',
-          now: () => startedAt,
-        ),
-      );
-
-      // Italian turn (detected locally from markers) establishes one language.
-      harness.realtimeGateway.session.addEvent(
-        const OpenAiRealtimeTranscriptCompleted(
-          type: 'session.input_transcript.done',
-          kind: OpenAiRealtimeTranscriptKind.source,
-          transcript: 'Buongiorno, come stai?',
-        ),
-      );
-      await _drainAsync();
-      expect(harness.realtimeGateway.connectCount, 1);
-
-      // English turn locks the pair and arms the reverse session.
-      harness.realtimeGateway.session.addEvent(
-        const OpenAiRealtimeTranscriptCompleted(
-          type: 'session.input_transcript.done',
-          kind: OpenAiRealtimeTranscriptKind.source,
-          transcript: 'Hello, what are you going to do?',
-        ),
-      );
-      await _drainAsync();
-
-      // A second dedicated translation session opens for the reverse direction
-      // (output = Italian), audio-only.
-      expect(harness.realtimeGateway.connectCount, 2);
-      final reverseConfig = harness.realtimeGateway.configs[1];
-      expect(reverseConfig.targetLanguageCode, 'it');
-      expect(reverseConfig.sourceLanguageCode, 'en');
-      expect(reverseConfig.sourceTranscriptionEnabled, isFalse);
-      expect(harness.coordinator.interpreterRouteLabel, 'Italian <-> English');
-
-      // Reverse session translated audio plays through the shared queue.
-      harness.realtimeGateway.sessions[1].addEvent(
-        OpenAiRealtimeAudioDelta(
-          type: 'session.output_audio.delta',
-          base64Audio: base64Encode(const [9, 8, 7, 6]),
-        ),
-      );
-      await _drainAsync();
-      expect(harness.playbackGateway.enqueuedChunks, isNotEmpty);
-    },
-  );
-
-  test(
-    'manual source and target prelock route and start reverse audio session',
-    () async {
-      final harness = await _Harness.create(
-        permissionStatus: MicrophonePermissionStatus.granted,
-        enableBidirectionalReverseSession: true,
-      );
-      harness.coordinator.setRuntimeOutputOptions(
-        translationOutputEnabled: true,
-        primaryReadAloudOutputEnabled: false,
-        reverseReadAloudOutputEnabled: true,
-      );
-      final startedAt = DateTime.utc(2026, 6, 2, 12);
-      await harness.repository.upsertMeeting(
-        StoredMeeting(
-          id: 'meeting-1',
-          title: 'Manual pair',
-          createdAt: startedAt,
-          updatedAt: startedAt,
-          sourceLanguageLabel: 'Italian (IT)',
-          targetLanguageLabel: 'English (US)',
-          transcriptEntries: const [],
-          summaryMetadata: const StoredSummaryMetadata.empty(),
-        ),
-      );
-
-      final result = await harness.coordinator.start(
         config: const OpenAiRealtimeTranslationConfig(
-          sourceLanguageCode: 'it',
-          targetLanguageCode: 'en',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          readAloudOutputEnabled: false,
         ),
         transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
           repository: harness.repository,
           meetingId: 'meeting-1',
-          sourceLanguageCode: 'it',
-          targetLanguageCode: 'en',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
           now: () => startedAt,
+        ),
+      );
+
+      harness.realtimeGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            itemId: 'turn-en-1',
+            languageCode: 'en',
+            transcript: 'Hi Marco, how are you today?',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            itemId: 'turn-en-1',
+            transcript: 'Ciao Marco, come stai oggi?',
+          ),
+        );
+      await _drainAsync();
+
+      expect(harness.spokenOutputGateway.isSpeaking, isTrue);
+
+      harness.realtimeGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'turn-it-2',
+          languageCode: 'it',
+          transcript: 'Sto bene. E tu?',
         ),
       );
       await _drainAsync();
 
-      expect(result, LiveRealtimeStartResult.started);
-      expect(harness.coordinator.interpreterRouteLabel, 'Italian <-> English');
-      expect(harness.realtimeGateway.connectCount, 2);
-      expect(harness.realtimeGateway.configs.first.sourceLanguageCode, 'it');
-      expect(harness.realtimeGateway.configs.first.targetLanguageCode, 'en');
-      final reverseConfig = harness.realtimeGateway.configs.last;
-      expect(reverseConfig.sourceLanguageCode, 'en');
-      expect(reverseConfig.targetLanguageCode, 'it');
-      expect(reverseConfig.sourceTranscriptionEnabled, isFalse);
+      expect(harness.spokenOutputGateway.stopCount, greaterThanOrEqualTo(1));
+      expect(textGateway.requests, hasLength(1));
+      expect(textGateway.requests.single.sourceLanguageCode, 'it');
+      expect(textGateway.requests.single.targetLanguageCode, 'en');
+      await _drainAsync();
+
+      expect(harness.realtimeGateway.connectCount, 1);
+      expect(harness.playbackGateway.enqueuedChunks, isEmpty);
+      expect(harness.spokenOutputGateway.utterances, hasLength(2));
+      expect(harness.spokenOutputGateway.utterances.last.routeSide,
+          SpokenTranslationRouteSide.target);
+      expect(
+        harness.spokenOutputGateway.utterances.last.outputLanguageCode,
+        'en',
+      );
+      expect(
+        harness.spokenOutputGateway.utterances.last.text,
+        'I am well. And you?',
+      );
     },
   );
 
@@ -3718,6 +3787,7 @@ class _Harness {
       repository = LocalMeetingRepository(store: MemoryEncryptedLocalStore()),
       captureGateway = _FakeMicrophoneCaptureGateway(),
       playbackGateway = _FakeTranslatedAudioPlaybackGateway(),
+      spokenOutputGateway = _FakeSpokenTranslationOutputGateway(),
       realtimeGateway = _FakeRealtimeTranslationGateway() {
     controller = LiveSessionController(permissionGateway: permissionGateway);
     credentialStore = OpenAiCredentialStore(repository: repository);
@@ -3727,6 +3797,7 @@ class _Harness {
       captureGateway: captureGateway,
       realtimeGateway: realtimeGateway,
       playbackGateway: playbackGateway,
+      spokenOutputGateway: spokenOutputGateway,
     );
   }
 
@@ -3749,6 +3820,7 @@ class _Harness {
       captureGateway: harness.captureGateway,
       realtimeGateway: harness.realtimeGateway,
       playbackGateway: harness.playbackGateway,
+      spokenOutputGateway: harness.spokenOutputGateway,
       reconnectPolicy: reconnectPolicy,
       reconnectDelay: reconnectDelay ?? (_) => Future<void>.value(),
       connectionTimeout: connectionTimeout,
@@ -3769,6 +3841,7 @@ class _Harness {
   final LocalMeetingRepository repository;
   final _FakeMicrophoneCaptureGateway captureGateway;
   final _FakeTranslatedAudioPlaybackGateway playbackGateway;
+  final _FakeSpokenTranslationOutputGateway spokenOutputGateway;
   final _FakeRealtimeTranslationGateway realtimeGateway;
   late LiveSessionController controller;
   late OpenAiCredentialStore credentialStore;
@@ -3877,6 +3950,51 @@ class _FakeTranslatedAudioPlaybackGateway
     if (clearQueue) {
       enqueuedChunks.clear();
     }
+  }
+}
+
+class _FakeSpokenTranslationOutputGateway
+    implements SpokenTranslationOutputGateway {
+  final List<SpokenTranslationUtterance> utterances = [];
+  int stopCount = 0;
+  bool holdSpeechOpen = false;
+  bool _isSpeaking = false;
+  Completer<void>? _activeSpeech;
+
+  @override
+  bool get isSpeaking => _isSpeaking;
+
+  @override
+  Future<void> speak(SpokenTranslationUtterance utterance) async {
+    utterances.add(utterance);
+    if (!holdSpeechOpen) {
+      _isSpeaking = false;
+      return;
+    }
+
+    _isSpeaking = true;
+    final completer = Completer<void>();
+    _activeSpeech = completer;
+    await completer.future;
+    if (_activeSpeech == completer) {
+      _activeSpeech = null;
+    }
+    _isSpeaking = false;
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCount += 1;
+    _isSpeaking = false;
+    final completer = _activeSpeech;
+    _activeSpeech = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+  }
+
+  void startSpeakingForTest() {
+    _isSpeaking = true;
   }
 }
 

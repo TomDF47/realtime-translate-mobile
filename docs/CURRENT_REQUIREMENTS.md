@@ -10,7 +10,7 @@ Build an Android-first Flutter mobile app, structured to remain iOS-compatible l
 
 The MVP is phone-only except for direct OpenAI API calls. There is no app backend, AWS, Lambda, token broker, cloud identity gate, cloud sync, outbound mail backend, server-side transcript handling, or server-side export handling. User-provided OpenAI credential/session material is stored only in encrypted local device storage and must never be committed, bundled, logged, screenshotted, or placed in mobile config.
 
-The active live experience is a text-first two-party interpreter with opt-in spoken output per language side. The user selects the two languages in use, the app treats that pair as locked from session start, transcript rows still use OpenAI metadata or deterministic local detection for source labels when available, and the meeting is preserved locally. Spoken translated audio is not automatic: each `From`/`To` language card has an `Output voice` checkbox that defaults off and persists with the recent language route. Normal live human-speech translation should use `gpt-realtime-translate` on `/v1/realtime/translations`; `gpt-realtime-2` remains only an explicit compatibility/experimental voice-agent profile.
+The active live experience is a text-first two-party interpreter with opt-in spoken output per language side. The user selects the two languages in use, the app treats that pair as locked from session start, transcript rows still use OpenAI metadata or deterministic local detection for source labels when available, and the meeting is preserved locally. Spoken translated audio is not automatic: each `From`/`To` language card has an `Output voice` checkbox that defaults off and persists with the recent language route. Checked sides speak finalized translated card text through serialized phone-local Android TextToSpeech; normal active UI operation must not create simultaneous primary/reverse realtime audio output. Normal live human-speech translation should use `gpt-realtime-translate` on `/v1/realtime/translations`; `gpt-realtime-2` remains only an explicit compatibility/experimental voice-agent profile.
 
 ## User Goals
 
@@ -41,7 +41,7 @@ The active live experience is a text-first two-party interpreter with opt-in spo
 
 1. After `Start interpreter`, the app moves immediately to a visible live startup state instead of appearing stalled.
 2. Startup must show an explicit loading/connecting indicator such as `Connecting to OpenAI` because initial connection can take about 15 seconds.
-3. With a saved credential, startup should reach `listeningPaused`: OpenAI realtime may be connected, but microphone capture and translated-audio playback remain closed until the user taps `Resume Listening`.
+3. With a saved credential, startup should reach `listeningPaused`: OpenAI realtime may be connected, but microphone capture, realtime audio playback, and phone-local spoken output remain closed until the user taps `Resume Listening`.
 4. Microphone capture must not start until the user resumes and permission is granted.
 5. Startup errors must keep the user on a useful live/recovery surface with sanitized labels.
 
@@ -50,7 +50,7 @@ The active live experience is a text-first two-party interpreter with opt-in spo
 1. The live screen begins with visible `From` and `To` selectors for the two-language pair, defaulting to the last saved route when available and otherwise Italian <-> English.
 2. `Auto-detect` is not offered as a source choice in the manual pair picker.
 3. The top status shows the selected pair as `<A> <-> <B>` from session start.
-4. Each selector has an `Output voice` checkbox. Both default off, persist with the recent route, and control whether that side's translated text is spoken.
+4. Each selector has an `Output voice` checkbox. Both default off, persist with the recent route, and control whether that side's translated text is spoken. Spoken output is one utterance at a time and must stop when a new source utterance interrupts it.
 5. The app must still detect Italian and other supported source languages from realtime metadata when available, and must fall back to deterministic local detection for source-row labels when metadata is missing.
 6. The top status must not depend on successful language discovery to know the two-language pair.
 7. Later turns translate A-to-B and B-to-A without manual direction switching.
@@ -61,7 +61,7 @@ The active live experience is a text-first two-party interpreter with opt-in spo
 
 1. The active live screen has `Stop Listening`.
 2. The active live screen must also have `Pause Listening` and `Resume Listening`.
-3. `Pause Listening` is privacy-first: it stops microphone capture and translated-audio playback while preserving the active encrypted local meeting, transcript rows, detected languages, resume target, and warm realtime session when available.
+3. `Pause Listening` is privacy-first: it stops microphone capture, realtime audio playback, and any in-progress spoken output while preserving the active encrypted local meeting, transcript rows, detected languages, resume target, and warm realtime session when available.
 4. `Resume Listening` reuses the warm realtime session when available, otherwise reconnects with the active realtime config and transcript commit target.
 5. The elapsed timer advances only while microphone capture is open, pauses while listening is paused/reconnecting/offline/backgrounded, and resets for a new meeting.
 
@@ -128,7 +128,7 @@ The active live experience is a text-first two-party interpreter with opt-in spo
 - The realtime target table covers the 13 documented OpenAI Realtime Translation output languages: Spanish, Portuguese, French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian, Vietnamese, Italian, and English (corrected 2026-06-01 from the earlier English/Spanish/French-only conservative table per the OpenAI cookbook).
 - Arabic and other auto-detected input languages that are not among the 13 outputs may be shown in picker/fallback contexts, but must be labeled as direct-OpenAI fallback targets.
 - Fallback behavior must be explicit in UI and must stay phone-only with direct OpenAI calls only.
-- Italian is a realtime output target. The two-party bidirectional design uses a primary `/v1/realtime/translations` session as the single transcript writer, plus an additive reverse session only when the opposite side's `Output voice` checkbox requires spoken output; reverse-direction text is produced by the direct OpenAI text path.
+- Italian is a realtime output target. The two-party bidirectional design uses a primary `/v1/realtime/translations` session as the single transcript writer for source/translation evidence. Reverse-direction text is produced by the direct OpenAI text path when needed, and spoken output is produced by serialized phone-local TTS from finalized translated card text rather than by opening an additive reverse realtime audio session.
 
 ## Realtime Connection, Loading, And Recovery
 

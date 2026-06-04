@@ -11,16 +11,21 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
+import java.util.Locale
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 
@@ -29,6 +34,7 @@ class MainActivity : FlutterActivity() {
     private val microphoneCaptureChannelName = "realtime_translate_mobile/microphone_capture"
     private val microphoneCaptureEventsChannelName = "realtime_translate_mobile/microphone_capture_events"
     private val translatedAudioPlaybackChannelName = "realtime_translate_mobile/translated_audio_playback"
+    private val spokenTranslationOutputChannelName = "realtime_translate_mobile/spoken_translation_output"
     private val nativeShareChannelName = "realtime_translate_mobile/native_share"
     private val recordAudioRequestCode = 4701
     private val askedPermissionKey = "asked_record_audio_permission"
@@ -37,6 +43,7 @@ class MainActivity : FlutterActivity() {
     private var microphoneCaptureEventSink: EventChannel.EventSink? = null
     private var microphoneCapture: Pcm16MicrophoneCapture? = null
     private var translatedAudioPlayback: Pcm16TranslatedAudioPlayback? = null
+    private var spokenTranslationOutput: TtsSpokenTranslationOutput? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -83,6 +90,18 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, spokenTranslationOutputChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "speak" -> speakTranslatedText(call.arguments, result)
+                    "stop" -> {
+                        stopSpokenTranslationOutput()
+                        result.success(null)
+                    }
+                    "isSpeaking" -> result.success(spokenTranslationOutput?.isSpeaking() ?: false)
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, nativeShareChannelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -95,6 +114,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         stopMicrophoneCapture()
         stopTranslatedAudioPlayback(clearQueue = true)
+        releaseSpokenTranslationOutput()
         super.onDestroy()
     }
 
@@ -273,6 +293,41 @@ class MainActivity : FlutterActivity() {
         translatedAudioPlayback = null
     }
 
+    private fun speakTranslatedText(arguments: Any?, result: MethodChannel.Result) {
+        val values = arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+        val text = values["text"] as? String ?: ""
+        val outputLanguageCode = values["outputLanguageCode"] as? String ?: ""
+        val utteranceId = values["utteranceId"] as? String ?: "spoken_translation"
+        if (text.isBlank()) {
+            result.success(null)
+            return
+        }
+        if (outputLanguageCode.isBlank()) {
+            result.error("invalid_spoken_language", "Spoken output language is missing.", null)
+            return
+        }
+
+        val output = spokenTranslationOutput ?: TtsSpokenTranslationOutput(
+            context = applicationContext,
+            mainHandler = mainHandler,
+        ).also { spokenTranslationOutput = it }
+        output.speak(
+            text = text,
+            languageTag = outputLanguageCode,
+            utteranceId = utteranceId,
+            result = result,
+        )
+    }
+
+    private fun stopSpokenTranslationOutput() {
+        spokenTranslationOutput?.stop()
+    }
+
+    private fun releaseSpokenTranslationOutput() {
+        spokenTranslationOutput?.release()
+        spokenTranslationOutput = null
+    }
+
     private fun pcm16BytesFromArguments(value: Any?): ByteArray? {
         return when (value) {
             is ByteArray -> value
@@ -332,6 +387,8 @@ class MainActivity : FlutterActivity() {
         @Volatile
         private var isRecording = false
         private var audioRecord: AudioRecord? = null
+        private var echoCanceler: AcousticEchoCanceler? = null
+        private var noiseSuppressor: NoiseSuppressor? = null
         private var captureThread: Thread? = null
 
         fun start(): CaptureStartError? {
@@ -365,9 +422,11 @@ class MainActivity : FlutterActivity() {
                 )
             }
 
+            enableInputEffects(record)
             return try {
                 record.startRecording()
                 if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                    releaseInputEffects()
                     record.release()
                     CaptureStartError(
                         "microphone_capture_unavailable",
@@ -387,12 +446,14 @@ class MainActivity : FlutterActivity() {
                     null
                 }
             } catch (error: SecurityException) {
+                releaseInputEffects()
                 record.release()
                 CaptureStartError(
                     "microphone_permission_missing",
                     "Microphone permission is not granted.",
                 )
             } catch (error: IllegalStateException) {
+                releaseInputEffects()
                 record.release()
                 CaptureStartError(
                     "microphone_capture_unavailable",
@@ -410,10 +471,35 @@ class MainActivity : FlutterActivity() {
             } catch (error: IllegalStateException) {
                 // The recorder may already be stopped after an input error.
             } finally {
+                releaseInputEffects()
                 record?.release()
             }
             captureThread?.join(500)
             captureThread = null
+        }
+
+        private fun enableInputEffects(record: AudioRecord) {
+            try {
+                if (AcousticEchoCanceler.isAvailable()) {
+                    echoCanceler = AcousticEchoCanceler.create(record.audioSessionId)?.apply {
+                        enabled = true
+                    }
+                }
+                if (NoiseSuppressor.isAvailable()) {
+                    noiseSuppressor = NoiseSuppressor.create(record.audioSessionId)?.apply {
+                        enabled = true
+                    }
+                }
+            } catch (error: RuntimeException) {
+                releaseInputEffects()
+            }
+        }
+
+        private fun releaseInputEffects() {
+            echoCanceler?.release()
+            echoCanceler = null
+            noiseSuppressor?.release()
+            noiseSuppressor = null
         }
 
         private fun readLoop(record: AudioRecord, chunkByteCount: Int) {
@@ -461,6 +547,183 @@ class MainActivity : FlutterActivity() {
                 eventSink.error(code, message, null)
             }
         }
+    }
+
+    private class TtsSpokenTranslationOutput(
+        context: Context,
+        private val mainHandler: Handler,
+    ) : TextToSpeech.OnInitListener {
+        private val tts: TextToSpeech = TextToSpeech(context.applicationContext, this)
+        private val pendingInitActions = mutableListOf<PendingInitAction>()
+        private var initialized = false
+        private var initFailed = false
+        private var pendingResult: MethodChannel.Result? = null
+        private var pendingUtteranceId: String? = null
+
+        @Volatile
+        private var speaking = false
+
+        override fun onInit(status: Int) {
+            mainHandler.post {
+                if (status == TextToSpeech.SUCCESS) {
+                    initialized = true
+                    tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) {
+                            mainHandler.post {
+                                if (utteranceId == pendingUtteranceId) {
+                                    speaking = true
+                                }
+                            }
+                        }
+
+                        override fun onDone(utteranceId: String?) {
+                            mainHandler.post {
+                                if (utteranceId == pendingUtteranceId) {
+                                    completePending(success = true)
+                                }
+                            }
+                        }
+
+                        @Deprecated("Deprecated in Android SDK")
+                        override fun onError(utteranceId: String?) {
+                            mainHandler.post {
+                                if (utteranceId == pendingUtteranceId) {
+                                    completePending(
+                                        success = false,
+                                        code = "spoken_output_failed",
+                                        message = "Spoken translation output failed.",
+                                    )
+                                }
+                            }
+                        }
+
+                        override fun onError(utteranceId: String?, errorCode: Int) {
+                            mainHandler.post {
+                                if (utteranceId == pendingUtteranceId) {
+                                    completePending(
+                                        success = false,
+                                        code = "spoken_output_failed",
+                                        message = "Spoken translation output failed.",
+                                    )
+                                }
+                            }
+                        }
+                    })
+                } else {
+                    initFailed = true
+                }
+                val actions = pendingInitActions.toList()
+                pendingInitActions.clear()
+                if (initialized) {
+                    actions.forEach { it.action.invoke() }
+                } else {
+                    actions.forEach {
+                        it.result.error(
+                            "spoken_output_unavailable",
+                            "The device text-to-speech engine is unavailable.",
+                            null,
+                        )
+                    }
+                }
+            }
+        }
+
+        fun isSpeaking(): Boolean {
+            return speaking
+        }
+
+        fun speak(
+            text: String,
+            languageTag: String,
+            utteranceId: String,
+            result: MethodChannel.Result,
+        ) {
+            runWhenReady(result) {
+                tts.stop()
+                completePending(success = true)
+                val locale = Locale.forLanguageTag(languageTag)
+                val languageResult = tts.setLanguage(locale)
+                if (languageResult == TextToSpeech.LANG_MISSING_DATA ||
+                    languageResult == TextToSpeech.LANG_NOT_SUPPORTED
+                ) {
+                    result.error(
+                        "spoken_language_unsupported",
+                        "The device text-to-speech engine does not support the requested language.",
+                        null,
+                    )
+                    return@runWhenReady
+                }
+
+                pendingResult = result
+                pendingUtteranceId = utteranceId
+                speaking = true
+                val speakResult = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                if (speakResult == TextToSpeech.ERROR) {
+                    completePending(
+                        success = false,
+                        code = "spoken_output_failed",
+                        message = "Spoken translation output failed.",
+                    )
+                }
+            }
+        }
+
+        fun stop() {
+            val actions = pendingInitActions.toList()
+            pendingInitActions.clear()
+            actions.forEach { it.result.success(null) }
+            if (initialized) {
+                tts.stop()
+            }
+            completePending(success = true)
+            speaking = false
+        }
+
+        fun release() {
+            stop()
+            tts.shutdown()
+            pendingInitActions.clear()
+        }
+
+        private fun runWhenReady(result: MethodChannel.Result, action: () -> Unit) {
+            if (initialized) {
+                action.invoke()
+                return
+            }
+            if (initFailed) {
+                result.error(
+                    "spoken_output_unavailable",
+                    "The device text-to-speech engine is unavailable.",
+                    null,
+                )
+                return
+            }
+            pendingInitActions.add(PendingInitAction(result, action))
+        }
+
+        private fun completePending(
+            success: Boolean,
+            code: String = "spoken_output_failed",
+            message: String = "Spoken translation output failed.",
+        ) {
+            val result = pendingResult
+            pendingResult = null
+            pendingUtteranceId = null
+            speaking = false
+            if (result == null) {
+                return
+            }
+            if (success) {
+                result.success(null)
+            } else {
+                result.error(code, message, null)
+            }
+        }
+
+        private data class PendingInitAction(
+            val result: MethodChannel.Result,
+            val action: () -> Unit,
+        )
     }
 
     private class Pcm16TranslatedAudioPlayback(
