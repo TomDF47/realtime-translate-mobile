@@ -147,7 +147,7 @@ void main() {
     expect(find.text('Open generated exports'), findsNothing);
   });
 
-  testWidgets('language cards show spoken output checkboxes off by default', (
+  testWidgets('language cards hide output checkboxes and show voice buttons', (
     tester,
   ) async {
     final repository = _testRepository();
@@ -165,156 +165,77 @@ void main() {
     await tester.tap(find.text('Start interpreter'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Output voice'), findsNWidgets(2));
+    expect(find.text('Output voice'), findsNothing);
     expect(
-      find.bySemanticsLabel('Output spoken translation for Italian off'),
+      find.bySemanticsLabel('Read latest translation for Italian'),
       findsOneWidget,
     );
     expect(
-      find.bySemanticsLabel('Output spoken translation for English off'),
+      find.bySemanticsLabel('Read latest translation for English'),
       findsOneWidget,
     );
   });
 
-  testWidgets('spoken output checkbox persists with last language route', (
+  testWidgets('language voice button speaks latest translation and resumes mic', (
     tester,
   ) async {
     final repository = _testRepository();
-    await _seedCredential(repository);
-
-    await tester.pumpWidget(
-      LiveTranslateApp(
-        permissionGateway: _FakePermissionGateway.granted(),
-        meetingRepository: repository,
-        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
-        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
-        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
-      ),
-    );
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('English (US)').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('English (US)').last);
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Italian (IT)').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Italian (IT)').last);
-    await tester.pumpAndSettle();
-
-    await tester.tap(
-      find.bySemanticsLabel('Output spoken translation for English off'),
-    );
-    await tester.pumpAndSettle();
-
-    var snapshot = await repository.loadSnapshot();
-    var route = snapshot.recentLanguageRoutes.first;
-    expect(route.sourceLanguageLabel, 'English (US)');
-    expect(route.targetLanguageLabel, 'Italian (IT)');
-    expect(route.sourceSpokenOutputEnabled, isTrue);
-    expect(route.targetSpokenOutputEnabled, isFalse);
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpAndSettle();
-
-    await tester.pumpWidget(
-      LiveTranslateApp(
-        permissionGateway: _FakePermissionGateway.granted(),
-        meetingRepository: repository,
-        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
-        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
-        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('English <-> Italian'), findsOneWidget);
-    expect(
-      find.bySemanticsLabel('Output spoken translation for English on'),
-      findsOneWidget,
-    );
-    expect(
-      find.bySemanticsLabel('Output spoken translation for Italian off'),
-      findsOneWidget,
-    );
-
-    snapshot = await repository.loadSnapshot();
-    route = snapshot.recentLanguageRoutes.first;
-    expect(route.sourceSpokenOutputEnabled, isTrue);
-  });
-
-  testWidgets('restored spoken output speaks first translation without cycling', (
-    tester,
-  ) async {
-    final repository = _testRepository();
+    final captureGateway = _FakeMicrophoneCaptureGateway();
     final realtimeGateway = _FakeRealtimeTranslationGateway();
     final spokenOutputGateway = _FakeSpokenTranslationOutputGateway();
     await _seedCredential(repository);
-    await repository.saveRecentLanguageRoute(
-      LanguageRoutePreference(
-        sourceLanguageLabel: 'English (US)',
-        targetLanguageLabel: 'Italian (IT)',
-        updatedAt: DateTime.utc(2026, 6, 4, 12),
-        sourceSpokenOutputEnabled: true,
-      ),
-    );
 
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
-        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        microphoneCaptureGateway: captureGateway,
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
         realtimeTranslationGateway: realtimeGateway,
         spokenTranslationOutputGateway: spokenOutputGateway,
       ),
     );
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Start interpreter'));
     await tester.pumpAndSettle();
-
-    expect(find.text('English <-> Italian'), findsOneWidget);
-    expect(
-      find.bySemanticsLabel('Output spoken translation for English on'),
-      findsOneWidget,
-    );
-    expect(realtimeGateway.primaryConfig.readAloudOutputEnabled, isFalse);
+    await tester.tap(find.bySemanticsLabel('Resume listening'));
+    await tester.pumpAndSettle();
 
     realtimeGateway.primarySession
       ..addEvent(
         const OpenAiRealtimeTranscriptCompleted(
           type: 'session.input_transcript.done',
           kind: OpenAiRealtimeTranscriptKind.source,
-          itemId: 'turn-en-1',
-          languageCode: 'en',
-          transcript: 'Hi Marco, how are you today?',
+          itemId: 'source-it-1',
+          languageCode: 'it',
+          transcript: 'La tempistica e stata concordata.',
         ),
       )
       ..addEvent(
         const OpenAiRealtimeTranscriptCompleted(
           type: 'session.output_transcript.done',
           kind: OpenAiRealtimeTranscriptKind.translation,
-          itemId: 'turn-en-1',
-          transcript: 'Ciao Marco, come stai oggi?',
+          itemId: 'source-it-1',
+          transcript: 'Timeline was agreed.',
         ),
       );
-    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.bySemanticsLabel('Read latest translation for English'),
+    );
     await tester.pumpAndSettle();
 
     expect(spokenOutputGateway.utterances, hasLength(1));
-    expect(spokenOutputGateway.utterances.single.outputLanguageCode, 'it');
     expect(
       spokenOutputGateway.utterances.single.text,
-      'Ciao Marco, come stai oggi?',
+      'Timeline was agreed.',
     );
+    expect(spokenOutputGateway.utterances.single.outputLanguageCode, 'en');
+    expect(captureGateway.stopCount, greaterThanOrEqualTo(1));
+    expect(captureGateway.startCount, 2);
+    expect(captureGateway.isCapturing, isTrue);
+    expect(find.text('Pause Listening'), findsOneWidget);
   });
 
   testWidgets('starts interpreter with manual language pair controls', (
@@ -1560,8 +1481,11 @@ Future<void> _seedCredential(LocalMeetingRepository repository) {
 
 Future<void> _appendStoredTranscriptLine(
   LocalMeetingRepository repository,
-  String meetingId,
-) async {
+  String meetingId, {
+  String languageCode = 'EN',
+  String originalText = 'Timeline was agreed.',
+  String translatedText = 'They agreed to meet on Tuesday at 10 AM.',
+}) async {
   final snapshot = await repository.loadSnapshot();
   final meeting = snapshot.meetings.singleWhere((item) => item.id == meetingId);
   final currentTime = DateTime.now().toUtc();
@@ -1574,9 +1498,9 @@ Future<void> _appendStoredTranscriptLine(
     entry: StoredTranscriptEntry(
       id: '$meetingId-test-line',
       meetingId: meetingId,
-      languageCode: 'EN',
-      originalText: 'Timeline was agreed.',
-      translatedText: 'They agreed to meet on Tuesday at 10 AM.',
+      languageCode: languageCode,
+      originalText: originalText,
+      translatedText: translatedText,
       timestamp: now,
       speakerLabel: null,
       confidence: null,
@@ -1621,8 +1545,8 @@ Widget _liveSessionHarness(LiveSessionState state) {
       onOpenAssistant: () {},
       onOpenSourceLanguageOptions: () {},
       onOpenTargetLanguageOptions: () {},
-      onSourceSpokenOutputChanged: (_) {},
-      onTargetSpokenOutputChanged: (_) {},
+      onSourceVoicePressed: () {},
+      onTargetVoicePressed: () {},
       onDirectionSwitch: () {},
       onRetryLiveSession: () {},
       onBottomAction: (_) {},
@@ -1663,14 +1587,18 @@ class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
   bool get isCapturing => _isCapturing;
 
   bool _isCapturing = false;
+  int startCount = 0;
+  int stopCount = 0;
 
   @override
   Future<void> start(MicrophoneCaptureConfig config) async {
+    startCount += 1;
     _isCapturing = true;
   }
 
   @override
   Future<void> stop() async {
+    stopCount += 1;
     _isCapturing = false;
   }
 }

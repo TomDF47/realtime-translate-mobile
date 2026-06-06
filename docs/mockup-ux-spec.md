@@ -94,10 +94,10 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - The active live interpreter shows two compact language selector cards: `From` and `To`.
   - The default pair is Italian <-> English.
   - Do not show a direction switch in the live interpreter flow; the selected pair is bidirectional.
-  - Each language card includes a compact `Output voice` checkbox under the language labels. The checkbox is off by default, persists with the recent language route, and controls whether that side's finalized translated text is spoken after that speaker talks. Spoken output is one utterance at a time.
+  - Each language card includes a compact voice button on the right. The button is disabled until that side has a finalized translation; tapping it pauses microphone forwarding, reads the latest translation for that side, then resumes listening if the mic was already active.
 - Feature toggles row:
   - Hide `Translate Text` from the active issue #30 live interpreter flow.
-  - Hide legacy global read-aloud, speaker, and headphone controls. Spoken output belongs to the per-language `Output voice` checkboxes instead of a global read-aloud toggle.
+  - Hide legacy global read-aloud, speaker, headphone controls, and `Output voice` checkboxes. Spoken output belongs to the per-language voice buttons instead of automatic turn playback or a global read-aloud toggle.
 - Transcript list:
   - Card per utterance or translation pair.
   - Language badge: `ES` or `EN`.

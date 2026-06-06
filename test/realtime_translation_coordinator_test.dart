@@ -118,6 +118,77 @@ void main() {
     },
   );
 
+  test('manual spoken playback pauses microphone and resumes listening', () async {
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+    );
+    final startedAt = DateTime.utc(2026, 6, 5, 11);
+    await harness.repository.upsertMeeting(
+      StoredMeeting(
+        id: 'meeting-1',
+        title: 'Manual voice playback',
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        sourceLanguageLabel: 'English (US)',
+        targetLanguageLabel: 'Italian (IT)',
+        transcriptEntries: const [],
+        summaryMetadata: const StoredSummaryMetadata.empty(),
+      ),
+    );
+
+    final result = await harness.coordinator.start(
+      config: const OpenAiRealtimeTranslationConfig(
+        sourceLanguageCode: 'en',
+        targetLanguageCode: 'it',
+        readAloudOutputEnabled: false,
+      ),
+      transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+        repository: harness.repository,
+        meetingId: 'meeting-1',
+        sourceLanguageCode: 'en',
+        targetLanguageCode: 'it',
+        now: () => startedAt,
+      ),
+    );
+    expect(result, LiveRealtimeStartResult.started);
+    expect(harness.captureGateway.isCapturing, isTrue);
+    expect(harness.captureGateway.startCount, 1);
+
+    final spoken = await harness.coordinator.speakTranslatedEntryOnDemand(
+      StoredTranscriptEntry(
+        id: 'turn-en-1',
+        meetingId: 'meeting-1',
+        languageCode: 'EN',
+        originalText: 'Hello, how are you?',
+        translatedText: 'Ciao, come stai?',
+        timestamp: startedAt,
+        speakerLabel: null,
+        confidence: null,
+        status: 'final',
+        playbackState: 'none',
+      ),
+    );
+
+    expect(spoken, isTrue);
+    expect(harness.spokenOutputGateway.utterances, hasLength(1));
+    expect(
+      harness.spokenOutputGateway.utterances.single.routeSide,
+      SpokenTranslationRouteSide.source,
+    );
+    expect(
+      harness.spokenOutputGateway.utterances.single.outputLanguageCode,
+      'it',
+    );
+    expect(
+      harness.spokenOutputGateway.utterances.single.text,
+      'Ciao, come stai?',
+    );
+    expect(harness.captureGateway.stopCount, greaterThanOrEqualTo(1));
+    expect(harness.captureGateway.startCount, 2);
+    expect(harness.captureGateway.isCapturing, isTrue);
+    expect(harness.controller.state.phase, LiveSessionPhase.listening);
+  });
+
   test('warm start connects realtime while remaining paused until resume', () async {
     final harness = await _Harness.create(
       permissionStatus: MicrophonePermissionStatus.granted,
@@ -3770,6 +3841,47 @@ void main() {
         expect(entries.first.originalText, 'Buongiorno a tutti.');
         expect(entries.first.translatedText, 'Good morning everyone.');
         expect(entries.last.originalText, 'Come stai oggi?');
+      },
+    );
+
+    test(
+      'cumulative source completion after a finished turn keeps only new text',
+      () async {
+        final repository = LocalMeetingRepository(
+          store: MemoryEncryptedLocalStore(),
+        );
+        final committer = await committerFor(repository);
+
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Hello, how are you?',
+          ),
+        );
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Ciao, come stai?',
+          ),
+        );
+        await committer.commitCompleted(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.input_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.source,
+            transcript: 'Hello, how are you? Bene, grazie, e tu?',
+          ),
+        );
+
+        final entries = (await repository.loadSnapshot())
+            .meetings
+            .single
+            .transcriptEntries;
+        expect(entries, hasLength(2));
+        expect(entries.first.originalText, 'Hello, how are you?');
+        expect(entries.last.originalText, 'Bene, grazie, e tu?');
+        expect(entries.last.originalText, isNot(contains('Hello')));
       },
     );
   });

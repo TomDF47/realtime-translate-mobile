@@ -782,8 +782,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   void _configureRuntimeOutputForRoute() {
     _realtimeCoordinator.setRuntimeOutputOptions(
       translationOutputEnabled: _translateTextEnabled,
-      sourceSpokenOutputEnabled: _sourceSpokenOutputEnabled,
-      targetSpokenOutputEnabled: _targetSpokenOutputEnabled,
+      sourceSpokenOutputEnabled: false,
+      targetSpokenOutputEnabled: false,
     );
   }
 
@@ -983,7 +983,84 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       spokenOutputEnabled: isTarget
           ? _targetSpokenOutputEnabled
           : _sourceSpokenOutputEnabled,
+      voicePlaybackAvailable:
+          _latestSpeakableEntryForSide(isTarget: isTarget) != null,
     );
+  }
+
+  StoredTranscriptEntry? _latestSpeakableEntryForSide({
+    required bool isTarget,
+  }) {
+    final activeMeeting = _activeMeeting;
+    if (activeMeeting == null) {
+      return null;
+    }
+
+    final languageCode = (isTarget
+            ? _selectedTargetLanguage.code
+            : _selectedSourceLanguage.code)
+        .trim()
+        .toLowerCase();
+    if (languageCode.isEmpty || languageCode == 'auto') {
+      return null;
+    }
+
+    for (final entry in activeMeeting.transcriptEntries.reversed) {
+      if (_translatedLanguageCodeForEntry(entry) != languageCode) {
+        continue;
+      }
+      if (entry.originalText.trim().isEmpty ||
+          entry.translatedText.trim().isEmpty) {
+        continue;
+      }
+      return entry;
+    }
+
+    return null;
+  }
+
+  String? _translatedLanguageCodeForEntry(StoredTranscriptEntry entry) {
+    final sourceCode = entry.languageCode.trim().toLowerCase();
+    final selectedSourceCode = _selectedSourceLanguage.code
+        .trim()
+        .toLowerCase();
+    final selectedTargetCode = _selectedTargetLanguage.code
+        .trim()
+        .toLowerCase();
+    if (sourceCode.isEmpty ||
+        selectedSourceCode.isEmpty ||
+        selectedTargetCode.isEmpty ||
+        sourceCode == 'auto') {
+      return null;
+    }
+    if (sourceCode == selectedSourceCode) {
+      return selectedTargetCode;
+    }
+    if (sourceCode == selectedTargetCode) {
+      return selectedSourceCode;
+    }
+    return null;
+  }
+
+  Future<void> _speakLatestTranslationForSide({
+    required bool isTarget,
+  }) async {
+    final entry = _latestSpeakableEntryForSide(isTarget: isTarget);
+    if (entry == null) {
+      return;
+    }
+
+    final didSpeak = await _realtimeCoordinator.speakTranslatedEntryOnDemand(
+      entry,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (!didSpeak) {
+      return;
+    }
+
+    await _loadStoredMeetings();
   }
 
   List<FeatureChipData> _featuresForSession(LiveSessionViewData base) {
@@ -1406,28 +1483,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       _sessionController.enterSpeakingPaused();
       setState(() => _surface = _AppSurface.speakingPaused);
     }
-  }
-
-  void _setSpokenOutputEnabled({
-    required bool isTarget,
-    required bool enabled,
-  }) {
-    final current = isTarget
-        ? _targetSpokenOutputEnabled
-        : _sourceSpokenOutputEnabled;
-    if (current == enabled) {
-      return;
-    }
-
-    setState(() {
-      if (isTarget) {
-        _targetSpokenOutputEnabled = enabled;
-      } else {
-        _sourceSpokenOutputEnabled = enabled;
-      }
-    });
-    _configureRuntimeOutputForSelectedRoute();
-    unawaited(_persistActiveRouteAndRestart());
   }
 
   Future<void> _selectLanguage(
@@ -1985,10 +2040,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
             _showLanguageOptionsSheet(isTarget: false),
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
-        onSourceSpokenOutputChanged: (enabled) =>
-            _setSpokenOutputEnabled(isTarget: false, enabled: enabled),
-        onTargetSpokenOutputChanged: (enabled) =>
-            _setSpokenOutputEnabled(isTarget: true, enabled: enabled),
+        onSourceVoicePressed: () =>
+            unawaited(_speakLatestTranslationForSide(isTarget: false)),
+        onTargetVoicePressed: () =>
+            unawaited(_speakLatestTranslationForSide(isTarget: true)),
         onDirectionSwitch: null,
         onRetryLiveSession: _openListening,
         onBottomAction: _handleBottomAction,
@@ -2012,10 +2067,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
             _showLanguageOptionsSheet(isTarget: false),
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
-        onSourceSpokenOutputChanged: (enabled) =>
-            _setSpokenOutputEnabled(isTarget: false, enabled: enabled),
-        onTargetSpokenOutputChanged: (enabled) =>
-            _setSpokenOutputEnabled(isTarget: true, enabled: enabled),
+        onSourceVoicePressed: () =>
+            unawaited(_speakLatestTranslationForSide(isTarget: false)),
+        onTargetVoicePressed: () =>
+            unawaited(_speakLatestTranslationForSide(isTarget: true)),
         onDirectionSwitch: null,
         onRetryLiveSession: _openSpeakingPaused,
         onBottomAction: _handleBottomAction,
@@ -2407,8 +2462,8 @@ class LiveSessionScreen extends StatelessWidget {
     required this.onOpenAssistant,
     required this.onOpenSourceLanguageOptions,
     required this.onOpenTargetLanguageOptions,
-    required this.onSourceSpokenOutputChanged,
-    required this.onTargetSpokenOutputChanged,
+    required this.onSourceVoicePressed,
+    required this.onTargetVoicePressed,
     required this.onDirectionSwitch,
     required this.onRetryLiveSession,
     required this.onBottomAction,
@@ -2425,8 +2480,8 @@ class LiveSessionScreen extends StatelessWidget {
   final VoidCallback? onOpenAssistant;
   final VoidCallback? onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
-  final ValueChanged<bool> onSourceSpokenOutputChanged;
-  final ValueChanged<bool> onTargetSpokenOutputChanged;
+  final VoidCallback onSourceVoicePressed;
+  final VoidCallback onTargetVoicePressed;
   final VoidCallback? onDirectionSwitch;
   final VoidCallback onRetryLiveSession;
   final ValueChanged<BottomControlActionData> onBottomAction;
@@ -2471,8 +2526,8 @@ class LiveSessionScreen extends StatelessWidget {
               onDirectionSwitch: onDirectionSwitch,
               onOpenSourceLanguageOptions: onOpenSourceLanguageOptions,
               onOpenTargetLanguageOptions: onOpenTargetLanguageOptions,
-              onSourceSpokenOutputChanged: onSourceSpokenOutputChanged,
-              onTargetSpokenOutputChanged: onTargetSpokenOutputChanged,
+              onSourceVoicePressed: onSourceVoicePressed,
+              onTargetVoicePressed: onTargetVoicePressed,
             ),
             if (session.languageRouteNotice != null) ...[
               const SizedBox(height: AppSpacing.xs),
@@ -2810,16 +2865,16 @@ class _LanguageRouteRow extends StatelessWidget {
     required this.onDirectionSwitch,
     required this.onOpenSourceLanguageOptions,
     required this.onOpenTargetLanguageOptions,
-    required this.onSourceSpokenOutputChanged,
-    required this.onTargetSpokenOutputChanged,
+    required this.onSourceVoicePressed,
+    required this.onTargetVoicePressed,
   });
 
   final LiveSessionViewData session;
   final VoidCallback? onDirectionSwitch;
   final VoidCallback? onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
-  final ValueChanged<bool> onSourceSpokenOutputChanged;
-  final ValueChanged<bool> onTargetSpokenOutputChanged;
+  final VoidCallback onSourceVoicePressed;
+  final VoidCallback onTargetVoicePressed;
 
   @override
   Widget build(BuildContext context) {
@@ -2830,7 +2885,7 @@ class _LanguageRouteRow extends StatelessWidget {
           child: LanguageSelectorCard(
             data: session.fromLanguage,
             onTap: onOpenSourceLanguageOptions,
-            onSpokenOutputChanged: onSourceSpokenOutputChanged,
+            onVoicePressed: onSourceVoicePressed,
           ),
         ),
         const SizedBox(width: AppSpacing.xs),
@@ -2845,7 +2900,7 @@ class _LanguageRouteRow extends StatelessWidget {
           child: LanguageSelectorCard(
             data: session.toLanguage,
             onTap: onOpenTargetLanguageOptions,
-            onSpokenOutputChanged: onTargetSpokenOutputChanged,
+            onVoicePressed: onTargetVoicePressed,
           ),
         ),
       ],

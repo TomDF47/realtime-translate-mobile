@@ -2,9 +2,34 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
-## 2026-06-04 - Warm Paused Startup With Serialized Phone-Local Spoken Output
+## 2026-06-05 - Manual Language-Card Voice Playback Replaces Output Voice Checkboxes
 
 Status: Accepted as code direction (local Windows checkout still relies on CI/Fedora for Flutter analyzer, tests, APK build, and installed-device proof)
+
+Context:
+
+- Tom's Samsung retest showed the automatic spoken-output loop was still unreliable: voice output was often absent, when it did play it could stop after one word, and transcript content could merge or overwrite into the wrong card.
+- The desired product shape is simple: keep a clear communication log, translate each turn as it arrives, and let the user explicitly play a translated line when they need audio.
+- The prior checkbox model made spoken output feel like a background process. That increased the chance of app TTS fighting the live microphone and made persisted checkbox state part of the live-capture critical path.
+
+Decision:
+
+- Hide the active `Output voice` checkboxes.
+- Keep the live interpreter text-first. Finalized transcript cards remain the source of truth for original and translated text.
+- Add one voice button to each `From`/`To` language card. The button is enabled only when that side has a finalized transcript row with both original and translated text.
+- Pressing a voice button pauses microphone forwarding, speaks the latest finalized translation for that side through the phone-local TextToSpeech gateway, and resumes listening only if microphone capture was active before the tap.
+- Active runtime output options no longer enable automatic source-side or target-side spoken output from finalized cards. Legacy spoken-output booleans may remain in encrypted route storage for compatibility, but the active live UI does not expose or apply them.
+- If OpenAI sends a cumulative completed source transcript after a finished row, strip the already-committed prefix before creating the next source row so old speech does not merge into the new communication card.
+
+Implications:
+
+- The active flow has fewer audio states: live microphone capture and explicit manual playback are serialized instead of competing.
+- Validation should focus on a clear EN/IT transcript log first, then on manual voice-button playback pausing and resuming capture.
+- This adds no dependency, Android permission, backend route, app-owned network path, credential handling change, microphone recording persistence, transcript/audio logging, or analytics/crash sink. The phone-only direct-OpenAI privacy boundary is unchanged.
+
+## 2026-06-04 - Warm Paused Startup With Serialized Phone-Local Spoken Output
+
+Status: Superseded in the active UI by `2026-06-05 - Manual Language-Card Voice Playback Replaces Output Voice Checkboxes`
 
 Context:
 
@@ -28,7 +53,7 @@ Implications:
 
 - The active UI remains text-first by default while allowing intentional spoken translation output without reintroducing hidden global read-aloud controls.
 - This adds no dependency, Android permission, backend route, app-owned network path, credential handling change, microphone recording persistence, or logging surface. The phone-only direct-OpenAI privacy boundary is unchanged.
-- Regression coverage must include warm paused startup, pause/resume warm reuse, per-side checkbox persistence, restored checkbox state activating before the first spoken turn, English then Italian separate cards, one spoken utterance per finalized card, no reverse realtime audio session for active UI spoken output, previous voice interruption on new speech, and microphone suppression during app speech.
+- Historical regression coverage for this superseded checkbox flow included warm paused startup, pause/resume warm reuse, per-side checkbox persistence, restored checkbox state activating before the first spoken turn, English then Italian separate cards, one spoken utterance per finalized card, no reverse realtime audio session for active UI spoken output, previous voice interruption on new speech, and microphone suppression during app speech.
 
 ## 2026-06-03 - Text-First Live Interpreter Suppresses Default Speaker And Reverse Audio
 
@@ -42,7 +67,7 @@ Context:
 
 Decision:
 
-- Default the active phone live interpreter to text-first: at that point the legacy `_readAloudEnabled` flag started false, the main app did not enable the best-effort reverse audio session, and the coordinator skipped translated-audio playback queue startup whenever read-aloud was disabled. The 2026-06-04 decision supersedes the global flag with per-side `Output voice` checkboxes and serialized phone-local TTS, leaving reverse realtime audio closed in normal active UI operation.
+- Default the active phone live interpreter to text-first: at that point the legacy `_readAloudEnabled` flag started false, the main app did not enable the best-effort reverse audio session, and the coordinator skipped translated-audio playback queue startup whenever read-aloud was disabled. The 2026-06-05 decision supersedes the global flag with manual language-card voice buttons, leaving reverse realtime audio closed in normal active UI operation.
 - Keep microphone capture and the primary `/v1/realtime/translations` text/transcript path active; only speaker playback/reverse audio are suppressed.
 - Let stable source deltas (sentence-ending punctuation or long text) trigger the same direct OpenAI fallback used by completed source turns when the detected source language is already the primary realtime output language or the selected target requires direct fallback.
 - Suppress no-item realtime output for a row once the direct text fallback has marked that row authoritative, so an English realtime echo cannot overwrite the Italian fallback translation.

@@ -91,26 +91,32 @@ class LiveRealtimeTranscriptCommitter {
         return null;
       }
 
+      final isSourceCompletion =
+          event.kind == OpenAiRealtimeTranscriptKind.source &&
+              event.transcript != null;
+      final effectiveTranscript = isSourceCompletion
+          ? _sourceCompletionSuffixAfterCurrent(event.transcript!)
+          : event.transcript;
       final nextLanguageCode = event.kind == OpenAiRealtimeTranscriptKind.source
           ? event.languageCode ??
-                (event.transcript == null
+                (effectiveTranscript == null
                     ? null
-                    : _detectLanguageCode(event.transcript!))
+                    : _detectLanguageCode(effectiveTranscript))
           : event.languageCode;
       if (_shouldStartNewSegment(
         event.kind,
         isCompletion: true,
         itemId: event.itemId,
         languageCode: nextLanguageCode,
-        transcript: event.transcript,
+        transcript: effectiveTranscript,
       )) {
         _resetSegment();
       }
 
       _seedEntryIdFromItemIfNew(event);
       _recordItemId(event.kind, event.itemId);
-      if (event.transcript != null) {
-        _replaceTranscript(event.kind, event.transcript!);
+      if (effectiveTranscript != null) {
+        _replaceTranscript(event.kind, effectiveTranscript);
       }
       _recordDetectedLanguage(event);
       _markCompleted(event.kind);
@@ -450,6 +456,24 @@ class LiveRealtimeTranscriptCommitter {
     }
 
     return _sourceBuffer.toString().trim() == candidate;
+  }
+
+  String? _sourceCompletionSuffixAfterCurrent(String transcript) {
+    if (!_hasTranscript || !_sourceCompleted) {
+      return transcript;
+    }
+
+    final current = _sourceBuffer.toString().trim();
+    final candidate = transcript.trim();
+    if (current.isEmpty || candidate.isEmpty || candidate == current) {
+      return transcript;
+    }
+    if (!candidate.startsWith(current)) {
+      return transcript;
+    }
+
+    final suffix = candidate.substring(current.length).trimLeft();
+    return suffix.isEmpty ? transcript : suffix;
   }
 
   bool _isCumulativeSourceCompletion(String transcript) {

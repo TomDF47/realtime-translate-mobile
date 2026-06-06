@@ -395,12 +395,12 @@ class LanguageSelectorCard extends StatelessWidget {
     super.key,
     required this.data,
     this.onTap,
-    this.onSpokenOutputChanged,
+    this.onVoicePressed,
   });
 
   final LanguageSelectorData data;
   final VoidCallback? onTap;
-  final ValueChanged<bool>? onSpokenOutputChanged;
+  final VoidCallback? onVoicePressed;
 
   @override
   Widget build(BuildContext context) {
@@ -435,12 +435,6 @@ class LanguageSelectorCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: accentColor.withValues(alpha: 0.18),
-                    foregroundColor: accentColor,
-                    child: Icon(data.icon, size: 20),
-                  ),
                   if (onTap != null)
                     const Icon(Icons.keyboard_arrow_down_rounded),
                 ],
@@ -461,18 +455,17 @@ class LanguageSelectorCard extends StatelessWidget {
     return _Surface(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
-        vertical: AppSpacing.xs,
+        vertical: AppSpacing.sm,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          languagePicker,
-          const SizedBox(height: AppSpacing.xxs),
-          _SpokenOutputCheckbox(
+          Expanded(child: languagePicker),
+          const SizedBox(width: AppSpacing.xs),
+          _LanguageVoiceButton(
             languageLabel: data.primaryLabel,
-            isEnabled: data.spokenOutputEnabled,
             accentColor: accentColor,
-            onChanged: onSpokenOutputChanged,
+            isEnabled: data.voicePlaybackAvailable && onVoicePressed != null,
+            onPressed: onVoicePressed,
           ),
         ],
       ),
@@ -480,67 +473,38 @@ class LanguageSelectorCard extends StatelessWidget {
   }
 }
 
-class _SpokenOutputCheckbox extends StatelessWidget {
-  const _SpokenOutputCheckbox({
+class _LanguageVoiceButton extends StatelessWidget {
+  const _LanguageVoiceButton({
     required this.languageLabel,
-    required this.isEnabled,
     required this.accentColor,
-    required this.onChanged,
+    required this.isEnabled,
+    required this.onPressed,
   });
 
   final String languageLabel;
-  final bool isEnabled;
   final Color accentColor;
-  final ValueChanged<bool>? onChanged;
+  final bool isEnabled;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final stateLabel = isEnabled ? 'on' : 'off';
-    final semanticLabel =
-        'Output spoken translation for $languageLabel $stateLabel';
-
-    return Semantics(
-      container: true,
-      button: onChanged != null,
-      checked: isEnabled,
-      excludeSemantics: true,
-      label: semanticLabel,
-      onTap: onChanged == null ? null : () => onChanged!(!isEnabled),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.chip),
-        onTap: onChanged == null ? null : () => onChanged!(!isEnabled),
-        child: SizedBox(
-          height: 28,
-          child: Row(
-            children: [
-              SizedBox(
-                width: 26,
-                height: 26,
-                child: IgnorePointer(
-                  child: Transform.scale(
-                    scale: 0.78,
-                    child: Checkbox(
-                      value: isEnabled,
-                      onChanged: onChanged == null ? null : (_) {},
-                      activeColor: accentColor,
-                      checkColor: AppColors.background,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                ),
-              ),
-              Flexible(
-                child: Text(
-                  'Output voice',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.compact(
-                    Theme.of(context).textTheme,
-                  ).copyWith(color: AppColors.textSecondary),
-                ),
-              ),
-            ],
+    final effectiveOnPressed = isEnabled ? onPressed : null;
+    final label = 'Read latest translation for $languageLabel';
+    return Tooltip(
+      message: isEnabled ? label : 'No translation yet for $languageLabel',
+      child: Semantics(
+        button: true,
+        enabled: isEnabled,
+        label: label,
+        child: IconButton.filledTonal(
+          onPressed: effectiveOnPressed,
+          icon: const Icon(Icons.volume_up_rounded),
+          color: accentColor,
+          style: IconButton.styleFrom(
+            fixedSize: const Size(44, 44),
+            backgroundColor: accentColor.withValues(alpha: 0.16),
+            disabledBackgroundColor: AppColors.surfacePressed,
+            disabledForegroundColor: AppColors.textTertiary,
           ),
         ),
       ),

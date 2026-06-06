@@ -1,6 +1,6 @@
 # Current Product Requirements
 
-Last synthesized: 2026-06-04
+Last synthesized: 2026-06-05
 
 This document summarizes the realtime translate app requirements as they stand now, based on the repository documentation and latest operator notes. If this document conflicts with older docs, the latest operator notes and accepted decision log entries win. The canonical long-form source remains [live-translate-build-spec.md](live-translate-build-spec.md).
 
@@ -10,7 +10,7 @@ Build an Android-first Flutter mobile app, structured to remain iOS-compatible l
 
 The MVP is phone-only except for direct OpenAI API calls. There is no app backend, AWS, Lambda, token broker, cloud identity gate, cloud sync, outbound mail backend, server-side transcript handling, or server-side export handling. User-provided OpenAI credential/session material is stored only in encrypted local device storage and must never be committed, bundled, logged, screenshotted, or placed in mobile config.
 
-The active live experience is a text-first two-party interpreter with opt-in spoken output per language side. The user selects the two languages in use, the app treats that pair as locked from session start, transcript rows still use OpenAI metadata or deterministic local detection for source labels when available, and the meeting is preserved locally. Spoken translated audio is not automatic: each `From`/`To` language card has an `Output voice` checkbox that defaults off and persists with the recent language route. Checked sides speak finalized translated card text through serialized phone-local Android TextToSpeech; normal active UI operation must not create simultaneous primary/reverse realtime audio output. Normal live human-speech translation should use `gpt-realtime-translate` on `/v1/realtime/translations`; `gpt-realtime-2` remains only an explicit compatibility/experimental voice-agent profile.
+The active live experience is a text-first two-party interpreter with on-demand spoken output per language side. The user selects the two languages in use, the app treats that pair as locked from session start, transcript rows still use OpenAI metadata or deterministic local detection for source labels when available, and the meeting is preserved locally. Spoken translated audio is not automatic: each `From`/`To` language card has a voice button that becomes available when that side has a finalized transcript row. Pressing the button speaks the latest finalized translation through phone-local Android TextToSpeech, pauses microphone forwarding during playback, and resumes listening only if capture was active before the tap. Normal active UI operation must not create simultaneous primary/reverse realtime audio output. Normal live human-speech translation should use `gpt-realtime-translate` on `/v1/realtime/translations`; `gpt-realtime-2` remains only an explicit compatibility/experimental voice-agent profile.
 
 ## User Goals
 
@@ -18,7 +18,7 @@ The active live experience is a text-first two-party interpreter with opt-in spo
 - Resume a previous local meeting without losing prior transcript history.
 - Select the two conversation languages once, then speak naturally in either language without choosing direction manually.
 - See the original speech and translated text clearly, with confidence/status when one side is pending.
-- Choose independently whether each side's translated text should be spoken aloud.
+- Play either side's latest translated text aloud on demand.
 - Know when the app is connecting, listening, paused, reconnecting, offline, credential-invalid, or in error.
 - Pause live listening without ending the meeting or deleting local transcript state.
 - Review local meeting history, ask scoped AI chat questions, and generate local encrypted exports.
@@ -50,7 +50,7 @@ The active live experience is a text-first two-party interpreter with opt-in spo
 1. The live screen begins with visible `From` and `To` selectors for the two-language pair, defaulting to the last saved route when available and otherwise Italian <-> English.
 2. `Auto-detect` is not offered as a source choice in the manual pair picker.
 3. The top status shows the selected pair as `<A> <-> <B>` from session start.
-4. Each selector has an `Output voice` checkbox. Both default off, persist with the recent route, and control whether that side's translated text is spoken. Spoken output is one utterance at a time and must stop when a new source utterance interrupts it.
+4. Each selector has a voice button. The button is disabled until that side has a finalized transcript row, then reads the latest translated text for that side on demand.
 5. The app must still detect Italian and other supported source languages from realtime metadata when available, and must fall back to deterministic local detection for source-row labels when metadata is missing.
 6. The top status must not depend on successful language discovery to know the two-language pair.
 7. Later turns translate A-to-B and B-to-A without manual direction switching.
@@ -95,7 +95,7 @@ The active live experience is a text-first two-party interpreter with opt-in spo
 
 - Preserve the supplied Android mockup visual direction: premium dark navy UI, teal listening accent, blue translation accent, amber speaking/read-aloud reference state, compact controls, restrained card radii, safe areas, and readable typography.
 - The active MVP first screen focuses on starting or resuming interpretation, not cloud sign-in or a technical dashboard.
-- The active live interpreter shows source and target language pickers with per-side `Output voice` checkboxes, and hides direction switch, `Translate Text` toggle, legacy global read-aloud controls, speaker/headphone chips, live-header AI chat, and live-screen export controls.
+- The active live interpreter shows source and target language pickers with per-side voice buttons, and hides direction switch, `Translate Text` toggle, `Output voice` checkboxes, legacy global read-aloud controls, speaker/headphone chips, live-header AI chat, and live-screen export controls.
 - Screenshotting or opening incidental device/app overlays must not cause hidden old direction-switch/read-aloud/export/chat controls to appear in the active live interpreter flow.
 - Required session states include at least `localSetup`, `meetingSelection`, `connecting`, `listening`, `listeningPaused`, `speaking`, `readAloudPaused`, `reconnecting`, `offline`, `credentialInvalid`, and `error`.
 - User-visible recovery labels must be sanitized and must not expose raw OpenAI server details, credentials, prompts, transcript text, or payloads.
