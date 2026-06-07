@@ -1466,6 +1466,17 @@ Future<void> _tapStartInterpreterUntil(
   }
 
   await tester.pumpAndSettle();
+  if (expectedSurface.evaluate().isEmpty) {
+    final visibleText = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((widget) => widget.data ?? widget.textSpan?.toPlainText() ?? '')
+        .where((text) => text.trim().isNotEmpty)
+        .take(20)
+        .join(' | ');
+    fail(
+      'Expected start surface did not appear. Visible text: $visibleText',
+    );
+  }
 }
 
 Future<void> _appendStoredTranscriptLine(
