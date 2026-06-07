@@ -30,7 +30,7 @@ void main() {
           if (call.method == 'speak') {
             return speakCompleter.future;
           }
-          return null;
+          return;
         });
     final gateway = MethodChannelSpokenTranslationOutputGateway(
       methodChannel: channel!,

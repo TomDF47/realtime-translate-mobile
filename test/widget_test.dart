@@ -102,13 +102,14 @@ void main() {
   ) async {
     final repository = _testRepository();
     await _seedCredential(repository);
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
-        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+        realtimeTranslationGateway: realtimeGateway,
       ),
     );
 
@@ -159,13 +160,14 @@ void main() {
   ) async {
     final repository = _testRepository();
     await _seedCredential(repository);
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
-        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+        realtimeTranslationGateway: realtimeGateway,
       ),
     );
 
