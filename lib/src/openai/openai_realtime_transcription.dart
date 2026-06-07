@@ -151,11 +151,11 @@ class OpenAiRealtimeTranscriptionGateway implements AudioTranscriptionGateway {
 
 class OpenAiRealtimeTranscriptionSession implements AudioTranscriptionSession {
   OpenAiRealtimeTranscriptionSession._({
-    required WebSocket socket,
+    required this._socket,
     required this.config,
     required this.diagnostics,
     this.debugRecorder = const RealtimeEventDebugRecorder(),
-  }) : _socket = socket {
+  }) {
     _subscription = _socket.listen(
       _handleSocketMessage,
       onError: _handleSocketError,
