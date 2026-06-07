@@ -233,6 +233,98 @@ void main() {
   );
 
   test(
+    'duplicate batched transcription completions do not create rows',
+    () async {
+      final textGateway = _FakeTextInterpreterGateway()
+        ..results.add(
+          const TextInterpreterTurnResult(
+            detectedLanguageCode: 'en',
+            detectedLanguageLabel: 'English',
+            translatedText: 'Ciao dal tavolo.',
+          ),
+        );
+      final transcriptionGateway = _FakeAudioTranscriptionGateway();
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        textInterpreterGateway: textGateway,
+        transcriptionGateway: transcriptionGateway,
+      );
+      final startedAt = DateTime.utc(2026, 6, 7, 10);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Duplicate batched completion',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'English (US)',
+          targetLanguageLabel: 'Italian (IT)',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          readAloudOutputEnabled: false,
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          now: () => startedAt,
+        ),
+      );
+      for (var i = 0; i < 2; i++) {
+        harness.captureGateway.addChunk(_pcm16Chunk(amplitude: 600));
+      }
+      for (var i = 0; i < 4; i++) {
+        harness.captureGateway.addChunk(_pcm16Chunk(amplitude: 0));
+      }
+      await _drainAsync();
+
+      transcriptionGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptionBufferCommitted(
+            type: 'input_audio_buffer.committed',
+            itemId: 'item-1',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptionCompleted(
+            type: 'conversation.item.input_audio_transcription.completed',
+            itemId: 'item-1',
+            languageCode: 'en',
+            transcript: 'Hello from the table.',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptionCompleted(
+            type: 'conversation.item.input_audio_transcription.completed',
+            itemId: 'item-1',
+            languageCode: 'en',
+            transcript: 'Hello from the table.',
+          ),
+        );
+      await _drainAsync();
+
+      final meeting = (await harness.repository.loadSnapshot()).meetings.single;
+      expect(meeting.transcriptEntries, hasLength(1));
+      expect(
+        meeting.transcriptEntries.single.originalText,
+        'Hello from the table.',
+      );
+      expect(
+        meeting.transcriptEntries.single.translatedText,
+        'Ciao dal tavolo.',
+      );
+      expect(textGateway.requests, hasLength(1));
+    },
+  );
+
+  test(
     'suppresses capture during spoken output until local speech interrupts it',
     () async {
       final harness = await _Harness.create(

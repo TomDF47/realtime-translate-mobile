@@ -168,6 +168,7 @@ class LiveRealtimeTranslationCoordinator {
   final Map<String, _PendingTranscriptionBatch>
   _pendingTranscriptionBatchesByItem = <String, _PendingTranscriptionBatch>{};
   final Set<String> _completedTranscriptionItemIds = <String>{};
+  final Set<String> _processedTranscriptionCompletionItemIds = <String>{};
   int _transcriptionBatchSequence = 0;
 
   bool get isStreaming {
@@ -868,6 +869,7 @@ class LiveRealtimeTranslationCoordinator {
     _pendingTranscriptionBatches.clear();
     _pendingTranscriptionBatchesByItem.clear();
     _completedTranscriptionItemIds.clear();
+    _processedTranscriptionCompletionItemIds.clear();
   }
 
   void _flushTranscriptionBufferIfNeeded() {
@@ -951,6 +953,13 @@ class LiveRealtimeTranslationCoordinator {
   ) async {
     final transcript = event.transcript.trim();
     if (transcript.isEmpty) {
+      return;
+    }
+
+    final normalizedItemId = event.itemId?.trim();
+    if (normalizedItemId != null &&
+        normalizedItemId.isNotEmpty &&
+        !_processedTranscriptionCompletionItemIds.add(normalizedItemId)) {
       return;
     }
 
