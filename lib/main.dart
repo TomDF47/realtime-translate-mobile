@@ -593,6 +593,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     return switch (state.phase) {
       LiveSessionPhase.reconnecting ||
       LiveSessionPhase.offline ||
+      LiveSessionPhase.credentialInvalid ||
       LiveSessionPhase.error => true,
       _ => false,
     };
