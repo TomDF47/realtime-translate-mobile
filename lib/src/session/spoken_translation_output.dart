@@ -96,7 +96,7 @@ class MethodChannelSpokenTranslationOutputGateway
 
   @override
   Future<void> stop() async {
-    if (!_isSpeaking && !_nativeOutputAvailable) {
+    if (!_isSpeaking) {
       return;
     }
 

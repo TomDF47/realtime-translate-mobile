@@ -33,16 +33,16 @@ The active live experience is a transcription-first two-party interpreter with o
 3. Provider sign-in buttons from the original mockup are V2/future only and must not gate the MVP.
 4. Starting without a saved credential shows `OpenAI setup required` before microphone permission, realtime, or capture resources open.
 5. The setup sheet accepts user-provided OpenAI credential/session material, stores it encrypted locally, does not redisplay the saved value, and provides removal/reset.
-6. After a credential exists, starting a meeting opens the paused live surface and connects OpenAI realtime transcription in the background.
-7. Android microphone permission is requested when the user taps `Resume Listening`, before capture starts.
+6. After a credential exists, starting a meeting requests microphone permission, connects OpenAI realtime transcription, and opens active listening.
+7. Android microphone permission is requested during live startup before capture starts.
 8. Denied, permanently denied, and revoked microphone permission states must be explicit and must not start capture.
 
 ### Live Interpreter Startup
 
 1. After `Start interpreter`, the app moves immediately to a visible live startup state instead of appearing stalled.
 2. Startup must show an explicit loading/connecting indicator such as `Connecting to OpenAI` because initial connection can take about 15 seconds.
-3. With a saved credential, startup should reach `listeningPaused`: OpenAI realtime transcription may be connected, but microphone capture and phone-local spoken output remain closed until the user taps `Resume Listening`.
-4. Microphone capture must not start until the user resumes and permission is granted.
+3. With a saved credential and microphone permission, startup should reach active `listening` with microphone capture open and `Pause Listening` visible.
+4. Microphone capture must not start until permission is granted.
 5. Startup errors must keep the user on a useful live/recovery surface with sanitized labels.
 
 ### Manual Language Pair And Translation
@@ -131,7 +131,7 @@ The active live experience is a transcription-first two-party interpreter with o
 
 - Direct OpenAI calls are the only routine product network path.
 - Normal live intake uses Realtime transcription-only sessions with `gpt-realtime-whisper`, manual `input_audio_buffer.commit`, and direct Responses translation with `store: false`.
-- Realtime startup can reach a warm paused state before microphone capture. Capture starts only after `Resume Listening` and microphone permission.
+- Realtime startup reaches active listening after microphone permission. The paused state is entered by `Pause Listening` and can keep the realtime transcription session warm.
 - Connection startup should have a bounded timeout/recovery path and a visible loading state; it must not leave the user staring at a static start screen for the roughly 15 second startup window.
 - Credential expiry/rejection moves to `credentialInvalid` and closes capture/realtime/playback resources.
 - Retryable network drops, socket closes, rate limits, transient OpenAI failures, connect timeouts, and lifecycle interruptions use bounded reconnect/backoff and show `reconnecting` or recovery UI.

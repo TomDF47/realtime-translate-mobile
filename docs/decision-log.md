@@ -52,9 +52,30 @@ Implications:
 - Validation should focus on a clear EN/IT transcript log first, then on manual voice-button playback pausing and resuming capture.
 - This adds no dependency, Android permission, backend route, app-owned network path, credential handling change, microphone recording persistence, transcript/audio logging, or analytics/crash sink. The phone-only direct-OpenAI privacy boundary is unchanged.
 
+## 2026-06-07 - Start Interpreter Begins Active Listening
+
+Status: Accepted
+
+Context:
+
+- Tom's latest Samsung retest showed the app sitting in a paused state and missing too much speech from both speakers.
+- The transcription-first batch loop is intended to keep forwarding microphone audio continuously, commit buffered audio in short batches or on pauses, translate each completed transcript batch, and keep a chronological communication log.
+
+Decision:
+
+- With a saved credential, `Start interpreter` requests microphone permission, opens the realtime transcription session, starts room microphone capture, and lands on active `listening` with `Pause Listening` visible.
+- `Pause Listening` remains available as an explicit privacy/control action: it flushes pending microphone audio, stops capture and spoken output, and keeps the realtime transcription session warm when available.
+- Manual row playback pauses capture only while that row's translated text is spoken, then resumes capture if listening was active before playback.
+
+Implications:
+
+- The previous warm-paused startup behavior is superseded for the active UI.
+- Credential and microphone permission gates still fail closed before capture or transcript routing.
+- The phone-only direct-OpenAI privacy boundary is unchanged.
+
 ## 2026-06-04 - Warm Paused Startup With Serialized Phone-Local Spoken Output
 
-Status: Superseded in the active UI by `2026-06-05 - Manual Language-Card Voice Playback Replaces Output Voice Checkboxes`
+Status: Superseded in the active UI by `2026-06-07 - Start Interpreter Begins Active Listening`
 
 Context:
 

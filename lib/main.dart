@@ -564,7 +564,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     final started = await _startRealtimeForSession(
       initialSession,
       meetingId: meetingId,
-      startPaused: true,
+      startPaused: false,
     );
     if (!mounted) {
       return;
@@ -2559,7 +2559,7 @@ class _LiveStateNoticeBanner extends StatelessWidget {
     final accentColor = AppColors.forAccent(accent);
     final title = isConnecting ? 'Connecting to OpenAI' : 'Listening paused';
     final body = isConnecting
-        ? 'Preparing live interpretation on this phone. Recording starts only when you resume listening.'
+        ? 'Preparing live interpretation on this phone. Recording starts as soon as the live session is ready.'
         : 'OpenAI stays connected in the background. Microphone capture and translated audio are stopped until you resume.';
 
     return Semantics(

@@ -21,7 +21,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Tap `Start interpreter` without a saved credential and verify `OpenAI setup required` appears before microphone permission.
 - Save only a placeholder or current test credential through `OpenAI setup`; verify the saved value is not displayed.
 - Start an interpreter session with fake or valid local credential and granted microphone permission.
-- Verify the live screen starts paused but warm-connected with the selected manual pair such as `Italian <-> English`, source/target language selectors, elapsed timer, transcript area, `Stop Listening`, and `Resume Listening`.
+- Verify the live screen starts active after microphone permission with the selected manual pair such as `Italian <-> English`, source/target language selectors, elapsed timer, transcript area, `Stop Listening`, and `Pause Listening`.
 - Verify both language cards hide `Output voice` checkboxes and do not show language-card voice buttons.
 - Verify the active live screen does not show direction switch, `Translate Text`, legacy global read-aloud controls, speaker/headphone chips, live-header AI chat, live-screen export controls, or `Resume read-aloud meeting`.
 - Open both language selectors, verify `Auto-detect` is not offered as a source choice, choose a different supported source/target, and verify the status card and stored meeting route update to the new pair.
@@ -46,7 +46,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Verify `Translate Text` is absent from the active interpreter flow before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
 - Verify legacy read-aloud, pause/resume read-aloud, speaker/headphone state, and switch-direction controls are hidden in the active interpreter flow before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
 - Verify transcript-row voice buttons remain available only on translated rows before and after menu, sheet, screenshot, and lifecycle pause/resume interactions, and `Output voice` checkboxes remain hidden.
-- Tap `Resume Listening`; verify microphone permission is requested only at resume time and the bottom control changes to `Pause Listening`.
+- Verify microphone permission is requested during startup before capture opens.
 - Tap `Pause Listening`; verify pending microphone audio is committed when present, microphone capture and phone-local spoken output stop, the active meeting remains visible, and `Resume Listening` reuses the warm Realtime transcription session when available.
 - Tap `Stop Listening`; verify capture/realtime/playback resources close and the setup screen returns.
 - If `Jump to Live` is visible, tap it and verify the list returns to the latest transcript entry or shows the latest-state confirmation.
@@ -63,7 +63,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 ## Transcript Chunking And Timer
 
-- Latest Tom feedback regression: start a live meeting from setup and verify the app immediately moves to the live surface with `Connecting to OpenAI` followed by `Listening paused`, not a stalled start screen or an indefinite preparing screen.
+- Latest Tom feedback regression: start a live meeting from setup and verify the app immediately moves to the live surface with `Connecting to OpenAI` followed by active `Listening` and `Pause Listening`, not a stalled start screen, an indefinite preparing screen, or a paused state that misses speech.
 - Verify the elapsed timer starts at `00:00` for a new active meeting.
 - Verify the timer advances only while microphone capture is open.
 - Verify the timer pauses during stopped/offline/reconnecting/backgrounded states.

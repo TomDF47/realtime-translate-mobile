@@ -113,7 +113,7 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - `Jump to Live` chip.
 - Fixed bottom control bar:
   - Large circular `Stop Listening` red button.
-  - Show `Resume Listening` while the warm startup or paused state has microphone capture closed.
+  - Show `Pause Listening` during active capture and `Resume Listening` only after the user pauses listening.
   - Show `Pause Listening` after microphone capture is active.
   - Do not show legacy read-aloud or switch-direction controls in the active issue #30 interpreter flow.
 - Live menu:

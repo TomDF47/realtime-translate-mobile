@@ -112,12 +112,16 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
 
-    expect(find.text('Paused'), findsOneWidget);
+    expect(find.text('Listening'), findsOneWidget);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
-    expect(find.text('Resume Listening'), findsOneWidget);
-    expect(find.bySemanticsLabel('Resume listening'), findsOneWidget);
+    expect(find.text('Pause Listening'), findsOneWidget);
+    expect(find.bySemanticsLabel('Pause listening'), findsOneWidget);
     expect(find.text('Translate Text'), findsNothing);
     expect(find.text('Waiting for speech'), findsOneWidget);
     expect(
@@ -165,7 +169,11 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
 
     expect(find.text('Output voice'), findsNothing);
     expect(
@@ -198,9 +206,11 @@ void main() {
         spokenTranslationOutputGateway: spokenOutputGateway,
       ),
     );
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
-    await tester.tap(find.bySemanticsLabel('Resume listening'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
 
     realtimeGateway.primarySession
       ..addEvent(
@@ -254,8 +264,12 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
-    expect(find.text('Paused'), findsOneWidget);
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
+    expect(find.text('Listening'), findsOneWidget);
     final primaryConfig = realtimeGateway.configs.firstWhere(
       (config) => config.sourceTranscriptionEnabled,
     );
@@ -277,7 +291,7 @@ void main() {
     expect(find.text('Switch'), findsNothing);
     expect(find.text('Read Aloud'), findsNothing);
     expect(find.text('Pause Read Aloud'), findsNothing);
-    expect(find.text('Resume Listening'), findsOneWidget);
+    expect(find.text('Pause Listening'), findsOneWidget);
     expect(find.bySemanticsLabel('Translate Text on'), findsNothing);
     expect(realtimeGateway.configs.length, initialRealtimeConfigCount);
 
@@ -334,7 +348,11 @@ void main() {
         ),
       );
 
-      await _tapStartInterpreterUntil(tester, find.text('Paused'));
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
 
       await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
       await tester.pumpAndSettle();
@@ -409,8 +427,8 @@ void main() {
     realtimeGateway.completeConnect();
     await tester.pumpAndSettle();
 
-    expect(find.text('Paused'), findsOneWidget);
-    expect(find.text('Resume Listening'), findsOneWidget);
+    expect(find.text('Listening'), findsOneWidget);
+    expect(find.text('Pause Listening'), findsOneWidget);
   });
 
   testWidgets('pause and resume listening controls keep meeting transcript', (
@@ -429,9 +447,11 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
-    await tester.tap(find.bySemanticsLabel('Resume listening'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     final meetingId = (await repository.loadSnapshot()).meetings.single.id;
     await _appendStoredTranscriptLine(repository, meetingId);
     await tester.pump(const Duration(milliseconds: 250));
@@ -523,7 +543,11 @@ void main() {
         ),
       );
 
-      await _tapStartInterpreterUntil(tester, find.text('Paused'));
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(find.text('Italian <-> English'), findsOneWidget);
       expect(find.text('Auto-detect Spanish -> English'), findsNothing);
       final primaryConfig = realtimeGateway.configs.firstWhere(
@@ -566,7 +590,11 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Waiting for speech'));
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Waiting for speech'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     expect(find.text('Waiting for speech'), findsOneWidget);
 
     realtimeGateway.primarySession
@@ -654,7 +682,11 @@ void main() {
         ),
       );
 
-      await _tapStartInterpreterUntil(tester, find.text('Paused'));
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(realtimeGateway.primaryConfig.targetLanguageCode, 'en');
 
       realtimeGateway.primarySession.addEvent(
@@ -748,7 +780,11 @@ void main() {
         ),
       );
 
-      await _tapStartInterpreterUntil(tester, find.text('Paused'));
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(find.text('Italian <-> English'), findsOneWidget);
 
       // Italian is spoken first with no realtime language metadata, so the app
@@ -852,7 +888,11 @@ void main() {
         ),
       );
 
-      await _tapStartInterpreterUntil(tester, find.text('Paused'));
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(find.text('Italian <-> English'), findsOneWidget);
 
       const englishParagraph =
@@ -977,7 +1017,11 @@ void main() {
         ),
       );
 
-      await _tapStartInterpreterUntil(tester, find.text('Paused'));
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(find.text('Italian <-> English'), findsOneWidget);
 
       realtimeGateway.primarySession
@@ -1170,7 +1214,11 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     final activeMeeting = (await repository.loadSnapshot()).meetings.single;
     await _appendStoredTranscriptLine(repository, activeMeeting.id);
 
@@ -1212,7 +1260,11 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Waiting for speech'));
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Waiting for speech'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
 
     expect(find.text('Italian <-> English'), findsOneWidget);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
@@ -1251,7 +1303,11 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     _expectManualPairActiveLiveControls();
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -1286,11 +1342,10 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
-
-    expect(find.text('Paused'), findsOneWidget);
-    await tester.tap(find.bySemanticsLabel('Resume listening'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Microphone access needed'),
+    );
 
     expect(find.text('Microphone access needed'), findsOneWidget);
     expect(find.text('Try microphone permission again'), findsOneWidget);
@@ -1320,9 +1375,11 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
-    await tester.tap(find.bySemanticsLabel('Resume listening'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     expect((await repository.loadSnapshot()).meetings, hasLength(1));
     expect(captureGateway.isCapturing, isTrue);
 
@@ -1376,7 +1433,7 @@ void main() {
       ),
     );
 
-    await _tapStartInterpreterUntil(tester, find.text('Paused'));
+    await _tapStartInterpreterUntil(tester, find.text('Pause Listening'));
 
     final initialMeeting = (await repository.loadSnapshot()).meetings.single;
 
@@ -1455,18 +1512,19 @@ Future<void> _seedCredential(LocalMeetingRepository repository) {
 Future<void> _tapStartInterpreterUntil(
   WidgetTester tester,
   Finder expectedSurface, {
+  bool Function()? isReady,
   int maxPumps = 60,
 }) async {
   await tester.tap(find.text('Start interpreter'));
   for (var index = 0; index < maxPumps; index++) {
     await tester.pump(const Duration(milliseconds: 50));
-    if (expectedSurface.evaluate().isNotEmpty) {
+    if (expectedSurface.evaluate().isNotEmpty && (isReady?.call() ?? true)) {
       return;
     }
   }
 
   await tester.pumpAndSettle();
-  if (expectedSurface.evaluate().isEmpty) {
+  if (expectedSurface.evaluate().isEmpty || !(isReady?.call() ?? true)) {
     final visibleText = tester
         .widgetList<Text>(find.byType(Text))
         .map((widget) => widget.data ?? widget.textSpan?.toPlainText() ?? '')
@@ -1474,7 +1532,8 @@ Future<void> _tapStartInterpreterUntil(
         .take(20)
         .join(' | ');
     fail(
-      'Expected start surface did not appear. Visible text: $visibleText',
+      'Expected start surface did not appear or was not ready. '
+      'Visible text: $visibleText',
     );
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_translate_mobile/src/session/spoken_translation_output.dart';
@@ -21,16 +23,20 @@ void main() {
       'realtime_translate_mobile/test_spoken_translation_output',
     );
     final calls = <MethodCall>[];
+    final speakCompleter = Completer<void>();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel!, (call) async {
           calls.add(call);
+          if (call.method == 'speak') {
+            return speakCompleter.future;
+          }
           return null;
         });
     final gateway = MethodChannelSpokenTranslationOutputGateway(
       methodChannel: channel!,
     );
 
-    await gateway.speak(
+    final speakFuture = gateway.speak(
       const SpokenTranslationUtterance(
         id: 'entry-1',
         routeSide: SpokenTranslationRouteSide.source,
@@ -39,7 +45,12 @@ void main() {
         text: 'Ciao Marco',
       ),
     );
+    await Future<void>.delayed(Duration.zero);
+    expect(gateway.isSpeaking, isTrue);
+
     await gateway.stop();
+    speakCompleter.complete();
+    await speakFuture;
 
     expect(gateway.isSpeaking, isFalse);
     expect(calls.map((call) => call.method), ['speak', 'stop']);
