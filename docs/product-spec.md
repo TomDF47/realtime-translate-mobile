@@ -4,15 +4,15 @@ This is the high-level product spec. Use [docs/live-translate-build-spec.md](liv
 
 ## Goal
 
-Build an Android-first, iOS-compatible mobile app for continuous live speech translation using OpenAI Realtime Translation. The MVP is phone-only except for direct OpenAI API calls.
+Build an Android-first, iOS-compatible mobile app for continuous live speech translation using direct OpenAI Realtime transcription plus direct OpenAI text translation. The MVP is phone-only except for direct OpenAI API calls.
 
 ## Core Experience
 
 1. User opens the app and starts a new meeting or selects an old meeting.
 2. User chooses source language detection or a known input language.
 3. User chooses a supported output language.
-4. App starts continuous translation through a direct OpenAI API connection.
-5. OpenAI streams translated audio and transcript deltas while the speaker is still talking.
+4. App starts continuous audio intake through a direct OpenAI API connection.
+5. OpenAI returns completed transcript batches; the app logs each batch immediately, translates it through direct OpenAI Responses with `store: false`, and can speak a translated row on demand.
 6. User can review local meeting history and continue from an old meeting.
 7. User can use scoped AI chat over `This meeting` or `All meetings`.
 8. User can generate Transcript, Summary, or Both as encrypted local exports, review them in app, and explicitly copy an export when ready.
@@ -49,10 +49,10 @@ The revised MVP keeps the visual direction but adapts sign-in affordances into p
 
 ### OpenAI
 
-- Live translation uses `gpt-realtime-translate` on `/v1/realtime/translations` for normal MVP human-speech interpretation.
-- Keep `gpt-realtime-2` only as an explicit compatibility/experimental voice-agent profile.
+- Live intake uses Realtime transcription-only sessions with `gpt-realtime-whisper` and manual input-buffer commits for normal MVP human-speech interpretation.
+- Keep `gpt-realtime-translate` on `/v1/realtime/translations` and `gpt-realtime-2` only as explicit compatibility/debug profiles.
 - App connects directly to the OpenAI API from the phone.
-- Translation path should support streaming translated audio and transcript deltas.
+- Translation path should create clear local transcript rows and update each row with direct Responses text translation.
 - AI chat and summary generation use direct OpenAI calls from the phone.
 - The accepted MVP credential approach is user-provided OpenAI credential/session material stored only in encrypted local device storage; no key may be committed or bundled.
 - Account for current platform limits: broad input language coverage, narrower target output language coverage, endpoint/model support, and reasoning parameter availability must be verified during implementation.

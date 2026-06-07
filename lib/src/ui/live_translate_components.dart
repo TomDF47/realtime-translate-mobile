@@ -395,16 +395,13 @@ class LanguageSelectorCard extends StatelessWidget {
     super.key,
     required this.data,
     this.onTap,
-    this.onVoicePressed,
   });
 
   final LanguageSelectorData data;
   final VoidCallback? onTap;
-  final VoidCallback? onVoicePressed;
 
   @override
   Widget build(BuildContext context) {
-    final accentColor = AppColors.forAccent(data.accent);
     final displayLabel = [
       data.primaryLabel,
       data.secondaryLabel,
@@ -457,57 +454,7 @@ class LanguageSelectorCard extends StatelessWidget {
         horizontal: AppSpacing.md,
         vertical: AppSpacing.sm,
       ),
-      child: Row(
-        children: [
-          Expanded(child: languagePicker),
-          const SizedBox(width: AppSpacing.xs),
-          _LanguageVoiceButton(
-            languageLabel: data.primaryLabel,
-            accentColor: accentColor,
-            isEnabled: data.voicePlaybackAvailable && onVoicePressed != null,
-            onPressed: onVoicePressed,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LanguageVoiceButton extends StatelessWidget {
-  const _LanguageVoiceButton({
-    required this.languageLabel,
-    required this.accentColor,
-    required this.isEnabled,
-    required this.onPressed,
-  });
-
-  final String languageLabel;
-  final Color accentColor;
-  final bool isEnabled;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final effectiveOnPressed = isEnabled ? onPressed : null;
-    final label = 'Read latest translation for $languageLabel';
-    return Tooltip(
-      message: isEnabled ? label : 'No translation yet for $languageLabel',
-      child: Semantics(
-        button: true,
-        enabled: isEnabled,
-        label: label,
-        child: IconButton.filledTonal(
-          onPressed: effectiveOnPressed,
-          icon: const Icon(Icons.volume_up_rounded),
-          color: accentColor,
-          style: IconButton.styleFrom(
-            fixedSize: const Size(44, 44),
-            backgroundColor: accentColor.withValues(alpha: 0.16),
-            disabledBackgroundColor: AppColors.surfacePressed,
-            disabledForegroundColor: AppColors.textTertiary,
-          ),
-        ),
-      ),
+      child: languagePicker,
     );
   }
 }
@@ -634,9 +581,10 @@ class FeatureChip extends StatelessWidget {
 }
 
 class TranscriptCard extends StatelessWidget {
-  const TranscriptCard({super.key, required this.entry});
+  const TranscriptCard({super.key, required this.entry, this.onPlayTranslation});
 
   final TranscriptEntryData entry;
+  final ValueChanged<String>? onPlayTranslation;
 
   @override
   Widget build(BuildContext context) {
@@ -737,10 +685,12 @@ class TranscriptCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: AppSpacing.xs),
-            Icon(
-              _playbackIcon(entry.playbackState),
-              color: accentColor,
-              size: 20,
+            _TranscriptVoiceButton(
+              entry: entry,
+              accentColor: accentColor,
+              onPressed: _canPlayTranslation
+                  ? () => onPlayTranslation?.call(entry.id)
+                  : null,
             ),
           ],
         ),
@@ -748,12 +698,42 @@ class TranscriptCard extends StatelessWidget {
     );
   }
 
-  IconData _playbackIcon(TranscriptPlaybackState state) {
-    return switch (state) {
-      TranscriptPlaybackState.none => Icons.more_horiz_rounded,
-      TranscriptPlaybackState.playable => Icons.volume_up_rounded,
-      TranscriptPlaybackState.speaking => Icons.graphic_eq_rounded,
-    };
+  bool get _canPlayTranslation =>
+      onPlayTranslation != null &&
+      entry.id.trim().isNotEmpty &&
+      entry.translatedText.trim().isNotEmpty;
+}
+
+class _TranscriptVoiceButton extends StatelessWidget {
+  const _TranscriptVoiceButton({
+    required this.entry,
+    required this.accentColor,
+    required this.onPressed,
+  });
+
+  final TranscriptEntryData entry;
+  final Color accentColor;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final isSpeaking = entry.playbackState == TranscriptPlaybackState.speaking;
+    final label = 'Read this translation aloud';
+    return IconButton.filledTonal(
+      onPressed: onPressed,
+      icon: Icon(
+        isSpeaking ? Icons.graphic_eq_rounded : Icons.volume_up_rounded,
+        size: 20,
+      ),
+      color: accentColor,
+      tooltip: onPressed == null ? 'Translation pending' : label,
+      style: IconButton.styleFrom(
+        fixedSize: const Size(40, 40),
+        backgroundColor: accentColor.withValues(alpha: 0.16),
+        disabledBackgroundColor: AppColors.surfacePressed,
+        disabledForegroundColor: AppColors.textTertiary,
+      ),
+    );
   }
 }
 
@@ -762,10 +742,12 @@ class TranscriptList extends StatelessWidget {
     super.key,
     required this.entries,
     this.bottomPadding = AppSpacing.bottomControlsHeight,
+    this.onPlayTranslation,
   });
 
   final List<TranscriptEntryData> entries;
   final double bottomPadding;
+  final ValueChanged<String>? onPlayTranslation;
 
   @override
   Widget build(BuildContext context) {
@@ -778,7 +760,10 @@ class TranscriptList extends StatelessWidget {
 
     return ListView.separated(
       padding: EdgeInsets.only(bottom: bottomPadding),
-      itemBuilder: (context, index) => TranscriptCard(entry: entries[index]),
+      itemBuilder: (context, index) => TranscriptCard(
+        entry: entries[index],
+        onPlayTranslation: onPlayTranslation,
+      ),
       separatorBuilder: (context, index) =>
           const SizedBox(height: AppSpacing.xs),
       itemCount: entries.length,

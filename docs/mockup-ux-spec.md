@@ -94,17 +94,17 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - The active live interpreter shows two compact language selector cards: `From` and `To`.
   - The default pair is Italian <-> English.
   - Do not show a direction switch in the live interpreter flow; the selected pair is bidirectional.
-  - Each language card includes a compact voice button on the right. The button is disabled until that side has a finalized translation; tapping it pauses microphone forwarding, reads the latest translation for that side, then resumes listening if the mic was already active.
+  - Language cards do not include voice buttons in the active transcription-first flow. Spoken output belongs to individual translated transcript rows.
 - Feature toggles row:
   - Hide `Translate Text` from the active issue #30 live interpreter flow.
-  - Hide legacy global read-aloud, speaker, headphone controls, and `Output voice` checkboxes. Spoken output belongs to the per-language voice buttons instead of automatic turn playback or a global read-aloud toggle.
+  - Hide legacy global read-aloud, speaker, headphone controls, language-card voice buttons, and `Output voice` checkboxes. Spoken output belongs to per-row translated playback instead of automatic turn playback or a global read-aloud toggle.
 - Transcript list:
   - Card per utterance or translation pair.
   - Language badge: `ES` or `EN`.
   - Original text smaller.
   - Translated text larger and bolder.
   - Timestamp.
-  - Per-line speaker or play icon.
+  - Per-line speaker/play button on the right; disabled while translation is pending and enabled only for that row's translated text.
   - Spanish/source cards use teal accent border.
   - English/target cards use blue accent border.
   - Include sample meeting content around Tuesday at 10 AM, deliverables, and project timeline.

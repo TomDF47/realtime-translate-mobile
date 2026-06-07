@@ -122,6 +122,7 @@ class FeatureChipData {
 
 class TranscriptEntryData {
   const TranscriptEntryData({
+    this.id = '',
     required this.languageCode,
     required this.originalText,
     required this.translatedText,
@@ -132,6 +133,7 @@ class TranscriptEntryData {
     this.playbackState = TranscriptPlaybackState.playable,
   });
 
+  final String id;
   final String languageCode;
   final String originalText;
   final String translatedText;

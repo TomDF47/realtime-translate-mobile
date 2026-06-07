@@ -2,9 +2,34 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
-## 2026-06-05 - Manual Language-Card Voice Playback Replaces Output Voice Checkboxes
+## 2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback
 
 Status: Accepted as code direction (local Windows checkout still relies on CI/Fedora for Flutter analyzer, tests, APK build, and installed-device proof)
+
+Context:
+
+- Tom's Samsung retest showed the prior live path was still not sensitive enough, especially for the person across the table, and translated audio controls were not on the speech bubbles.
+- The app does not need local VAD to decide whether speech is important. The more reliable contract is to send captured audio continuously, batch commits around pauses or a hard cap, then translate the returned transcript.
+- The language-card voice button still had "latest translation for side" ambiguity. A communication log needs row-level playback so the user knows exactly which translation will be spoken.
+
+Decision:
+
+- The production `LiveTranslateApp` opts into a Realtime transcription-only session using `gpt-realtime-whisper` on `/v1/realtime` with `session.type = transcription` and manual `input_audio_buffer.commit`.
+- Android forwards every captured PCM16 chunk to OpenAI. Local pause detection and the hard cap decide only when to commit the already-forwarded buffer; they do not gate whether audio is sent.
+- A completed transcription batch creates a stable transcript row immediately. The direct Responses text interpreter translates that text with `store: false` and updates the same row instead of merging into another box.
+- The active Android capture config requests room capture (`UNPROCESSED` where available, else `MIC`) and disables platform acoustic echo cancellation/noise suppression for this path so across-table speech is less likely to be filtered out.
+- The active UI removes language-card voice buttons. Each translated transcript row exposes its own voice button. Pressing it flushes pending mic audio, pauses capture, speaks that row's translated text through phone-local TextToSpeech, and resumes listening only if capture was active before the tap.
+- The legacy `/v1/realtime/translations` translation gateway and committer remain in the repo for compatibility/debug tests, but they are no longer the default phone-test loop.
+
+Implications:
+
+- Future #6 validation should prove room pickup from both speakers, stable chronological transcript rows, direct Responses translations in the matching rows, and per-row audible TTS playback.
+- A future live OpenAI smoke should be added for the transcription-first path; the existing dedicated-translation smoke proves only the retained legacy gateway.
+- This adds no dependency, Android permission, backend route, app-owned server path, live credential read, microphone recording persistence, transcript/audio logging, or analytics/crash sink. The phone-only direct-OpenAI privacy boundary is unchanged.
+
+## 2026-06-05 - Manual Language-Card Voice Playback Replaces Output Voice Checkboxes
+
+Status: Superseded in the active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
 
 Context:
 

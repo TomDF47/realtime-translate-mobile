@@ -14,6 +14,7 @@ import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
@@ -189,6 +190,8 @@ class MainActivity : FlutterActivity() {
         val sampleRateHz = (values["sampleRateHz"] as? Number)?.toInt() ?: 24000
         val channelCount = (values["channelCount"] as? Number)?.toInt() ?: 1
         val chunkDurationMs = (values["chunkDurationMs"] as? Number)?.toInt() ?: 200
+        val androidAudioSource = values["androidAudioSource"] as? String ?: "voiceRecognition"
+        val androidInputEffectsEnabled = values["androidInputEffectsEnabled"] as? Boolean ?: true
 
         if (channelCount != 1) {
             result.error("unsupported_channel_count", "Only mono microphone capture is supported.", null)
@@ -203,6 +206,8 @@ class MainActivity : FlutterActivity() {
         val capture = Pcm16MicrophoneCapture(
             sampleRateHz = sampleRateHz,
             chunkDurationMs = chunkDurationMs,
+            androidAudioSource = androidAudioSource,
+            inputEffectsEnabled = androidInputEffectsEnabled,
             eventSink = eventSink,
             mainHandler = mainHandler,
         )
@@ -381,6 +386,8 @@ class MainActivity : FlutterActivity() {
     private class Pcm16MicrophoneCapture(
         private val sampleRateHz: Int,
         private val chunkDurationMs: Int,
+        private val androidAudioSource: String,
+        private val inputEffectsEnabled: Boolean,
         private val eventSink: EventChannel.EventSink,
         private val mainHandler: Handler,
     ) {
@@ -408,7 +415,7 @@ class MainActivity : FlutterActivity() {
             val bufferSize = maxOf(minBufferSize, chunkByteCount * 2)
             @Suppress("DEPRECATION")
             val record = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                resolveAudioSource(),
                 sampleRateHz,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
@@ -422,7 +429,9 @@ class MainActivity : FlutterActivity() {
                 )
             }
 
-            enableInputEffects(record)
+            if (inputEffectsEnabled) {
+                enableInputEffects(record)
+            }
             return try {
                 record.startRecording()
                 if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
@@ -493,6 +502,17 @@ class MainActivity : FlutterActivity() {
             } catch (error: RuntimeException) {
                 releaseInputEffects()
             }
+        }
+
+        private fun resolveAudioSource(): Int {
+            if (androidAudioSource == "room") {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    return MediaRecorder.AudioSource.UNPROCESSED
+                }
+                return MediaRecorder.AudioSource.MIC
+            }
+
+            return MediaRecorder.AudioSource.VOICE_RECOGNITION
         }
 
         private fun releaseInputEffects() {

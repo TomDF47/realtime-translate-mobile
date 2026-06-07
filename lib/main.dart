@@ -12,6 +12,7 @@ import 'src/openai/openai_configuration.dart';
 import 'src/openai/openai_credential_store.dart';
 import 'src/openai/openai_meeting_summary.dart';
 import 'src/openai/openai_realtime_resilience.dart';
+import 'src/openai/openai_realtime_transcription.dart';
 import 'src/openai/openai_realtime_translation.dart';
 import 'src/openai/openai_text_interpreter.dart';
 import 'src/session/live_session_controller.dart';
@@ -46,6 +47,7 @@ class LiveTranslateApp extends StatelessWidget {
     this.microphoneCaptureGateway,
     this.translatedAudioPlaybackGateway,
     this.realtimeTranslationGateway,
+    this.realtimeTranscriptionGateway,
     this.textInterpreterGateway,
     this.spokenTranslationOutputGateway,
   });
@@ -57,6 +59,7 @@ class LiveTranslateApp extends StatelessWidget {
   final MicrophoneCaptureGateway? microphoneCaptureGateway;
   final TranslatedAudioPlaybackGateway? translatedAudioPlaybackGateway;
   final RealtimeTranslationGateway? realtimeTranslationGateway;
+  final AudioTranscriptionGateway? realtimeTranscriptionGateway;
   final TextInterpreterGateway? textInterpreterGateway;
   final SpokenTranslationOutputGateway? spokenTranslationOutputGateway;
 
@@ -74,6 +77,7 @@ class LiveTranslateApp extends StatelessWidget {
         microphoneCaptureGateway: microphoneCaptureGateway,
         translatedAudioPlaybackGateway: translatedAudioPlaybackGateway,
         realtimeTranslationGateway: realtimeTranslationGateway,
+        realtimeTranscriptionGateway: realtimeTranscriptionGateway,
         textInterpreterGateway: textInterpreterGateway,
         spokenTranslationOutputGateway: spokenTranslationOutputGateway,
       ),
@@ -107,7 +111,9 @@ StoredMeeting _storedMeetingFromSession({
     transcriptEntries: [
       for (var index = 0; index < session.transcriptEntries.length; index++)
         StoredTranscriptEntry(
-          id: '$id-entry-$index',
+          id: session.transcriptEntries[index].id.isEmpty
+              ? '$id-entry-$index'
+              : session.transcriptEntries[index].id,
           meetingId: id,
           languageCode: session.transcriptEntries[index].languageCode,
           originalText: session.transcriptEntries[index].originalText,
@@ -149,6 +155,7 @@ TranscriptEntryData _transcriptEntryFromStored(StoredTranscriptEntry entry) {
   };
 
   return TranscriptEntryData(
+    id: entry.id,
     languageCode: _languageChipLabel(entry.languageCode),
     originalText: entry.originalText,
     translatedText: entry.translatedText,
@@ -331,6 +338,7 @@ class LiveTranslateHome extends StatefulWidget {
     this.microphoneCaptureGateway,
     this.translatedAudioPlaybackGateway,
     this.realtimeTranslationGateway,
+    this.realtimeTranscriptionGateway,
     this.textInterpreterGateway,
     this.spokenTranslationOutputGateway,
   });
@@ -342,6 +350,7 @@ class LiveTranslateHome extends StatefulWidget {
   final MicrophoneCaptureGateway? microphoneCaptureGateway;
   final TranslatedAudioPlaybackGateway? translatedAudioPlaybackGateway;
   final RealtimeTranslationGateway? realtimeTranslationGateway;
+  final AudioTranscriptionGateway? realtimeTranscriptionGateway;
   final TextInterpreterGateway? textInterpreterGateway;
   final SpokenTranslationOutputGateway? spokenTranslationOutputGateway;
 
@@ -399,6 +408,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     _aiChatGateway = widget.aiChatGateway ?? OpenAiResponsesAiChatGateway();
     _meetingSummaryGateway =
         widget.meetingSummaryGateway ?? OpenAiResponsesMeetingSummaryGateway();
+    final useBatchedTranscription =
+        widget.realtimeTranscriptionGateway != null ||
+        widget.realtimeTranslationGateway == null;
     _realtimeCoordinator = LiveRealtimeTranslationCoordinator(
       sessionController: _sessionController,
       credentialStore: _openAiCredentialStore,
@@ -411,6 +423,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       realtimeGateway:
           widget.realtimeTranslationGateway ??
           OpenAiRealtimeTranslationGateway(),
+      transcriptionGateway: useBatchedTranscription
+          ? widget.realtimeTranscriptionGateway ??
+                OpenAiRealtimeTranscriptionGateway()
+          : null,
       textInterpreterGateway: widget.textInterpreterGateway,
       spokenOutputGateway:
           widget.spokenTranslationOutputGateway ??
@@ -980,73 +996,26 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           : language.regionLabel,
       icon: fallback.icon,
       accent: fallback.accent,
-      spokenOutputEnabled: isTarget
-          ? _targetSpokenOutputEnabled
-          : _sourceSpokenOutputEnabled,
-      voicePlaybackAvailable:
-          _latestSpeakableEntryForSide(isTarget: isTarget) != null,
+      spokenOutputEnabled: false,
+      voicePlaybackAvailable: false,
     );
   }
 
-  StoredTranscriptEntry? _latestSpeakableEntryForSide({
-    required bool isTarget,
-  }) {
+  Future<void> _speakTranscriptTranslation(String transcriptEntryId) async {
     final activeMeeting = _activeMeeting;
     if (activeMeeting == null) {
-      return null;
+      return;
     }
 
-    final languageCode = (isTarget
-            ? _selectedTargetLanguage.code
-            : _selectedSourceLanguage.code)
-        .trim()
-        .toLowerCase();
-    if (languageCode.isEmpty || languageCode == 'auto') {
-      return null;
-    }
-
-    for (final entry in activeMeeting.transcriptEntries.reversed) {
-      if (_translatedLanguageCodeForEntry(entry) != languageCode) {
-        continue;
+    StoredTranscriptEntry? selectedEntry;
+    for (final entry in activeMeeting.transcriptEntries) {
+      if (entry.id == transcriptEntryId) {
+        selectedEntry = entry;
+        break;
       }
-      if (entry.originalText.trim().isEmpty ||
-          entry.translatedText.trim().isEmpty) {
-        continue;
-      }
-      return entry;
     }
-
-    return null;
-  }
-
-  String? _translatedLanguageCodeForEntry(StoredTranscriptEntry entry) {
-    final sourceCode = entry.languageCode.trim().toLowerCase();
-    final selectedSourceCode = _selectedSourceLanguage.code
-        .trim()
-        .toLowerCase();
-    final selectedTargetCode = _selectedTargetLanguage.code
-        .trim()
-        .toLowerCase();
-    if (sourceCode.isEmpty ||
-        selectedSourceCode.isEmpty ||
-        selectedTargetCode.isEmpty ||
-        sourceCode == 'auto') {
-      return null;
-    }
-    if (sourceCode == selectedSourceCode) {
-      return selectedTargetCode;
-    }
-    if (sourceCode == selectedTargetCode) {
-      return selectedSourceCode;
-    }
-    return null;
-  }
-
-  Future<void> _speakLatestTranslationForSide({
-    required bool isTarget,
-  }) async {
-    final entry = _latestSpeakableEntryForSide(isTarget: isTarget);
-    if (entry == null) {
+    final entry = selectedEntry;
+    if (entry == null || entry.translatedText.trim().isEmpty) {
       return;
     }
 
@@ -2040,10 +2009,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
             _showLanguageOptionsSheet(isTarget: false),
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
-        onSourceVoicePressed: () =>
-            unawaited(_speakLatestTranslationForSide(isTarget: false)),
-        onTargetVoicePressed: () =>
-            unawaited(_speakLatestTranslationForSide(isTarget: true)),
+        onTranscriptVoicePressed: (entryId) =>
+            unawaited(_speakTranscriptTranslation(entryId)),
         onDirectionSwitch: null,
         onRetryLiveSession: _openListening,
         onBottomAction: _handleBottomAction,
@@ -2067,10 +2034,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
             _showLanguageOptionsSheet(isTarget: false),
         onOpenTargetLanguageOptions: () =>
             _showLanguageOptionsSheet(isTarget: true),
-        onSourceVoicePressed: () =>
-            unawaited(_speakLatestTranslationForSide(isTarget: false)),
-        onTargetVoicePressed: () =>
-            unawaited(_speakLatestTranslationForSide(isTarget: true)),
+        onTranscriptVoicePressed: (entryId) =>
+            unawaited(_speakTranscriptTranslation(entryId)),
         onDirectionSwitch: null,
         onRetryLiveSession: _openSpeakingPaused,
         onBottomAction: _handleBottomAction,
@@ -2462,8 +2427,7 @@ class LiveSessionScreen extends StatelessWidget {
     required this.onOpenAssistant,
     required this.onOpenSourceLanguageOptions,
     required this.onOpenTargetLanguageOptions,
-    required this.onSourceVoicePressed,
-    required this.onTargetVoicePressed,
+    required this.onTranscriptVoicePressed,
     required this.onDirectionSwitch,
     required this.onRetryLiveSession,
     required this.onBottomAction,
@@ -2480,8 +2444,7 @@ class LiveSessionScreen extends StatelessWidget {
   final VoidCallback? onOpenAssistant;
   final VoidCallback? onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
-  final VoidCallback onSourceVoicePressed;
-  final VoidCallback onTargetVoicePressed;
+  final ValueChanged<String> onTranscriptVoicePressed;
   final VoidCallback? onDirectionSwitch;
   final VoidCallback onRetryLiveSession;
   final ValueChanged<BottomControlActionData> onBottomAction;
@@ -2526,8 +2489,6 @@ class LiveSessionScreen extends StatelessWidget {
               onDirectionSwitch: onDirectionSwitch,
               onOpenSourceLanguageOptions: onOpenSourceLanguageOptions,
               onOpenTargetLanguageOptions: onOpenTargetLanguageOptions,
-              onSourceVoicePressed: onSourceVoicePressed,
-              onTargetVoicePressed: onTargetVoicePressed,
             ),
             if (session.languageRouteNotice != null) ...[
               const SizedBox(height: AppSpacing.xs),
@@ -2554,7 +2515,10 @@ class LiveSessionScreen extends StatelessWidget {
             child: Stack(
               alignment: Alignment.bottomCenter,
               children: [
-                TranscriptList(entries: session.transcriptEntries),
+                TranscriptList(
+                  entries: session.transcriptEntries,
+                  onPlayTranslation: onTranscriptVoicePressed,
+                ),
                 if (!session.isAtLiveEdge)
                   Padding(
                     padding: const EdgeInsets.only(
@@ -2865,16 +2829,12 @@ class _LanguageRouteRow extends StatelessWidget {
     required this.onDirectionSwitch,
     required this.onOpenSourceLanguageOptions,
     required this.onOpenTargetLanguageOptions,
-    required this.onSourceVoicePressed,
-    required this.onTargetVoicePressed,
   });
 
   final LiveSessionViewData session;
   final VoidCallback? onDirectionSwitch;
   final VoidCallback? onOpenSourceLanguageOptions;
   final VoidCallback onOpenTargetLanguageOptions;
-  final VoidCallback onSourceVoicePressed;
-  final VoidCallback onTargetVoicePressed;
 
   @override
   Widget build(BuildContext context) {
@@ -2885,7 +2845,6 @@ class _LanguageRouteRow extends StatelessWidget {
           child: LanguageSelectorCard(
             data: session.fromLanguage,
             onTap: onOpenSourceLanguageOptions,
-            onVoicePressed: onSourceVoicePressed,
           ),
         ),
         const SizedBox(width: AppSpacing.xs),
@@ -2900,7 +2859,6 @@ class _LanguageRouteRow extends StatelessWidget {
           child: LanguageSelectorCard(
             data: session.toLanguage,
             onTap: onOpenTargetLanguageOptions,
-            onVoicePressed: onTargetVoicePressed,
           ),
         ),
       ],

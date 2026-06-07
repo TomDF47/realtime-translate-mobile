@@ -22,13 +22,13 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Save only a placeholder or current test credential through `OpenAI setup`; verify the saved value is not displayed.
 - Start an interpreter session with fake or valid local credential and granted microphone permission.
 - Verify the live screen starts paused but warm-connected with the selected manual pair such as `Italian <-> English`, source/target language selectors, elapsed timer, transcript area, `Stop Listening`, and `Resume Listening`.
-- Verify both language cards hide `Output voice` checkboxes and show compact voice buttons on the right.
+- Verify both language cards hide `Output voice` checkboxes and do not show language-card voice buttons.
 - Verify the active live screen does not show direction switch, `Translate Text`, legacy global read-aloud controls, speaker/headphone chips, live-header AI chat, live-screen export controls, or `Resume read-aloud meeting`.
 - Open both language selectors, verify `Auto-detect` is not offered as a source choice, choose a different supported source/target, and verify the status card and stored meeting route update to the new pair.
-- Before any finalized transcript row exists, verify each language-card voice button is disabled.
+- Before any finalized transcript row exists, verify no `Read this translation aloud` row button is visible.
 - Feed or fake source turns in both selected languages and verify transcript rows keep original and translated text in separate fields.
 - For an English <-> Italian pair, verify English speech creates an EN card with English original and Italian translation, then Italian speech creates an IT card with Italian original and English translation.
-- After a finalized transcript row exists, tap the matching language-card voice button and verify the app pauses microphone capture, reads the latest translated text once, and resumes listening if capture was active before the tap.
+- After a finalized transcript row exists, tap that row's `Read this translation aloud` button and verify the app flushes pending mic audio, pauses microphone capture, reads that row's translated text once, and resumes listening only if capture was active before the tap.
 - Feed or fake a cumulative source completion after a finished row and verify the next transcript card contains only the new speech, not the prior card's original text.
 - Open the live menu and verify `Meeting history` responds while `Generate export` and `Open generated exports` remain absent from the active live menu.
 - Open AI chat from meeting history or another non-live-header entry point and close it with the close button and drag/back dismissal.
@@ -45,9 +45,9 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 - Verify `Translate Text` is absent from the active interpreter flow before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
 - Verify legacy read-aloud, pause/resume read-aloud, speaker/headphone state, and switch-direction controls are hidden in the active interpreter flow before and after menu, sheet, screenshot, and lifecycle pause/resume interactions.
-- Verify language-card voice buttons remain available in the `From` and `To` cards before and after menu, sheet, screenshot, and lifecycle pause/resume interactions, and `Output voice` checkboxes remain hidden.
+- Verify transcript-row voice buttons remain available only on translated rows before and after menu, sheet, screenshot, and lifecycle pause/resume interactions, and `Output voice` checkboxes remain hidden.
 - Tap `Resume Listening`; verify microphone permission is requested only at resume time and the bottom control changes to `Pause Listening`.
-- Tap `Pause Listening`; verify microphone capture, realtime audio playback, and phone-local spoken output stop, the active meeting remains visible, and `Resume Listening` reuses the warm realtime session when available.
+- Tap `Pause Listening`; verify pending microphone audio is committed when present, microphone capture and phone-local spoken output stop, the active meeting remains visible, and `Resume Listening` reuses the warm Realtime transcription session when available.
 - Tap `Stop Listening`; verify capture/realtime/playback resources close and the setup screen returns.
 - If `Jump to Live` is visible, tap it and verify the list returns to the latest transcript entry or shows the latest-state confirmation.
 - In AI chat, tap prompt chips, send, helpful, not helpful, regenerate, and close; verify no control is inert.
@@ -68,11 +68,10 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 - Verify the timer advances only while microphone capture is open.
 - Verify the timer pauses during stopped/offline/reconnecting/backgrounded states.
 - Verify the timer resumes after listening resumes and resets when returning to setup or starting a new meeting.
-- Feed translation transcript deltas before matching source/original deltas and verify the late source text appears in the same visible transcript card as the existing translation.
-- Feed streaming transcript deltas with three or more spoken sentences.
+- Feed or fake transcription-only completions for three or more spoken sentences.
 - Verify partial live rows appear before final completion and refresh on screen without leaving the live surface.
 - Verify each visible transcript card shows both an `Original` section for spoken source text and a `Translation` section for translated text; pending halves should show a pending placeholder, not a blank card.
-- Verify roughly every two completed spoken sentences rolls into a separate transcript block.
+- Verify app-side batching commits on detected pauses and hard caps without merging later completed speech into an earlier transcript block.
 - Verify partial text updates the current visible block before final completion.
 - Verify transcript rows are not duplicated across fake reconnect.
 

@@ -147,7 +147,7 @@ void main() {
     expect(find.text('Open generated exports'), findsNothing);
   });
 
-  testWidgets('language cards hide output checkboxes and show voice buttons', (
+  testWidgets('language cards hide output controls and row voice starts pending', (
     tester,
   ) async {
     final repository = _testRepository();
@@ -168,15 +168,16 @@ void main() {
     expect(find.text('Output voice'), findsNothing);
     expect(
       find.bySemanticsLabel('Read latest translation for Italian'),
-      findsOneWidget,
+      findsNothing,
     );
     expect(
       find.bySemanticsLabel('Read latest translation for English'),
-      findsOneWidget,
+      findsNothing,
     );
+    expect(find.byTooltip('Read this translation aloud'), findsNothing);
   });
 
-  testWidgets('language voice button speaks latest translation and resumes mic', (
+  testWidgets('transcript row voice button speaks translation and resumes mic', (
     tester,
   ) async {
     final repository = _testRepository();
@@ -221,9 +222,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pumpAndSettle();
 
-    await tester.tap(
-      find.bySemanticsLabel('Read latest translation for English'),
-    );
+    await tester.tap(find.byTooltip('Read this translation aloud'));
     await tester.pumpAndSettle();
 
     expect(spokenOutputGateway.utterances, hasLength(1));
@@ -1545,8 +1544,7 @@ Widget _liveSessionHarness(LiveSessionState state) {
       onOpenAssistant: () {},
       onOpenSourceLanguageOptions: () {},
       onOpenTargetLanguageOptions: () {},
-      onSourceVoicePressed: () {},
-      onTargetVoicePressed: () {},
+      onTranscriptVoicePressed: (_) {},
       onDirectionSwitch: () {},
       onRetryLiveSession: () {},
       onBottomAction: (_) {},

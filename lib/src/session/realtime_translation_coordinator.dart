@@ -6,8 +6,10 @@ import 'package:flutter/widgets.dart';
 
 import '../diagnostics/privacy_safe_diagnostics.dart';
 import '../language/language_support.dart';
+import '../openai/openai_configuration.dart';
 import '../openai/openai_credential_store.dart';
 import '../openai/openai_realtime_resilience.dart';
+import '../openai/openai_realtime_transcription.dart';
 import '../openai/openai_realtime_translation.dart';
 import '../openai/openai_text_interpreter.dart';
 import '../storage/local_storage_models.dart';
@@ -15,6 +17,7 @@ import 'bidirectional_interpreter_routing.dart';
 import 'live_session_controller.dart';
 import 'microphone_capture.dart';
 import 'microphone_permission.dart';
+import 'realtime_transcription_batcher.dart';
 import 'realtime_transcript_committer.dart';
 import 'spoken_translation_output.dart';
 import 'translated_audio_playback.dart';
@@ -55,6 +58,7 @@ class LiveRealtimeTranslationCoordinator {
     this.startupStepTimeout = const Duration(seconds: 10),
     this.diagnostics = const PrivacySafeDiagnostics(),
     TextInterpreterGateway? textInterpreterGateway,
+    this.transcriptionGateway,
     SpokenTranslationOutputGateway? spokenOutputGateway,
     this.onTranscriptCommitted,
     this.enableBidirectionalReverseSession = false,
@@ -82,6 +86,7 @@ class LiveRealtimeTranslationCoordinator {
 
   final PrivacySafeDiagnostics diagnostics;
   final TextInterpreterGateway textInterpreterGateway;
+  final AudioTranscriptionGateway? transcriptionGateway;
   final SpokenTranslationOutputGateway spokenOutputGateway;
   final LiveRealtimeTranscriptCommitted? onTranscriptCommitted;
 
@@ -99,8 +104,11 @@ class LiveRealtimeTranslationCoordinator {
   final bool enableBidirectionalReverseSession;
 
   RealtimeTranslationSession? _realtimeSession;
+  AudioTranscriptionSession? _transcriptionSession;
   StreamSubscription<MicrophonePcm16Chunk>? _captureSubscription;
   StreamSubscription<OpenAiRealtimeEvent>? _realtimeSubscription;
+  StreamSubscription<OpenAiRealtimeTranscriptionEvent>?
+  _transcriptionSubscription;
   LiveRealtimeTranscriptCommitter? _transcriptCommitter;
   OpenAiRealtimeTranslationConfig? _activeConfig;
   LiveRealtimeTranscriptCommitTarget? _activeTranscriptCommitTarget;
@@ -153,9 +161,18 @@ class LiveRealtimeTranslationCoordinator {
   int _reconnectGeneration = 0;
   Timer? _pendingReconnectTimer;
   Completer<void>? _pendingReconnectDelay;
+  RealtimeTranscriptionBatchController _transcriptionBatchController =
+      RealtimeTranscriptionBatchController.roomConversation();
+  final List<_PendingTranscriptionBatch> _pendingTranscriptionBatches =
+      <_PendingTranscriptionBatch>[];
+  final Map<String, _PendingTranscriptionBatch>
+  _pendingTranscriptionBatchesByItem = <String, _PendingTranscriptionBatch>{};
+  final Set<String> _completedTranscriptionItemIds = <String>{};
+  int _transcriptionBatchSequence = 0;
 
   bool get isStreaming {
-    return _realtimeSession != null && captureGateway.isCapturing;
+    return (_realtimeSession != null || _transcriptionSession != null) &&
+        captureGateway.isCapturing;
   }
 
   /// User-facing interpreter status/header label derived from the languages the
@@ -229,6 +246,17 @@ class LiveRealtimeTranslationCoordinator {
           MicrophonePermissionStatus.granted) {
         return LiveRealtimeStartResult.permissionNotGranted;
       }
+    }
+
+    final activeTranscriptionGateway = transcriptionGateway;
+    if (activeTranscriptionGateway != null) {
+      return _startBatchedTranscription(
+        config: config,
+        credential: credential,
+        startGeneration: startGeneration,
+        startPaused: startPaused,
+        transcriptionGateway: activeTranscriptionGateway,
+      );
     }
 
     RealtimeTranslationSession? realtimeSession;
@@ -308,6 +336,76 @@ class LiveRealtimeTranslationCoordinator {
     }
   }
 
+  Future<LiveRealtimeStartResult> _startBatchedTranscription({
+    required OpenAiRealtimeTranslationConfig config,
+    required String credential,
+    required int startGeneration,
+    required bool startPaused,
+    required AudioTranscriptionGateway transcriptionGateway,
+  }) async {
+    AudioTranscriptionSession? transcriptionSession;
+    try {
+      transcriptionSession = await _connectTranscriptionWithTimeout(
+        config: OpenAiRealtimeTranscriptionConfig(
+          inputAudioRate: config.inputAudioRate,
+        ),
+        credential: credential,
+        gateway: transcriptionGateway,
+      );
+      if (!_isCurrentStart(startGeneration)) {
+        await transcriptionSession.closeImmediately();
+        return LiveRealtimeStartResult.failed;
+      }
+
+      _bindTranscriptionSession(
+        transcriptionSession,
+      );
+      transcriptionSession = null;
+
+      if (startPaused) {
+        sessionController.markRealtimePreparedPaused(playbackQueueOpen: false);
+      } else {
+        await _startRoomTranscriptionMicrophoneCapture(config);
+        if (!_isCurrentStart(startGeneration)) {
+          await _closeRealtimeResources(
+            graceful: false,
+            finishTranscript: false,
+          );
+          return LiveRealtimeStartResult.failed;
+        }
+        sessionController.markRealtimeStarted(playbackQueueOpen: false);
+      }
+
+      diagnostics.info(
+        'live_realtime.batched_transcription_started',
+        fields: {
+          'operation': 'realtimeTranscription.streaming.start',
+          'model': OpenAiConfiguration.translationTranscriptionModel,
+          'targetLanguage': config.targetLanguageCode,
+          'result': 'started',
+        },
+      );
+      return startPaused
+          ? LiveRealtimeStartResult.preparedPaused
+          : LiveRealtimeStartResult.started;
+    } catch (error) {
+      await transcriptionSession?.closeImmediately();
+      await _closeRealtimeResources(graceful: false, finishTranscript: true);
+      if (!_isCurrentStart(startGeneration)) {
+        return LiveRealtimeStartResult.failed;
+      }
+      final decision = reconnectPolicy.plan(
+        failure: OpenAiRealtimeFailure.fromSocketError(error),
+        retryAttempt: sessionController.state.realtimeRetryAttempt + 1,
+      );
+      sessionController.applyRealtimeRecoveryDecision(decision);
+      if (decision.shouldRetry) {
+        _scheduleReconnect(decision, keepPaused: startPaused);
+      }
+      return LiveRealtimeStartResult.failed;
+    }
+  }
+
   void handleAppLifecycleState(AppLifecycleState lifecycleState) {
     sessionController.handleAppLifecycleState(lifecycleState);
     switch (lifecycleState) {
@@ -360,10 +458,14 @@ class LiveRealtimeTranslationCoordinator {
     _onDemandSpokenOutputActive = false;
     _cancelPendingReconnect();
     await spokenOutputGateway.stop();
+    if (_transcriptionSession != null && captureGateway.isCapturing) {
+      _flushTranscriptionBufferIfNeeded();
+    }
     await captureGateway.stop();
     await playbackGateway.stop(clearQueue: true);
     sessionController.pauseListening(
-      keepRealtimeSessionOpen: _realtimeSession != null,
+      keepRealtimeSessionOpen:
+          _realtimeSession != null || _transcriptionSession != null,
     );
   }
 
@@ -371,6 +473,26 @@ class LiveRealtimeTranslationCoordinator {
     final config = _activeConfig;
     if (config == null) {
       return LiveRealtimeStartResult.failed;
+    }
+
+    if (_transcriptionSession != null && !captureGateway.isCapturing) {
+      final permissionGranted = await sessionController
+          .requestMicrophoneForListening();
+      if (!permissionGranted) {
+        await _closeRealtimeResources(graceful: false, finishTranscript: false);
+        return LiveRealtimeStartResult.permissionNotGranted;
+      }
+      try {
+        await _startRoomTranscriptionMicrophoneCapture(config);
+        sessionController.markRealtimeStarted(playbackQueueOpen: false);
+        return LiveRealtimeStartResult.started;
+      } catch (error) {
+        await _handleRealtimeFailure(
+          OpenAiRealtimeFailure.fromSocketError(error),
+          allowReconnect: true,
+        );
+        return LiveRealtimeStartResult.failed;
+      }
     }
 
     if (_realtimeSession != null && !captureGateway.isCapturing) {
@@ -448,10 +570,14 @@ class LiveRealtimeTranslationCoordinator {
     final shouldResume = wasListening && _activeConfig != null;
     if (wasListening) {
       _spokenOutputGeneration += 1;
+      if (_transcriptionSession != null) {
+        _flushTranscriptionBufferIfNeeded();
+      }
       await captureGateway.stop();
       await playbackGateway.stop(clearQueue: true);
       sessionController.pauseListening(
-        keepRealtimeSessionOpen: _realtimeSession != null,
+        keepRealtimeSessionOpen:
+            _realtimeSession != null || _transcriptionSession != null,
       );
     }
 
@@ -644,6 +770,389 @@ class LiveRealtimeTranslationCoordinator {
     }
 
     realtimeSession.appendPcm16Audio(chunk.bytes);
+  }
+
+  void _bindTranscriptionSession(AudioTranscriptionSession transcriptionSession) {
+    _transcriptionSession = transcriptionSession;
+    _transcriptCommitter = null;
+    _resetTranscriptionBatching();
+    _transcriptionSubscription = transcriptionSession.events.listen(
+      _handleTranscriptionEvent,
+      onError: (error) {
+        unawaited(
+          _handleRealtimeFailure(
+            OpenAiRealtimeFailure.fromSocketError(error),
+            allowReconnect: true,
+          ),
+        );
+      },
+    );
+    _captureSubscription = captureGateway.chunks.listen(
+      (chunk) => unawaited(
+        _handleTranscriptionCaptureChunk(chunk, transcriptionSession),
+      ),
+      onError: (error) {
+        unawaited(
+          _handleRealtimeFailure(
+            OpenAiRealtimeFailure(
+              kind: OpenAiRealtimeFailureKind.fatal,
+              diagnosticCode: error.runtimeType.toString(),
+            ),
+            allowReconnect: true,
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _handleTranscriptionCaptureChunk(
+    MicrophonePcm16Chunk chunk,
+    AudioTranscriptionSession transcriptionSession,
+  ) async {
+    if (!identical(_transcriptionSession, transcriptionSession)) {
+      return;
+    }
+
+    if (spokenOutputGateway.isSpeaking) {
+      if (!_isLikelySpeechInterrupt(chunk)) {
+        return;
+      }
+      await _interruptSpokenOutput();
+      if (!identical(_transcriptionSession, transcriptionSession)) {
+        return;
+      }
+    }
+
+    transcriptionSession.appendPcm16Audio(chunk.bytes);
+    final decision = _transcriptionBatchController.add(chunk);
+    final reason = decision.reason;
+    if (reason != null) {
+      _commitTranscriptionBuffer(transcriptionSession);
+    }
+  }
+
+  void _handleTranscriptionEvent(OpenAiRealtimeTranscriptionEvent event) {
+    if (_closingIntentionally && !_processTranscriptsDuringIntentionalClose) {
+      return;
+    }
+
+    switch (event) {
+      case OpenAiRealtimeTranscriptionBufferCommitted(:final itemId):
+        _trackTranscriptionCommitItem(itemId);
+      case OpenAiRealtimeTranscriptionCompleted():
+        unawaited(_commitCompletedTranscription(event));
+      case OpenAiRealtimeTranscriptionError():
+        unawaited(
+          _handleRealtimeFailure(
+            OpenAiRealtimeFailure.fromSocketError(
+              OpenAiRealtimeTranscriptionStartupException.fromError(event),
+            ),
+            allowReconnect: true,
+          ),
+        );
+      case OpenAiRealtimeTranscriptionSessionClosed():
+        unawaited(
+          _handleRealtimeFailure(
+            OpenAiRealtimeFailure.sessionClosed(),
+            allowReconnect: true,
+          ),
+        );
+      default:
+        break;
+    }
+  }
+
+  void _resetTranscriptionBatching() {
+    _transcriptionBatchController =
+        RealtimeTranscriptionBatchController.roomConversation();
+    _pendingTranscriptionBatches.clear();
+    _pendingTranscriptionBatchesByItem.clear();
+    _completedTranscriptionItemIds.clear();
+  }
+
+  void _flushTranscriptionBufferIfNeeded() {
+    final session = _transcriptionSession;
+    if (session == null) {
+      return;
+    }
+
+    final decision = _transcriptionBatchController.flush();
+    if (!decision.shouldCommit) {
+      return;
+    }
+
+    _commitTranscriptionBuffer(session);
+  }
+
+  void _commitTranscriptionBuffer(AudioTranscriptionSession session) {
+    if (!identical(_transcriptionSession, session)) {
+      return;
+    }
+
+    final target = _activeTranscriptCommitTarget;
+    final now = (target?.now() ?? DateTime.now()).toUtc();
+    final sequence = _transcriptionBatchSequence++;
+    final entryId = target == null
+        ? 'batched-transcription-$sequence'
+        : '${target.meetingId}-batched-transcription-$sequence';
+    _pendingTranscriptionBatches.add(
+      _PendingTranscriptionBatch(
+        entryId: entryId,
+        timestamp: now,
+      ),
+    );
+    session.commitInputAudioBuffer();
+  }
+
+  void _trackTranscriptionCommitItem(String? itemId) {
+    final normalized = itemId?.trim();
+    if (normalized == null || normalized.isEmpty) {
+      return;
+    }
+    if (_completedTranscriptionItemIds.remove(normalized)) {
+      return;
+    }
+    if (_pendingTranscriptionBatches.isEmpty) {
+      return;
+    }
+
+    final batch = _pendingTranscriptionBatches.removeAt(0);
+    _pendingTranscriptionBatchesByItem[normalized] = batch;
+  }
+
+  _PendingTranscriptionBatch _takeTranscriptionBatch({
+    required String? itemId,
+  }) {
+    final normalized = itemId?.trim();
+    if (normalized != null && normalized.isNotEmpty) {
+      final batch = _pendingTranscriptionBatchesByItem.remove(normalized);
+      if (batch != null) {
+        return batch;
+      }
+      _completedTranscriptionItemIds.add(normalized);
+    }
+    if (_pendingTranscriptionBatches.isNotEmpty) {
+      return _pendingTranscriptionBatches.removeAt(0);
+    }
+
+    final target = _activeTranscriptCommitTarget;
+    final now = (target?.now() ?? DateTime.now()).toUtc();
+    final sequence = _transcriptionBatchSequence++;
+    return _PendingTranscriptionBatch(
+      entryId: target == null
+          ? 'batched-transcription-$sequence'
+          : '${target.meetingId}-batched-transcription-$sequence',
+      timestamp: now,
+    );
+  }
+
+  Future<void> _commitCompletedTranscription(
+    OpenAiRealtimeTranscriptionCompleted event,
+  ) async {
+    final transcript = event.transcript.trim();
+    if (transcript.isEmpty) {
+      return;
+    }
+
+    final target = _activeTranscriptCommitTarget;
+    if (target == null) {
+      return;
+    }
+
+    final batch = _takeTranscriptionBatch(itemId: event.itemId);
+    final localDetectedLanguage =
+        event.languageCode ?? detectInterpreterLanguageCode(transcript);
+    final pendingEntry = StoredTranscriptEntry(
+      id: batch.entryId,
+      meetingId: target.meetingId,
+      languageCode: _storedLanguageCode(localDetectedLanguage),
+      originalText: transcript,
+      translatedText: '',
+      timestamp: batch.timestamp,
+      speakerLabel: null,
+      confidence: null,
+      status: 'translating',
+      playbackState: 'none',
+    );
+
+    await target.repository.upsertTranscriptEntry(
+      meetingId: target.meetingId,
+      updatedAt: target.now().toUtc(),
+      entry: pendingEntry,
+    );
+    _sourceTranscriptTurns += 1;
+    _recordDetectedInterpreterLanguage(
+      code: localDetectedLanguage,
+      fallbackText: transcript,
+    );
+    onTranscriptCommitted?.call();
+
+    try {
+      final credential = await credentialStore.readCredentialForNetworkUse();
+      if (credential == null || credential.isEmpty) {
+        sessionController.markCredentialInvalid();
+        await _markBatchedTranslationInterrupted(target, pendingEntry);
+        return;
+      }
+
+      final selectedDirection = _directionForTranscribedSource(
+        localDetectedLanguage,
+      );
+      final result = await textInterpreterGateway.interpretTurn(
+        request: TextInterpreterTurnRequest(
+          text: transcript,
+          knownLanguageCodes: _selectedLanguagePairCodes(target),
+          sourceLanguageCode: localDetectedLanguage,
+          targetLanguageCode: selectedDirection?.targetLanguageCode,
+          routeType: TranslationRouteType.directOpenAiFallback,
+        ),
+        credential: credential,
+      );
+      _recordDetectedInterpreterLanguage(
+        code: result.detectedLanguageCode,
+        label: result.detectedLanguageLabel,
+        fallbackText: transcript,
+      );
+
+      final translatedText = result.translatedText?.trim() ?? '';
+      final finalEntry = pendingEntry.copyWith(
+        languageCode: _storedLanguageCode(result.detectedLanguageCode),
+        translatedText: translatedText,
+        status: translatedText.isEmpty ? 'partial' : 'final',
+        playbackState: translatedText.isEmpty ? 'none' : 'playable',
+      );
+      await target.repository.upsertTranscriptEntry(
+        meetingId: target.meetingId,
+        updatedAt: target.now().toUtc(),
+        entry: finalEntry,
+      );
+      if (translatedText.isNotEmpty) {
+        _outputTranscriptTurns += 1;
+      }
+      onTranscriptCommitted?.call();
+    } on TextInterpreterCredentialException {
+      sessionController.markCredentialInvalid();
+      await _markBatchedTranslationInterrupted(target, pendingEntry);
+    } catch (error) {
+      diagnostics.warning(
+        'live_realtime.batched_translation_failed',
+        fields: {
+          'operation': 'textInterpreter.interpretTurn',
+          'result': 'failed',
+          'errorCode': error.runtimeType.toString(),
+        },
+      );
+      await _markBatchedTranslationInterrupted(target, pendingEntry);
+    }
+  }
+
+  Future<void> _markBatchedTranslationInterrupted(
+    LiveRealtimeTranscriptCommitTarget target,
+    StoredTranscriptEntry entry,
+  ) async {
+    await target.repository.upsertTranscriptEntry(
+      meetingId: target.meetingId,
+      updatedAt: target.now().toUtc(),
+      entry: entry.copyWith(status: 'interrupted'),
+    );
+    onTranscriptCommitted?.call();
+  }
+
+  List<String> _selectedLanguagePairCodes(
+    LiveRealtimeTranscriptCommitTarget target,
+  ) {
+    final codes = <String>[];
+    for (final code in [
+      target.sourceLanguageCode.trim().toLowerCase(),
+      target.targetLanguageCode.trim().toLowerCase(),
+    ]) {
+      if (code.isEmpty || code == 'auto' || codes.contains(code)) {
+        continue;
+      }
+      codes.add(code);
+    }
+    return codes;
+  }
+
+  BidirectionalInterpreterDirection? _directionForTranscribedSource(
+    String? sourceCode,
+  ) {
+    final normalized = sourceCode?.trim().toLowerCase();
+    if (normalized == null || normalized.isEmpty || normalized == 'auto') {
+      return null;
+    }
+
+    final selectedDirection = _bidirectionalRuntime.directionForSource(
+      normalized,
+    );
+    if (selectedDirection != null) {
+      return selectedDirection;
+    }
+
+    final target = _activeTranscriptCommitTarget;
+    if (target == null) {
+      return null;
+    }
+    final selectedSource = target.sourceLanguageCode.trim().toLowerCase();
+    final selectedTarget = target.targetLanguageCode.trim().toLowerCase();
+    if (normalized == selectedSource && selectedTarget.isNotEmpty) {
+      return BidirectionalInterpreterDirection(
+        source: InterpreterLanguage(
+          code: selectedSource,
+          label: _languageLabelForCode(selectedSource),
+        ),
+        target: InterpreterLanguage(
+          code: selectedTarget,
+          label: _languageLabelForCode(selectedTarget),
+        ),
+        routePlan: LanguageSupport.planRoute(
+          sourceCode: selectedSource,
+          targetCode: selectedTarget,
+        ),
+      );
+    }
+    if (normalized == selectedTarget && selectedSource.isNotEmpty) {
+      return BidirectionalInterpreterDirection(
+        source: InterpreterLanguage(
+          code: selectedTarget,
+          label: _languageLabelForCode(selectedTarget),
+        ),
+        target: InterpreterLanguage(
+          code: selectedSource,
+          label: _languageLabelForCode(selectedSource),
+        ),
+        routePlan: LanguageSupport.planRoute(
+          sourceCode: selectedTarget,
+          targetCode: selectedSource,
+        ),
+      );
+    }
+
+    return null;
+  }
+
+  void _recordDetectedInterpreterLanguage({
+    required String? code,
+    String? label,
+    required String fallbackText,
+  }) {
+    final detectedCode = code ?? detectInterpreterLanguageCode(fallbackText);
+    if (detectedCode == null || detectedCode.trim().isEmpty) {
+      return;
+    }
+    final normalized = detectedCode.trim().toLowerCase();
+    _bidirectionalRuntime.recordDetectedLanguage(
+      code: normalized,
+      label: label ?? _languageLabelForCode(normalized),
+    );
+  }
+
+  String _storedLanguageCode(String? code) {
+    final normalized = code?.trim().toLowerCase();
+    if (normalized == null || normalized.isEmpty) {
+      return 'auto';
+    }
+    return normalized.toUpperCase();
   }
 
   void _handleRealtimeEvent(OpenAiRealtimeEvent event) {
@@ -1881,6 +2390,21 @@ class LiveRealtimeTranslationCoordinator {
         );
   }
 
+  Future<AudioTranscriptionSession> _connectTranscriptionWithTimeout({
+    required OpenAiRealtimeTranscriptionConfig config,
+    required String credential,
+    required AudioTranscriptionGateway gateway,
+  }) {
+    return gateway
+        .connect(config: config, credential: credential)
+        .timeout(
+          connectionTimeout,
+          onTimeout: () {
+            throw const LiveRealtimeConnectTimeoutException();
+          },
+        );
+  }
+
   Future<void> _startPlaybackQueue(OpenAiRealtimeTranslationConfig config) {
     return playbackGateway
         .start(
@@ -1893,6 +2417,25 @@ class LiveRealtimeTranslationCoordinator {
           onTimeout: () {
             throw const LiveRealtimeStartupTimeoutException(
               'translatedPlayback.start',
+            );
+          },
+        );
+  }
+
+  Future<void> _startRoomTranscriptionMicrophoneCapture(
+    OpenAiRealtimeTranslationConfig config,
+  ) {
+    return captureGateway
+        .start(
+          MicrophoneCaptureConfig.roomTranscription(
+            sampleRateHz: config.inputAudioRate,
+          ),
+        )
+        .timeout(
+          startupStepTimeout,
+          onTimeout: () {
+            throw const LiveRealtimeStartupTimeoutException(
+              'microphone.capture.start',
             );
           },
         );
@@ -1920,13 +2463,18 @@ class LiveRealtimeTranslationCoordinator {
     required bool finishTranscript,
   }) async {
     final realtimeSession = _realtimeSession;
+    final transcriptionSession = _transcriptionSession;
     final realtimeSubscription = _realtimeSubscription;
+    final transcriptionSubscription = _transcriptionSubscription;
     final captureSubscription = _captureSubscription;
     final transcriptCommitter = _transcriptCommitter;
     _realtimeSession = null;
+    _transcriptionSession = null;
     _realtimeSubscription = null;
+    _transcriptionSubscription = null;
     _captureSubscription = null;
     _spokenOutputGeneration += 1;
+    _resetTranscriptionBatching();
 
     _closingIntentionally = true;
     _processTranscriptsDuringIntentionalClose = graceful && finishTranscript;
@@ -1936,6 +2484,8 @@ class LiveRealtimeTranslationCoordinator {
       await captureGateway.stop();
       await _cancelSubscription(captureSubscription);
       await playbackGateway.stop(clearQueue: true);
+      await _cancelSubscription(transcriptionSubscription);
+      await transcriptionSession?.closeImmediately();
       if (realtimeSession == null) {
         await _cancelSubscription(realtimeSubscription);
       } else if (graceful) {
@@ -2059,4 +2609,14 @@ class _RealtimeSourceTurn {
 
   final StoredTranscriptEntry entry;
   final String sourceLanguageCode;
+}
+
+class _PendingTranscriptionBatch {
+  const _PendingTranscriptionBatch({
+    required this.entryId,
+    required this.timestamp,
+  });
+
+  final String entryId;
+  final DateTime timestamp;
 }

@@ -8,6 +8,7 @@ import 'package:realtime_translate_mobile/src/diagnostics/privacy_safe_diagnosti
 import 'package:realtime_translate_mobile/src/language/language_support.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_transcription.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_text_interpreter.dart';
 import 'package:realtime_translate_mobile/src/session/live_session_controller.dart';
@@ -89,6 +90,147 @@ void main() {
     expect(harness.realtimeGateway.session.commitInputAudioBufferCount, 0);
     expect(harness.realtimeGateway.session.createResponseCount, 0);
   });
+
+  test(
+    'batched transcription forwards every chunk and translates distinct rows',
+    () async {
+      final textGateway = _FakeTextInterpreterGateway()
+        ..results.addAll(
+          const [
+            TextInterpreterTurnResult(
+              detectedLanguageCode: 'en',
+              detectedLanguageLabel: 'English',
+              translatedText: 'Ciao dal tavolo.',
+            ),
+            TextInterpreterTurnResult(
+              detectedLanguageCode: 'it',
+              detectedLanguageLabel: 'Italian',
+              translatedText: 'I can hear you.',
+            ),
+          ],
+        );
+      final transcriptionGateway = _FakeAudioTranscriptionGateway();
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        textInterpreterGateway: textGateway,
+        transcriptionGateway: transcriptionGateway,
+      );
+      final startedAt = DateTime.utc(2026, 6, 7, 9);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Batched interpreter',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'English (US)',
+          targetLanguageLabel: 'Italian (IT)',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      final result = await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          readAloudOutputEnabled: false,
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          now: () => startedAt,
+        ),
+      );
+      for (var i = 0; i < 2; i++) {
+        harness.captureGateway.addChunk(_pcm16Chunk(amplitude: 600));
+      }
+      for (var i = 0; i < 4; i++) {
+        harness.captureGateway.addChunk(_pcm16Chunk(amplitude: 0));
+      }
+      await _drainAsync();
+
+      expect(result, LiveRealtimeStartResult.started);
+      expect(harness.realtimeGateway.connectCount, 0);
+      expect(transcriptionGateway.connectCount, 1);
+      expect(transcriptionGateway.configs.single.languageHint, isNull);
+      expect(
+        harness.captureGateway.lastConfig,
+        isA<MicrophoneCaptureConfig>()
+            .having(
+              (value) => value.androidAudioSource,
+              'androidAudioSource',
+              AndroidAudioSource.room,
+            )
+            .having(
+              (value) => value.androidInputEffectsEnabled,
+              'androidInputEffectsEnabled',
+              isFalse,
+            ),
+      );
+      expect(transcriptionGateway.session.appendedChunks, hasLength(6));
+      expect(transcriptionGateway.session.commitInputAudioBufferCount, 1);
+
+      transcriptionGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptionBufferCommitted(
+            type: 'input_audio_buffer.committed',
+            itemId: 'item-1',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptionCompleted(
+            type: 'conversation.item.input_audio_transcription.completed',
+            itemId: 'item-1',
+            languageCode: 'en',
+            transcript: 'Hello from the table.',
+          ),
+        );
+      await _drainAsync();
+
+      for (var i = 0; i < 2; i++) {
+        harness.captureGateway.addChunk(_pcm16Chunk(amplitude: 600));
+      }
+      for (var i = 0; i < 4; i++) {
+        harness.captureGateway.addChunk(_pcm16Chunk(amplitude: 0));
+      }
+      await _drainAsync();
+      expect(transcriptionGateway.session.commitInputAudioBufferCount, 2);
+      transcriptionGateway.session
+        ..addEvent(
+          const OpenAiRealtimeTranscriptionBufferCommitted(
+            type: 'input_audio_buffer.committed',
+            itemId: 'item-2',
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptionCompleted(
+            type: 'conversation.item.input_audio_transcription.completed',
+            itemId: 'item-2',
+            languageCode: 'it',
+            transcript: 'Ti sento.',
+          ),
+        );
+      await _drainAsync();
+
+      final meeting = (await harness.repository.loadSnapshot()).meetings.single;
+      expect(meeting.transcriptEntries, hasLength(2));
+      expect(
+        meeting.transcriptEntries.map((entry) => entry.id).toSet(),
+        hasLength(2),
+      );
+      expect(meeting.transcriptEntries[0].originalText, 'Hello from the table.');
+      expect(meeting.transcriptEntries[0].translatedText, 'Ciao dal tavolo.');
+      expect(meeting.transcriptEntries[0].status, 'final');
+      expect(meeting.transcriptEntries[0].playbackState, 'playable');
+      expect(meeting.transcriptEntries[1].originalText, 'Ti sento.');
+      expect(meeting.transcriptEntries[1].translatedText, 'I can hear you.');
+      expect(textGateway.requests, hasLength(2));
+      expect(textGateway.requests.first.targetLanguageCode, 'it');
+      expect(textGateway.requests.last.targetLanguageCode, 'en');
+    },
+  );
 
   test(
     'suppresses capture during spoken output until local speech interrupts it',
@@ -3887,6 +4029,15 @@ void main() {
   });
 }
 
+List<int> _pcm16Chunk({required int amplitude}) {
+  final bytes = Uint8List(9600);
+  for (var offset = 0; offset < bytes.length; offset += 2) {
+    bytes[offset] = amplitude & 0xff;
+    bytes[offset + 1] = (amplitude >> 8) & 0xff;
+  }
+  return bytes;
+}
+
 Future<void> _drainAsync() async {
   for (var i = 0; i < 6; i++) {
     await Future<void>.delayed(Duration.zero);
@@ -3922,6 +4073,7 @@ class _Harness {
     Duration connectionTimeout = const Duration(seconds: 12),
     Duration startupStepTimeout = const Duration(seconds: 12),
     TextInterpreterGateway? textInterpreterGateway,
+    AudioTranscriptionGateway? transcriptionGateway,
     PrivacySafeDiagnostics? diagnostics,
     bool enableBidirectionalReverseSession = false,
   }) async {
@@ -3938,6 +4090,7 @@ class _Harness {
       connectionTimeout: connectionTimeout,
       startupStepTimeout: startupStepTimeout,
       textInterpreterGateway: textInterpreterGateway,
+      transcriptionGateway: transcriptionGateway,
       diagnostics: diagnostics ?? const PrivacySafeDiagnostics(),
       enableBidirectionalReverseSession: enableBidirectionalReverseSession,
     );
@@ -4205,6 +4358,61 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
   void sendSessionUpdate() {}
 
   void addEvent(OpenAiRealtimeEvent event) {
+    _events.add(event);
+  }
+}
+
+class _FakeAudioTranscriptionGateway implements AudioTranscriptionGateway {
+  final List<_FakeAudioTranscriptionSession> sessions = [];
+  final List<OpenAiRealtimeTranscriptionConfig> configs = [];
+  final List<String> credentials = [];
+  int connectCount = 0;
+
+  _FakeAudioTranscriptionSession get session => sessions.last;
+
+  @override
+  Future<AudioTranscriptionSession> connect({
+    required OpenAiRealtimeTranscriptionConfig config,
+    required String credential,
+  }) async {
+    connectCount += 1;
+    final session = _FakeAudioTranscriptionSession();
+    sessions.add(session);
+    configs.add(config);
+    credentials.add(credential);
+    return session;
+  }
+}
+
+class _FakeAudioTranscriptionSession implements AudioTranscriptionSession {
+  final StreamController<OpenAiRealtimeTranscriptionEvent> _events =
+      StreamController<OpenAiRealtimeTranscriptionEvent>.broadcast();
+  final List<List<int>> appendedChunks = [];
+  int commitInputAudioBufferCount = 0;
+  int closeImmediatelyCount = 0;
+
+  @override
+  Stream<OpenAiRealtimeTranscriptionEvent> get events => _events.stream;
+
+  @override
+  void appendPcm16Audio(List<int> pcm16Audio) {
+    appendedChunks.add(List<int>.from(pcm16Audio));
+  }
+
+  @override
+  Future<void> closeImmediately() async {
+    closeImmediatelyCount += 1;
+  }
+
+  @override
+  void commitInputAudioBuffer() {
+    commitInputAudioBufferCount += 1;
+  }
+
+  @override
+  void sendSessionUpdate() {}
+
+  void addEvent(OpenAiRealtimeTranscriptionEvent event) {
     _events.add(event);
   }
 }
