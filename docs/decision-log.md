@@ -248,7 +248,7 @@ Implications:
 
 ## 2026-06-01 - Enable Source Input Transcription On The Realtime Translation Session, And Keep Debug-Signed Release APKs Out Of Tester Distribution
 
-Status: Accepted
+Status: Superseded in the active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
 
 Context:
 
@@ -275,7 +275,7 @@ Implications:
 
 ## 2026-06-01 - Live Block Splitting And Language Attribution For The Real Translation Wire Shape
 
-Status: Accepted
+Status: Accepted, with live model routing superseded in active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
 
 Decision:
 
@@ -426,7 +426,7 @@ Implications:
 
 ## 2026-05-24 - Direct OpenAI Credential And Model Preference
 
-Status: Accepted
+Status: Accepted, with live model routing superseded in active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
 
 Decision:
 
@@ -449,11 +449,11 @@ Implications:
 
 - Credential UX, encrypted storage, redaction, reset/removal, and credential-invalid recovery are MVP implementation requirements.
 - A real OpenAI network smoke test requires Tom to provide a key out-of-band or interactively at that point; no placeholder or real key belongs in the repo.
-- Future changes that route live interpretation away from `gpt-realtime-translate` need a fresh accepted decision and must not add backend infrastructure.
+- The fresh accepted decision that routes active live interpretation away from `gpt-realtime-translate` is `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`; future route changes still need an accepted decision and must not add backend infrastructure.
 
 ## 2026-05-26 - Live Interpretation Uses Dedicated Realtime Translation Profile
 
-Status: Accepted
+Status: Superseded in the active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
 
 Decision:
 

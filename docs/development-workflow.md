@@ -63,7 +63,7 @@ Backend/cloud:
 
 OpenAI:
 
-- Preferred realtime voice/translation model: `gpt-realtime-translate` on `/v1/realtime/translations` for normal live translation; keep `gpt-realtime-2` only as an explicit compatibility/experimental voice-agent profile.
+- Active MVP live intake model: Realtime transcription-only sessions using `gpt-realtime-whisper` on `/v1/realtime` with manual input-buffer commits. Keep `gpt-realtime-translate` on `/v1/realtime/translations` and `gpt-realtime-2` only as explicit compatibility/debug profiles unless a later accepted decision changes the active path.
 - Direct phone-to-OpenAI API calls only.
 - Verify current Realtime Translation language support, realtime endpoint/model behavior, accepted encrypted local credential UX, and summary model/reasoning support during implementation.
 - Keep AI chat scoped explicitly to `This meeting` or `All meetings`.
