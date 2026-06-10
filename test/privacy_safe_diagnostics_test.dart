@@ -150,6 +150,37 @@ void main() {
       );
     },
   );
+
+  test(
+    'Gemini credential diagnostics never include credential material',
+    () async {
+      final sink = MemoryPrivacySafeDiagnosticsSink();
+      final repository = LocalMeetingRepository(
+        store: MemoryEncryptedLocalStore(),
+      );
+      final credentialStore = OpenAiCredentialStore.gemini(
+        repository: repository,
+        diagnostics: PrivacySafeDiagnostics(sink: sink),
+      );
+      const placeholderCredential = 'placeholder-local-gemini-credential';
+
+      await credentialStore.saveUserProvidedCredential(placeholderCredential);
+      expect(await credentialStore.readCredentialForNetworkUse(), isNotNull);
+      await credentialStore.loadStatus();
+      await credentialStore.clearCredential();
+
+      final serialized = _serializeAll(sink.records);
+      expect(serialized, contains('gemini.credential_saved'));
+      expect(serialized, contains('gemini.credential_read'));
+      expect(serialized, contains('gemini.credential_status'));
+      expect(serialized, contains('gemini.credential_removed'));
+      expect(serialized, isNot(contains(placeholderCredential)));
+      expect(
+        sink.records.expand((record) => record.fields.keys),
+        isNot(contains('apiKey')),
+      );
+    },
+  );
 }
 
 String _serialize(PrivacySafeDiagnosticRecord record) {

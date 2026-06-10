@@ -4,7 +4,7 @@ This is the canonical build spec for the Realtime Translate Mobile repo. Future 
 
 ## Product Goal
 
-Build an Android-first, iOS-compatible Flutter app for a two-party live interpreter using direct OpenAI calls. Phase 1 of the revised MVP is text-first: the user selects the two languages in use, the app treats that pair as locked from session start, and transcript rows still use OpenAI metadata or deterministic local detection for per-turn source labels when available. Fully automatic bidirectional spoken audio is not claimed in the active UI until it is safely validated. The MVP is phone-only except for direct OpenAI API calls. It should feel premium, clean, and executive-grade, with live interpretation and meeting history as usable product surfaces rather than a technical dashboard.
+Build an Android-first, iOS-compatible Flutter app for a two-party live interpreter using direct Gemini Live Translate for the live speech runtime plus direct OpenAI Responses calls for AI chat, summaries, and approved text fallback. Phase 1 of the revised MVP is text-first: the user selects the two languages in use, the app treats that pair as locked from session start, and transcript rows still use Gemini transcript metadata or deterministic local detection for per-turn source labels when available. Fully automatic bidirectional spoken audio is not claimed in the active UI until it is safely validated. The MVP is phone-only except for direct Gemini/OpenAI API calls. It should feel premium, clean, and executive-grade, with live interpretation and meeting history as usable product surfaces rather than a technical dashboard.
 
 ## Fixed MVP Decisions
 
@@ -13,8 +13,8 @@ Build an Android-first, iOS-compatible Flutter app for a two-party live interpre
 | Mobile framework | Flutter |
 | Platform order | Android first, iOS-compatible later |
 | MVP backend | None |
-| Routine network path | Phone app connects directly to the OpenAI API only |
-| Live model | Use `gpt-realtime-translate` on `/v1/realtime/translations` for MVP live human-speech interpretation; keep `gpt-realtime-2` available only as an explicit compatibility/experimental voice-agent profile |
+| Routine network path | Phone app connects directly to Gemini Live Translate for live translation and directly to OpenAI Responses for AI chat, summaries, and approved text fallback |
+| Live model | Use Gemini Live Translate preview model `gemini-3.5-live-translate-preview` for MVP live human-speech interpretation; keep OpenAI realtime translation code only as an explicit compatibility/fallback seam |
 | AI chat | Direct OpenAI path scoped explicitly to `This meeting` or `All meetings` |
 | Storage | Encrypted local device storage only |
 | Meetings | Local meeting history, transcript/history, and summary metadata stored on phone |
@@ -49,11 +49,11 @@ Supplied mockups:
 
 1. User opens the app and sees a premium phone-local welcome/start surface.
 2. User taps `Start interpreter` or selects an old local meeting and continues from it.
-3. App gates startup on encrypted local OpenAI credential availability and Android microphone permission.
+3. App gates live startup on encrypted local Gemini credential availability and Android microphone permission. AI chat, summaries, and direct text fallback separately require encrypted local OpenAI credential availability.
 4. Live interpreter opens with visible `From` and `To` language selectors for the two-language pair, defaulting to Italian <-> English, plus no direction switch, no `Translate Text` toggle, no live-header AI chat launcher, and no live-screen export controls.
-5. The status card shows the selected pair as `<A> <-> <B>` from session start. Source-row language chips may still come from OpenAI metadata or deterministic local detection.
-6. Subsequent turns translate A-to-B and B-to-A as text through direct OpenAI calls with `store: false`; transcript rows expose pending/detected/translating/final states.
-7. User can change either selected language during the active meeting; the app persists the new pair locally and restarts the direct OpenAI realtime session with the updated target/output language.
+5. The status card shows the selected pair as `<A> <-> <B>` from session start. Source-row language chips may still come from Gemini transcript metadata or deterministic local detection.
+6. Subsequent turns stream through Gemini Live Translate using 16 kHz mono PCM16 input chunks and map Gemini input/output transcripts into transcript rows with pending/detected/translating/final states. Approved text fallback remains direct OpenAI Responses with `store: false`.
+7. User can change either selected language during the active meeting; the app persists the new pair locally and restarts the direct Gemini live session with the updated target language.
 8. App stores meeting transcript/history/summary metadata in encrypted local device storage.
 9. User can open AI chat from a meeting with `This meeting` scope or from a global/history surface with `All meetings` scope.
 10. User can generate Transcript, Summary, or Both as an encrypted local export, continue browsing while generation runs, review generated exports in app, and explicitly copy an export when ready.
@@ -113,12 +113,23 @@ The MVP must not include an app backend.
 - Do not send transcript text, translated text, prompts, microphone audio, audio chunks, audio-derived payloads, summaries, recipient lists, or meeting metadata to an app-owned backend.
 - If a future backend is introduced, it must be treated as V2/future scope and reconciled through [docs/v2-future-scope.md](v2-future-scope.md), [docs/decision-log.md](decision-log.md), and the GitHub issue map before implementation.
 
+## Gemini Live Translation Requirements
+
+- Use `gemini-3.5-live-translate-preview` through the Gemini Live API raw WebSocket path for normal MVP live human-speech interpretation.
+- Connect from the phone app directly to Gemini. Do not add an app backend, token broker, AWS, cloud sync, or server-side transcript handling.
+- Store user-provided Gemini credential/session material only in encrypted local device storage, separately from OpenAI credential material, and never bundle, hard-code, log, screenshot, or commit it.
+- Send the documented setup message with `setup.model = models/gemini-3.5-live-translate-preview`, `generationConfig.responseModalities = ["AUDIO"]`, `inputAudioTranscription = {}`, `outputAudioTranscription = {}`, and `translationConfig.targetLanguageCode` set to the selected target output language.
+- Stream raw little-endian mono PCM16 microphone audio as `realtimeInput.audio` with `mimeType: audio/pcm;rate=16000` in 100 ms chunks.
+- Parse `serverContent.inputTranscription` as source/original transcript, `serverContent.outputTranscription` as translated transcript, and `serverContent.modelTurn.parts[].inlineData` as translated PCM16 audio output. Output audio is 24 kHz mono PCM16.
+- Keep `echoTargetLanguage: true` unless a later accepted decision changes how same-target speech should be handled.
+- Recover from direct credential/session expiry, network drops, transient Gemini errors, and app lifecycle interruption with bounded reconnect/backoff behavior.
+- Keep user-facing state clear during connecting, reconnecting, credential-invalid, unsupported-language, offline, permission-denied, rate-limit, and model/API error states.
+- Ask Tom for a Gemini API key only at the first real Gemini network smoke/integration test.
+
 ## OpenAI Requirements
 
-- Use `gpt-realtime-translate` on the dedicated `/v1/realtime/translations` path for normal MVP live human-speech interpretation.
-- Keep `gpt-realtime-2` available only as an explicit compatibility/experimental voice-agent profile; do not use it as the default live meeting route unless a later accepted decision changes this.
-- Connect from the phone app directly to OpenAI.
-- Stream microphone audio directly to OpenAI.
+- Keep OpenAI Responses paths for AI chat, summaries, and approved text fallback. Use `store: false` for request paths that send meeting context or transcript-derived content.
+- Keep `gpt-realtime-translate` and `gpt-realtime-2` code available only as explicit compatibility/fallback seams; do not use either as the default live meeting route unless a later accepted decision changes this.
 - Configure `audio.input.transcription` (model `gpt-realtime-whisper`) and `audio.input.noise_reduction` (`near_field`) on the dedicated `/v1/realtime/translations` session so the endpoint emits the source/original transcript (`session.input_transcript.delta`/`.done`). Without input transcription the endpoint streams only translated audio and `session.output_transcript`, so the original speech cannot display and turns cannot split. Set only `audio.output.language`; do not send a model, instructions, or a source language on this endpoint.
 - Receive translated audio and transcript deltas while the speaker is still talking.
 - Recover from direct credential/session expiry, network drops, transient OpenAI errors, and app lifecycle interruption with bounded reconnect/backoff behavior.
@@ -128,9 +139,9 @@ The MVP must not include an app backend.
 - Ask Tom for an OpenAI API key only at the first real OpenAI network smoke/integration test.
 - Store credential/session material only in encrypted local storage, redact it from logs/screenshots/test output, and provide a clear removal/reset path.
 
-Current implementation note: issue #30 originally changed the default MVP surface from route translation to a two-party live interpreter, and the 2026-06-02 manual-pair decision restores visible `From` and `To` selectors because on-device language discovery did not reliably converge. The Flutter app now opens with `Start interpreter`, keeps the credential and microphone gates, defaults the active pair to Italian <-> English, and lets the user choose any supported app source/target pair without a manual direction switch. The coordinator seeds the selected pair into `BidirectionalInterpreterRuntime` from session start, restarts cleanly when the pair changes, and still uses OpenAI language metadata or deterministic local detection for transcript-row source labels when available. The active live UI keeps direction switching, the `Translate Text` toggle, live-header AI chat, live-screen export controls, read-aloud controls, and speaker/headphone chips hidden so secondary workflows do not compete with interpretation. A fakeable direct OpenAI text interpreter gateway exists for Phase 1 text turns and builds Responses requests with `store: false`; tests cover manual source/target selection, pair seeding, reverse-session startup, local source-language row fallback, and A-to-B/B-to-A fake translation. Existing realtime, microphone, playback, encrypted storage, AI chat, generated export, and privacy-safe diagnostics seams remain in place, with credential material still confined to encrypted local storage and OpenAI Authorization headers.
+Current implementation note: issue #30 originally changed the default MVP surface from route translation to a two-party live interpreter, and the 2026-06-02 manual-pair decision restores visible `From` and `To` selectors because on-device language discovery did not reliably converge. The Flutter app now opens with `Start interpreter`, keeps the credential and microphone gates, defaults the active pair to Italian <-> English, and lets the user choose any supported app source/target pair without a manual direction switch. The coordinator seeds the selected pair into `BidirectionalInterpreterRuntime` from session start, restarts cleanly when the pair changes, and uses Gemini transcript metadata or deterministic local detection for transcript-row source labels when available. The active live UI keeps direction switching, the `Translate Text` toggle, live-header AI chat, live-screen export controls, read-aloud controls, and speaker/headphone chips hidden so secondary workflows do not compete with interpretation. A fakeable direct OpenAI text interpreter gateway exists for Phase 1 text turns and builds Responses requests with `store: false`; tests cover manual source/target selection, pair seeding, local source-language row fallback, and A-to-B/B-to-A fake translation. Existing realtime, microphone, playback, encrypted storage, AI chat, generated export, and privacy-safe diagnostics seams remain in place, with Gemini/OpenAI credential material still confined to encrypted local storage and never included in JSON setup/audio messages or diagnostics.
 
-Current implementation note: issue #31 adds a live listening pause separate from read-aloud pause. Pausing listening stops microphone capture, the realtime session, and translated-audio playback while preserving the active encrypted local meeting and transcript state; resuming reconnects with the active realtime config and transcript commit target. The live interpreter now shows a clear `Connecting to OpenAI` startup indicator before capture starts, parses common nested realtime language metadata, falls back to deterministic local English/Italian/Spanish/French source-language detection when realtime language metadata is missing, stores the resolved source language on transcript entries, and rolls transcript blocks on source item/language changes or a new source after a completed source+translation pair.
+Current implementation note: issue #31 adds a live listening pause separate from read-aloud pause. Pausing listening stops microphone capture, the realtime session, and translated-audio playback while preserving the active encrypted local meeting and transcript state; resuming reconnects with the active realtime config and transcript commit target. After issue #53, the active live interpreter shows a clear `Connecting to Gemini` startup indicator before capture starts, parses Gemini `serverContent` transcript metadata, falls back to deterministic local source-language detection when provider metadata is missing, stores the resolved source language on transcript entries, and rolls transcript blocks on source item/language changes or a new source after a completed source+translation pair.
 
 Current implementation note: issue #31 follow-up hardens the wired live interpreter path against the real `/v1/realtime/translations` wire shape, which streams `session.input_transcript` (source) and `session.output_transcript` (translation) deltas with no item ids and no per-event language metadata. Three defects were fixed against the wired coordinator/committer path rather than only the text-first test seam. First, transcript block splitting no longer requires a realtime translation to be present on the block to roll: a new source utterance after the current block's source completed always starts a new block, so a later turn's source and translation can no longer merge into a prior source-only block (for example an English turn whose Italian translation comes from the direct OpenAI text fallback). Second, source-language resolution never defaults an unknown source to the target language; an unresolved source stays neutral (`auto`, presented in the transcript card as a `--` chip rather than a raw code) so the live header and per-row language chips do not collapse every turn to the target language, and a single distinctive non-English marker (for example `buongiorno`, `ciao`) now resolves short foreign phrases while English-homograph markers (for example Italian `come`) only count toward the higher multi-marker threshold. Third, before the 2026-06-02 manual-pair restoration, the live header/status was driven by the runtime's detected-language ordering so it could advance from `Heard <language>. Waiting for the other language...` to the locked two-language pair label as soon as a second distinct language was heard; the current UI instead seeds the selected manual pair from session start, while the same committer fix still prevents a turn that finalizes its own translation on a sentence boundary from orphaning its `output_transcript.done` into a new, source-less block. This is wired-path logic and test coverage only; it adds no dependency, Android permission, backend route, network path, OpenAI request format, live credential read, microphone recording, or logging surface change. The installed-app live-UI header/block proof remains blocked behind #6 because this machine's emulator has no audio source.
 
@@ -152,14 +163,14 @@ Current implementation note: issue #37 makes live-session startup fully time-bou
 
 ## Language Support And Fallback
 
-OpenAI Realtime Translation is expected to have broad input language coverage and narrower target output language coverage. The app must plan for unsupported target output languages.
+Gemini Live Translation supports the current MVP language set for live translation. Direct OpenAI text fallback remains available for approved text-only fallback cases and AI chat/summary workflows.
 
 Implementation requirements:
 
 - Keep a centralized, easy-to-update language support table.
 - Show all app target languages in the target picker.
-- Clearly label which target languages are valid realtime output targets and which require the direct OpenAI fallback route.
-- Detect when a requested target language is unsupported by realtime output.
+- Clearly label which target languages use Gemini live output and which require the direct OpenAI fallback route.
+- Detect when a requested target language is unsupported by the active live route.
 - Provide a clear direct-OpenAI fallback path for broader target language support when product-approved.
 - Make fallback behavior explicit in the UI rather than failing silently.
 - Keep fallback AI chat and translation routes phone-only except for direct OpenAI calls.
@@ -169,6 +180,8 @@ Current implementation note: language support was verified again on 2026-05-26 a
 Updated 2026-06-01: the OpenAI Realtime Translation cookbook enumerates 13 supported output languages (Spanish, Portuguese, French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian, Vietnamese, Italian, English), so the conservative English/Spanish/French-only realtime table was corrected to mark all 13 (including Italian) as realtime output targets in `language_support.dart`. Arabic remains a direct-OpenAI fallback target because it is an auto-detected input language but not one of the 13 outputs. This supersedes the "Italian is direct-fallback only" stance for realtime output.
 
 Updated 2026-06-03: fallback-only targets stay selectable and explicit. If a selected target such as Arabic is not a realtime output language, the live surface shows a direct OpenAI text-fallback notice, the primary realtime session outputs the realtime-capable language on the other side of the pair so source transcripts and supported audio direction still work, and the fallback-only direction uses the phone-only direct OpenAI text path with `store: false`.
+
+Updated 2026-06-10: issue #53 changes the active live runtime to Gemini Live Translate preview. The official Gemini Live Translate docs list Arabic and the current app languages as supported live translation languages, and the app configures Gemini with the selected target language directly. The OpenAI realtime output table and `/v1/realtime/translations` notes above are retained as historical compatibility context, not the default live route.
 
 ## Meeting Management Requirements
 
@@ -219,13 +232,13 @@ Current implementation note: Transcript/Summary/Both exports are generated into 
 
 Target users include very high-level executives. Cybersecurity is a first-class acceptance criterion.
 
-- No standard OpenAI API keys in mobile source, committed config, assets, logs, tests, screenshots, or app bundles.
+- No standard Gemini or OpenAI API keys in mobile source, committed config, assets, logs, tests, screenshots, or app bundles.
 - No app backend, AWS, cloud sync, server mailer, or server-side transcript handling in the MVP.
-- Direct OpenAI API calls are the only routine network path for app product behavior.
+- Direct Gemini API calls for live translation and direct OpenAI API calls for AI chat, summaries, and approved text fallback are the only routine network paths for app product behavior.
 - User-initiated generated export copy may place content on the platform clipboard only after the user explicitly presses Copy; the app must not run an outbound mail backend.
 - Local meeting transcript history, summary metadata, sensitive preferences, remembered recipients, and credential/session material must be encrypted on device when implementation exists.
 - Use least-privilege mobile permissions. Microphone access is required; any additional permission needs product/security justification.
-- Logs and diagnostics must exclude speech, transcript payloads, full prompts, translated content, summaries, recipient lists, raw auth/session tokens, OpenAI credential material, and API keys.
+- Logs and diagnostics must exclude speech, transcript payloads, full prompts, translated content, summaries, recipient lists, raw auth/session tokens, Gemini/OpenAI credential material, and API keys.
 - Crash reporting or analytics, if added later, must use redaction and opt-in/notice appropriate to the product.
 - Dependencies must be pinned through lockfiles once implementation exists and checked against credible advisory sources before merge.
 - Tests should include negative assertions for transcript routing, secret leakage, and logging/diagnostics leakage.
@@ -237,7 +250,7 @@ Minimum verification plan once implementation exists:
 - `flutter analyze`
 - `flutter test`
 - Android emulator smoke check using `android-pixel9-headless`
-- Secret scanning or equivalent check that no standard OpenAI API key appears in mobile code/config/assets/tests/build outputs
+- Secret scanning or equivalent check that no standard Gemini/OpenAI API key appears in mobile code/config/assets/tests/build outputs
 - Dependency/advisory check for pinned Flutter/Dart/native package versions
 - Local cybersecurity gate: `bash scripts/check-supply-chain.sh`
 - UI smoke checks for supplied mockup-derived surfaces plus meeting management and generated export surfaces

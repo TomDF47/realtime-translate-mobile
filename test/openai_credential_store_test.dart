@@ -67,6 +67,51 @@ void main() {
     );
   });
 
+  test(
+    'stores Gemini live credential separately from OpenAI credential',
+    () async {
+      final repository = LocalMeetingRepository(
+        store: MemoryEncryptedLocalStore(),
+      );
+      final openAiStore = OpenAiCredentialStore(repository: repository);
+      final geminiStore = OpenAiCredentialStore.gemini(repository: repository);
+
+      await openAiStore.saveUserProvidedCredential('placeholder-openai-key');
+      await geminiStore.saveUserProvidedCredential('placeholder-gemini-key');
+
+      final snapshot = await repository.loadSnapshot();
+      expect(
+        await openAiStore.readCredentialForNetworkUse(),
+        'placeholder-openai-key',
+      );
+      expect(
+        await geminiStore.readCredentialForNetworkUse(),
+        'placeholder-gemini-key',
+      );
+      expect(
+        geminiStore.loadStatus().then(
+          (status) =>
+              status.displayLabelForProvider(LiveCredentialProvider.gemini),
+        ),
+        completion('Gemini credential stored on this device'),
+      );
+      expect(
+        snapshot.credentialSessionMaterial,
+        containsPair(
+          OpenAiCredentialStore.apiKeyStorageKey,
+          'placeholder-openai-key',
+        ),
+      );
+      expect(
+        snapshot.credentialSessionMaterial,
+        containsPair(
+          OpenAiCredentialStore.geminiApiKeyStorageKey,
+          'placeholder-gemini-key',
+        ),
+      );
+    },
+  );
+
   test('clears saved credential material without deleting meetings', () async {
     final repository = LocalMeetingRepository(
       store: MemoryEncryptedLocalStore(),

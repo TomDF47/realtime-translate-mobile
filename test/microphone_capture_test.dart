@@ -18,6 +18,20 @@ void main() {
     });
   });
 
+  test('Gemini live translate capture config emits 16 kHz 100 ms chunks', () {
+    const config = MicrophoneCaptureConfig.geminiLiveTranslate();
+
+    expect(config.sampleRateHz, 16000);
+    expect(config.channelCount, 1);
+    expect(config.chunkDuration, const Duration(milliseconds: 100));
+    expect(config.bytesPerChunk, 3200);
+    expect(config.toMethodArguments(), {
+      'sampleRateHz': 16000,
+      'channelCount': 1,
+      'chunkDurationMs': 100,
+    });
+  });
+
   test('parses PCM16 platform chunk without treating bytes as text', () {
     final chunk = MicrophonePcm16Chunk.fromPlatformEvent({
       'bytes': Uint8List.fromList([0, 1, 2, 3]),

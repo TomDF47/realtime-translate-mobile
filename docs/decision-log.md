@@ -2,6 +2,31 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-10 - Gemini Live Translate Is The Default Live Runtime
+
+Status: Accepted for issue #53
+
+Context:
+
+- Tom requested the active live translation runtime move from OpenAI Realtime Translation to Google's Gemini Live Translate preview model.
+- The official Gemini Live Translate guide (last updated 2026-06-09 UTC) documents model `gemini-3.5-live-translate-preview`, raw WebSocket setup with `generationConfig.translationConfig.targetLanguageCode`, 16 kHz mono PCM16 input sent as `realtimeInput.audio` with `audio/pcm;rate=16000`, 100 ms audio chunks, and `serverContent` input/output transcripts plus inline translated audio.
+- AI chat, meeting summaries, and existing text fallback still use OpenAI Responses with `store: false`; the issue did not request replacing those paths.
+
+Decision:
+
+- Make Gemini Live Translate preview (`gemini-3.5-live-translate-preview`) the default live speech translation runtime.
+- Store Gemini live credentials separately from OpenAI credentials in encrypted local device storage, and label setup UI/provider errors distinctly.
+- Keep OpenAI realtime translation code available as compatibility/fallback code, but do not fake Gemini by sending a Gemini model string to an OpenAI endpoint.
+- Keep microphone capture provider-specific: Gemini live uses 16 kHz mono PCM16 with 100 ms chunks; OpenAI compatibility paths keep 24 kHz mono PCM16 with 200 ms chunks.
+- Map Gemini `serverContent.inputTranscription`, `serverContent.outputTranscription`, and `modelTurn.parts[].inlineData` into the existing `RealtimeTranslationSession` event types so the coordinator/committer/storage path remains narrow and testable.
+
+Implications:
+
+- The MVP remains phone-only with no app backend, token broker, AWS, server mailer, cloud sync, or server-side transcript handling.
+- Direct Gemini calls are now part of the routine product network path for live translation; direct OpenAI calls remain routine for AI chat, summaries, and approved text fallback.
+- Gemini and OpenAI credentials must never be bundled, committed, logged, or included in JSON setup/audio messages or diagnostics.
+- Open issue #6 still needs physical-device proof for live microphone capture and installed-app behavior against the Gemini route.
+
 ## 2026-06-03 - Text-First Live Interpreter Suppresses Default Speaker And Reverse Audio
 
 Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)

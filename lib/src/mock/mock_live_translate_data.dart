@@ -16,9 +16,14 @@ abstract final class MockLiveTranslateData {
       semanticLabel: 'Open meeting history',
     ),
     LocalSetupActionData(
-      label: 'OpenAI setup',
+      label: 'Gemini live setup',
       icon: Icons.key_rounded,
-      semanticLabel: 'OpenAI setup',
+      semanticLabel: 'Gemini live setup',
+    ),
+    LocalSetupActionData(
+      label: 'OpenAI chat & summary setup',
+      icon: Icons.psychology_alt_rounded,
+      semanticLabel: 'OpenAI chat and summary setup',
     ),
   ];
 

@@ -29,7 +29,8 @@ void main() {
     expect(find.text('Live Translate'), findsOneWidget);
     expect(find.text('Start interpreter'), findsOneWidget);
     expect(find.text('Open meeting history'), findsOneWidget);
-    expect(find.text('OpenAI setup'), findsOneWidget);
+    expect(find.text('Gemini live setup'), findsOneWidget);
+    expect(find.text('OpenAI chat & summary setup'), findsOneWidget);
     expect(
       find.text(
         'Transcripts are stored on device only. Your conversations stay private.',
@@ -45,7 +46,7 @@ void main() {
     expect(find.byIcon(Icons.add), findsNothing);
   });
 
-  testWidgets('saves OpenAI credential locally before live start', (
+  testWidgets('saves Gemini credential locally before live start', (
     tester,
   ) async {
     final repository = _testRepository();
@@ -55,46 +56,46 @@ void main() {
     await tester.tap(find.text('Start interpreter'));
     await tester.pumpAndSettle();
 
-    expect(find.text('OpenAI setup required'), findsWidgets);
-    expect(find.text('Open OpenAI setup'), findsOneWidget);
+    expect(find.text('Gemini setup required'), findsWidgets);
+    expect(find.text('Open Gemini setup'), findsOneWidget);
 
-    await tester.tap(find.text('Open OpenAI setup'));
+    await tester.tap(find.text('Open Gemini setup'));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byType(TextField).last,
-      'placeholder-local-openai-credential',
+      'placeholder-local-gemini-credential',
     );
     await tester.tap(find.text('Save encrypted credential'));
     await tester.pumpAndSettle();
 
     expect(
-      find.text('OpenAI credential stored on this device'),
+      find.text('Gemini credential stored on this device'),
       findsOneWidget,
     );
-    expect(find.text('placeholder-local-openai-credential'), findsNothing);
+    expect(find.text('placeholder-local-gemini-credential'), findsNothing);
     expect(
       await OpenAiCredentialStore(
         repository: repository,
+        provider: LiveCredentialProvider.gemini,
       ).readCredentialForNetworkUse(),
-      'placeholder-local-openai-credential',
+      'placeholder-local-gemini-credential',
     );
 
     await tester.tap(find.text('Remove credential from this device'));
     await tester.pumpAndSettle();
 
-    expect(find.text('OpenAI setup required'), findsWidgets);
+    expect(find.text('Gemini setup required'), findsWidgets);
     expect(find.text('Remove credential from this device'), findsNothing);
     expect(
       await OpenAiCredentialStore(
         repository: repository,
+        provider: LiveCredentialProvider.gemini,
       ).readCredentialForNetworkUse(),
       isNull,
     );
   });
 
-  testWidgets('opens teal listening with manual pair controls', (
-    tester,
-  ) async {
+  testWidgets('opens teal listening with manual pair controls', (tester) async {
     final repository = _testRepository();
     await _seedCredential(repository);
     await tester.pumpWidget(
@@ -171,6 +172,8 @@ void main() {
     );
     expect(primaryConfig.targetLanguageCode, 'en');
     expect(primaryConfig.sourceLanguageCode, 'it');
+    expect(primaryConfig.inputAudioRate, 16000);
+    expect(primaryConfig.outputAudioRate, 24000);
     expect(
       primaryConfig.profile,
       OpenAiRealtimeTranslationProfile.dedicatedTranslation,
@@ -316,7 +319,7 @@ void main() {
     expect(find.text('Listening for languages...'), findsNothing);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Connecting'), findsOneWidget);
-    expect(find.text('Connecting to OpenAI'), findsOneWidget);
+    expect(find.text('Connecting to Gemini'), findsOneWidget);
     expect(
       find.text(
         'Preparing live interpretation on this phone. Recording starts after the secure realtime session is ready.',
@@ -415,9 +418,9 @@ void main() {
 
     expect(find.text('Italian <-> English'), findsOneWidget);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
-    expect(find.text('Reconnecting to OpenAI'), findsOneWidget);
+    expect(find.text('Reconnecting to Gemini'), findsOneWidget);
     expect(
-      find.text('Connection interrupted. Reconnecting to OpenAI shortly.'),
+      find.text('Connection interrupted. Reconnecting to Gemini shortly.'),
       findsOneWidget,
     );
     expect(find.text('socket connection interrupted'), findsNothing);
@@ -958,14 +961,14 @@ void main() {
           isPlaybackQueueOpen: false,
           realtimeRetryAttempt: 1,
           realtimeReconnectDelay: Duration(milliseconds: 500),
-          notice: 'Connection interrupted. Reconnecting to OpenAI shortly.',
+          notice: 'Connection interrupted. Reconnecting to Gemini shortly.',
         ),
       ),
     );
 
-    expect(find.text('Reconnecting to OpenAI'), findsOneWidget);
+    expect(find.text('Reconnecting to Gemini'), findsOneWidget);
     expect(
-      find.text('Connection interrupted. Reconnecting to OpenAI shortly.'),
+      find.text('Connection interrupted. Reconnecting to Gemini shortly.'),
       findsOneWidget,
     );
     expect(find.textContaining('Retry attempt 1'), findsOneWidget);
@@ -1022,15 +1025,15 @@ void main() {
           realtimeRecoveryAction: OpenAiRealtimeRecoveryAction.fatalError,
           realtimeFailureKind: OpenAiRealtimeFailureKind.rateLimited,
           notice:
-              'OpenAI rate limits persisted after retries. Restart when quota is available.',
+              'Gemini rate limits persisted after retries. Restart when quota is available.',
         ),
       ),
     );
 
-    expect(find.text('OpenAI rate limit reached'), findsOneWidget);
+    expect(find.text('Gemini rate limit reached'), findsOneWidget);
     expect(
       find.text(
-        'OpenAI rate limits persisted after retries. Restart when quota is available.',
+        'Gemini rate limits persisted after retries. Restart when quota is available.',
       ),
       findsOneWidget,
     );
@@ -1366,10 +1369,14 @@ LocalMeetingRepository _testRepository() {
   return LocalMeetingRepository(store: MemoryEncryptedLocalStore());
 }
 
-Future<void> _seedCredential(LocalMeetingRepository repository) {
-  return OpenAiCredentialStore(
+Future<void> _seedCredential(LocalMeetingRepository repository) async {
+  await OpenAiCredentialStore(
     repository: repository,
   ).saveUserProvidedCredential('placeholder-local-openai-credential');
+  await OpenAiCredentialStore(
+    repository: repository,
+    provider: LiveCredentialProvider.gemini,
+  ).saveUserProvidedCredential('placeholder-local-gemini-credential');
 }
 
 Future<void> _appendStoredTranscriptLine(
@@ -1407,10 +1414,7 @@ void _expectManualPairActiveLiveControls() {
     find.bySemanticsLabel(RegExp('From language selector')),
     findsOneWidget,
   );
-  expect(
-    find.bySemanticsLabel(RegExp('To language selector')),
-    findsOneWidget,
-  );
+  expect(find.bySemanticsLabel(RegExp('To language selector')), findsOneWidget);
   expect(find.text('Switch'), findsNothing);
   expect(find.text('Switch Direction'), findsNothing);
   expect(find.text('Translate Text'), findsNothing);

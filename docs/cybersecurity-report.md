@@ -2,6 +2,8 @@
 
 Report date/time: 2026-05-24 22:12:54 AWST (Australia/Perth, UTC+08:00)
 
+Issue #53 update (2026-06-10): the active live translation runtime now uses direct Gemini Live Translate with `gemini-3.5-live-translate-preview`. Gemini live credential material is stored separately from OpenAI credential material in encrypted local storage, never bundled, and never included in setup/audio JSON messages or diagnostics. The Gemini raw WebSocket key is used only as connection credential material; diagnostics record only endpoint/model/target labels. Gemini setup uses `generationConfig.translationConfig.targetLanguageCode`; audio append uses 16 kHz mono PCM16 `realtimeInput.audio` with `audio/pcm;rate=16000`; parsed `serverContent` transcripts/audio feed the existing local committer/playback seams. OpenAI Responses remains the direct phone path for AI chat, summaries, and approved text fallback with `store: false`. No backend, AWS, token broker, cloud sync, server mailer, dependency, or Android permission was added.
+
 Scope: Flutter scaffold dependency baseline, Android microphone-permission lifecycle update, Android PCM16 microphone capture, Android PCM16 translated-audio speaker output, encrypted local meeting storage, centralized language support/fallback routing, phone-local OpenAI credential setup, privacy-safe diagnostics controls, direct realtime WebSocket/resilience/coordinator scaffolding with bounded reconnect scheduling, WebSocket close-reason auth-failure classification, user-visible realtime recovery UI states with sanitized failure-category labels, realtime transcript delta commitment into encrypted local meetings, scoped AI chat Responses API request scaffolding, direct meeting summary Responses API request scaffolding, Transcript/Summary/Both generated exports with encrypted in-app storage/copying, local dependency/security gate, redacted live OpenAI smoke harness for the phone-only MVP, including local generated-spoken-audio validation and controlled generated-spoken-audio reconnect validation, installed-APK Android emulator E2E automation including non-secret invalid-credential recovery and a device-audio preflight for physical microphone/audible speaker validation, the opt-in debug-only generated-event installed-app persistence proof, the non-live final QA gate for standard checks plus fresh debug/release APK handoff artifacts, and the store-ready Android release-signing preflight path. The repo now contains Flutter Android/iOS scaffold files, package manifests, a lockfile, Android Gradle build files, placeholder-only environment config, local signing placeholders, native Android MethodChannels/EventChannels for runtime microphone permission, PCM16 capture, translated-audio playback, and deferred share-sheet launch, a platform-backed secure storage repository, a local OpenAI credential store, a local language support table, a no-op-by-default diagnostics allowlist/redaction helper, direct OpenAI realtime, resilience, transcript-commit, translated-audio playback, AI chat, and summary gateway seams, a local transcript/summary export composer, a repeatable local supply-chain script, a repeatable live OpenAI smoke script, a repeatable installed-app Android emulator E2E script, a repeatable non-live final QA wrapper, and a store-signing preflight script that checks local uncommitted signing config without printing signing material.
 
 ## Executive Summary
@@ -29,7 +31,7 @@ Current result: no known vulnerabilities or GitHub advisory hits were found for 
 - Scoped AI chat keeps prompt/request context local until a user sends it directly to OpenAI from the phone; request construction sets `store: false` and never routes through an app backend.
 - Local diagnostics are no-op by default and must pass through field allowlisting, secret redaction, and payload omission before any sink records them.
 - Transcript, Summary, and Both export generation is user initiated, runs in the background from the UI perspective, and saves generated export bodies only in encrypted local meeting storage. Recipient input/checklist UI is disabled in the active MVP flow. Generated summary text/metadata remain in encrypted local storage. Summary/Both uses the direct OpenAI Responses path only when a saved local credential is available. Plaintext export bodies are exposed only in the in-app generated export detail view and the explicit Copy action.
-- Direct OpenAI API calls are the only routine product network path.
+- Direct Gemini API calls for live translation and direct OpenAI API calls for AI chat, summaries, and approved text fallback are the only routine product network paths.
 - Generated export copy is user initiated; no app-operated outbound mail backend or external delivery path is active in the MVP.
 - Logs, analytics, crash reports, screenshots, diagnostics, and tests must exclude transcript, audio, prompt, summary, recipient, export, and OpenAI credential/session payloads.
 
@@ -148,7 +150,7 @@ Primary versions introduced:
 - `scripts/check_android_release_signing.sh` is the store-ready signing preflight. It validates local signing fields and keystore path without printing signing material, and `--apk` rejects Android debug-signed artifacts.
 - `scripts/final_qa_gate.sh --require-store-signing` runs the store-signing preflight before the release build and verifies the fresh release APK is not debug-signed afterward. Normal final QA remains available for non-store QA/handoff without signing material.
 - Release-mode APK artifacts built without local `android/key.properties` use the existing debug-signing fallback and are labeled `release-debug-signed`; they are suitable only for local handoff/smoke validation, not production store submission.
-- No standard OpenAI API key, client secret, token broker URL, AWS config, Google/Microsoft sign-in config, keystore, or certificate has been added.
+- No standard Gemini/OpenAI API key, client secret, token broker URL, AWS config, Google/Microsoft sign-in config, keystore, or certificate has been added.
 - The Flutter scaffold includes Android and iOS platform code only; there is no app-owned network endpoint.
 - Microphone permission, Android PCM16 capture, and Android PCM16 translated-audio output use app-owned platform code and do not add a supply-chain dependency. Translated-audio playback uses platform `AudioTrack` and adds no package, SDK, or additional permission. Capture/playback should be reviewed again if a package, SDK, resampler, external playback engine, or additional audio permission is introduced.
 - Encrypted local storage uses `flutter_secure_storage` 10.3.0. Android storage is backed by Android KeyStore/Tink through the plugin; iOS storage is backed by Keychain with `first_unlock_this_device` accessibility.
@@ -188,9 +190,9 @@ For each package or tool version introduced:
 
 ## MVP Cybersecurity Acceptance Criteria
 
-- No committed or bundled standard OpenAI API key.
+- No committed or bundled standard Gemini or OpenAI API key.
 - No app backend or server-side transcript handling.
-- Direct OpenAI API only for routine product network traffic.
+- Direct Gemini API for live translation and direct OpenAI API for AI chat, summaries, and approved text fallback are the only routine product network paths.
 - Encrypted local storage for meetings, transcripts, summaries, recipients, sensitive preferences, and credential/session material.
 - Explicit AI chat scope: `This meeting` or `All meetings`.
 - Generated exports avoid an app-operated outbound mail backend and remain encrypted locally until explicit Copy.

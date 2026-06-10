@@ -35,6 +35,8 @@ Reconcile the capture into `test/fixtures/realtime_translation_documented_turns.
 
 Issue #30 adds focused coverage for the revised two-party interpreter default: the start surface says `Start interpreter`, the active live screen shows source/target selectors for the manual pair, hides direction switching, the `Translate Text` toggle, live-header AI chat, live-screen export controls, and read-aloud claims, seeds the selected pair into the runtime from session start, persists picker changes, transcript rows preserve original and translated text separately with pending/delayed/final statuses, fake text interpreter turns translate A-to-B and B-to-A through a direct OpenAI gateway with `store: false`, and diagnostics remain payload-safe. Issue #31 adds focused coverage for `Pause Listening` / `Resume Listening`, clear `Connecting to OpenAI` startup UI, realtime nested language metadata parsing, deterministic local supported-language source fallback, source-language change row rolling, new source item row rolling after a completed pair, translation-first original-speech backfill, avoiding final translated rows with empty original speech, and manual-pair reverse-session startup. Issue #32 adds focused English/Italian text fallback coverage: after pair lock, English turns carry an English-to-Italian direct OpenAI fallback direction and produce Italian-visible translated text, while Italian turns carry an Italian-to-English realtime-capable direction and produce English-visible translated text. The 2026-06-03 fallback-target regression covers English <-> Arabic: the active UI shows a direct OpenAI fallback notice, the primary realtime session outputs English rather than unsupported Arabic, and the English-to-Arabic turn uses the phone-only direct OpenAI text path.
 
+Issue #53 adds focused Gemini Live Translate coverage: Gemini setup message uses `models/gemini-3.5-live-translate-preview`, `generationConfig.translationConfig.targetLanguageCode`, input/output audio transcription toggles, and no credential in JSON; Gemini audio append uses `realtimeInput.audio` with `mimeType: audio/pcm;rate=16000`; Gemini `serverContent.inputTranscription`, `serverContent.outputTranscription`, and inline translated audio parse into the existing realtime source/translation/audio event types; Gemini live credentials are stored and diagnosed separately from OpenAI credentials; microphone capture for Gemini uses 16 kHz mono PCM16 with 100 ms chunks while OpenAI compatibility capture remains 24 kHz/200 ms; and live setup/recovery copy labels Gemini separately from OpenAI chat/summary setup.
+
 Optional live OpenAI smoke, only when a credential is supplied through the process environment from an uncommitted local source:
 
 ```bash
@@ -62,6 +64,7 @@ Expected coverage areas:
 - Session state model transitions: local setup, meeting selection, connecting, listening, speaking, read-aloud paused, reconnecting, offline, credential invalid, and error.
 - Microphone permission states: granted, denied, permanently denied, and revoked.
 - Direct OpenAI integration seams for realtime translation, credential-invalid handling, AI chat, and summary generation.
+- Direct Gemini integration seams for live translation, credential-invalid handling, setup/audio message construction, and `serverContent` parsing.
 - Language support table and unsupported-target fallback behavior.
 - Local encrypted storage read/write/delete behavior for meetings, transcript/history, summary metadata, generated exports, preferences, remembered recipients, last selected recipients, and any credential/session material.
 - Meeting management: start new meeting, select old meeting, continue from meeting, delete meeting.
@@ -75,7 +78,7 @@ Expected coverage areas:
 
 Every implementation change touching OpenAI, logging, storage, permissions, dependencies, export, or transcript handling should include negative tests or documented checks for:
 
-- No standard OpenAI API key in mobile code/config/assets/tests/screenshots/build outputs.
+- No standard Gemini or OpenAI API key in mobile code/config/assets/tests/screenshots/build outputs.
 - No transcript/audio/prompt/summary/export payload routed through app-owned backend infrastructure.
 - No app backend, AWS, Lambda, token broker, cloud sync, or server mailer added to MVP code.
 - No transcript/audio/prompt/summary/recipient payload in logs, analytics, diagnostics, crash reports, screenshots, or test output.
@@ -164,13 +167,13 @@ The default flow is:
 1. Locate `--apk PATH` or build an APK artifact (debug by default, `--release` for a release-mode artifact), each with a SHA-256 sidecar.
 2. `scripts/check_apk_metadata.sh` verifies the SHA-256 sidecar (when present), the package id `com.tomdf47.realtime_translate_mobile`, version metadata, and that requested permissions stay within the least-privilege allowlist (`RECORD_AUDIO`, `INTERNET`, and the AndroidX `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`). It also requires the product-critical permissions `RECORD_AUDIO` and `INTERNET` to be present so a release build that drops the direct phone-to-OpenAI network path fails the gate (#41), then reports debug vs release signing without failing a debug release.
 3. `scripts/lib/android_emulator_boot.sh` cold-boots `Pixel_9_API_36_Play` with bounded retries, a process watchdog, and `adb` device-state checks, replacing the previous single-shot launch and unbounded `adb wait-for-device`. A dying cold boot now fails fast with a captured log tail instead of hanging. The booted serial is captured and reused by the installed-app proof so result attribution stays tight.
-4. `scripts/android_emulator_e2e.sh --verify-offline-startup` installs the APK, clears app state, launches it, and proves the offline bounded state: with no credential saved the live coordinator returns `missingCredential` before any network call, microphone-permission request, or OpenAI request, so the app reaches the `OpenAI setup required` gate and the proof asserts it never remains on `Preparing live session`. No credential is read or saved and no OpenAI request is made.
+4. `scripts/android_emulator_e2e.sh --verify-offline-startup` installs the APK, clears app state, launches it, and proves the offline bounded state: with no credential saved the live coordinator returns `missingCredential` before any network call, microphone-permission request, Gemini request, or OpenAI request, so the app reaches the `Gemini setup required` gate and the proof asserts it never remains on `Preparing live session`. No credential is read or saved and no Gemini/OpenAI request is made.
 5. The script prints a sanitized result block (including the run mode) and writes it to `/tmp/realtime-translate-mobile-release-smoke/release-smoke-result.md`. `--record-to-release <tag>` and `--record-to-issue <number>` post that block via `gh` after a secret-pattern guard (default print-only).
 
-The default path reads no OpenAI credential and makes no OpenAI network request. Two network paths are explicit, separate opt-ins:
+The default path reads no Gemini/OpenAI credential and makes no Gemini/OpenAI network request. Two network paths are explicit, separate opt-ins:
 
-- `--verify-invalid-credential-recovery` saves a non-secret invalid placeholder credential, grants microphone permission, and **makes a live OpenAI auth-rejection network request** to prove the app fails closed to `OpenAI setup required` without staying on `Preparing live session`. It reads no real secret, but it is a live OpenAI request and is therefore not part of the default offline path.
-- `--with-live-credential` reads the local secret file and drives the live realtime path with real credentials.
+- `--verify-invalid-credential-recovery` saves a non-secret invalid placeholder live credential, grants microphone permission, and **makes a live auth-rejection network request** to prove the app fails closed to `Gemini setup required` without staying on `Preparing live session`. It reads no real secret, but it is a live network request and is therefore not part of the default offline path.
+- `--with-live-credential` reads the local secret file and drives the Gemini live path with real credentials.
 
 Boot resilience is local-only by design; Android emulator smoke stays out of CI (see CI Gates below).
 

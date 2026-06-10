@@ -21,7 +21,7 @@ void main() {
     final semanticsHandle = tester.ensureSemantics();
     try {
       final repository = _testRepository();
-      await _seedCredential(repository);
+      await _seedCredentials(repository);
       await tester.pumpWidget(
         LiveTranslateApp(
           permissionGateway: _FakePermissionGateway.granted(),
@@ -33,35 +33,28 @@ void main() {
         ),
       );
 
-      expect(
-        tester.getSemantics(
-          find.widgetWithText(FilledButton, 'Start interpreter'),
-        ),
-        matchesSemantics(
-          label: 'Start interpreter',
-          isButton: true,
-          hasTapAction: true,
-        ),
+      await _expectSetupButtonSemantics(
+        tester,
+        buttonText: 'Start interpreter',
+        semanticLabel: 'Start interpreter',
       );
-      expect(
-        tester.getSemantics(
-          find.widgetWithText(FilledButton, 'Open meeting history'),
-        ),
-        matchesSemantics(
-          label: 'Open meeting history',
-          isButton: true,
-          hasTapAction: true,
-        ),
+      await _expectSetupButtonSemantics(
+        tester,
+        buttonText: 'Open meeting history',
+        semanticLabel: 'Open meeting history',
       );
-      expect(
-        tester.getSemantics(find.widgetWithText(FilledButton, 'OpenAI setup')),
-        matchesSemantics(
-          label: 'OpenAI setup',
-          isButton: true,
-          hasTapAction: true,
-        ),
+      await _expectSetupButtonSemantics(
+        tester,
+        buttonText: 'Gemini live setup',
+        semanticLabel: 'Gemini live setup',
+      );
+      await _expectSetupButtonSemantics(
+        tester,
+        buttonText: 'OpenAI chat & summary setup',
+        semanticLabel: 'OpenAI chat and summary setup',
       );
 
+      await tester.ensureVisible(find.text('Start interpreter'));
       await tester.tap(find.text('Start interpreter'));
       await tester.pumpAndSettle();
       final activeMeeting = (await repository.loadSnapshot()).meetings.single;
@@ -107,7 +100,7 @@ void main() {
     _configureCompactLargeTextViewport(tester);
 
     final repository = _testRepository();
-    await _seedCredential(repository);
+    await _seedCredentials(repository);
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
@@ -159,12 +152,31 @@ void main() {
   });
 }
 
+Future<void> _expectSetupButtonSemantics(
+  WidgetTester tester, {
+  required String buttonText,
+  required String semanticLabel,
+}) async {
+  final finder = find.widgetWithText(FilledButton, buttonText);
+
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
+
+  expect(
+    tester.getSemantics(finder),
+    matchesSemantics(label: semanticLabel, isButton: true, hasTapAction: true),
+  );
+}
+
 LocalMeetingRepository _testRepository() {
   return LocalMeetingRepository(store: MemoryEncryptedLocalStore());
 }
 
-Future<void> _seedCredential(LocalMeetingRepository repository) {
-  return OpenAiCredentialStore(
+Future<void> _seedCredentials(LocalMeetingRepository repository) async {
+  await OpenAiCredentialStore.gemini(
+    repository: repository,
+  ).saveUserProvidedCredential('placeholder-local-gemini-credential');
+  await OpenAiCredentialStore(
     repository: repository,
   ).saveUserProvidedCredential('placeholder-local-openai-credential');
 }

@@ -63,7 +63,7 @@ Backend/cloud:
 
 OpenAI:
 
-- Preferred realtime voice/translation model: `gpt-realtime-translate` on `/v1/realtime/translations` for normal live translation; keep `gpt-realtime-2` only as an explicit compatibility/experimental voice-agent profile.
+- Preferred live translation model: Gemini Live Translate preview `gemini-3.5-live-translate-preview`; keep OpenAI realtime profiles only as explicit compatibility/experimental seams.
 - Direct phone-to-OpenAI API calls only.
 - Verify current Realtime Translation language support, realtime endpoint/model behavior, accepted encrypted local credential UX, and summary model/reasoning support during implementation.
 - Keep AI chat scoped explicitly to `This meeting` or `All meetings`.
@@ -75,7 +75,7 @@ Cybersecurity:
 - Pin dependencies through lockfiles once implementation exists.
 - Check dependency advisories before merging package changes.
 - Run `bash scripts/check-supply-chain.sh` before closing dependency-bearing or security-sensitive implementation work.
-- Keep logs, analytics, crash reports, screenshots, and test output free of transcript, audio, prompt, summary, recipient, and OpenAI credential/session material.
+- Keep logs, analytics, crash reports, screenshots, and test output free of transcript, audio, prompt, summary, recipient, and Gemini/OpenAI credential/session material.
 
 ## Documentation Update Matrix
 

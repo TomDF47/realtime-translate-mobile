@@ -303,7 +303,7 @@ void main() {
     );
     expect(
       controller.state.notice,
-      'OpenAI credential expired or was rejected. Update the credential stored on this device.',
+      'Gemini credential expired or was rejected. Update the credential stored on this device.',
     );
     expect(controller.state.isMicrophoneCaptureOpen, isFalse);
     expect(controller.state.isRealtimeSessionOpen, isFalse);
@@ -337,7 +337,7 @@ void main() {
     );
     expect(
       controller.state.notice,
-      'OpenAI is rate limiting this live session. Retrying shortly.',
+      'Gemini is rate limiting this live session. Retrying shortly.',
     );
 
     controller.applyRealtimeRecoveryDecision(
@@ -358,7 +358,7 @@ void main() {
     );
     expect(
       controller.state.notice,
-      'OpenAI rate limits persisted after retries. Restart when quota is available.',
+      'Gemini rate limits persisted after retries. Restart when quota is available.',
     );
     expect(controller.state.isMicrophoneCaptureOpen, isFalse);
     expect(controller.state.isRealtimeSessionOpen, isFalse);

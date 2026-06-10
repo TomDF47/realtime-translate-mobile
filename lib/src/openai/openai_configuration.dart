@@ -28,3 +28,15 @@ abstract final class OpenAiConfiguration {
       '$apiBaseUrl/realtime/translations/client_secrets';
   static const responsesEndpoint = '$apiBaseUrl/responses';
 }
+
+abstract final class GeminiConfiguration {
+  static const liveTranslateModel = 'gemini-3.5-live-translate-preview';
+  static const liveTranslateWebSocketBaseUrl =
+      'wss://generativelanguage.googleapis.com';
+  static const liveTranslateWebSocketPath =
+      '/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+  static const liveTranslateInputAudioRate = 16000;
+  static const liveTranslateOutputAudioRate = 24000;
+  static const liveTranslateAudioChunkDuration = Duration(milliseconds: 100);
+  static const liveTranslateAudioMimeType = 'audio/pcm;rate=16000';
+}

@@ -34,7 +34,7 @@ If a field is not allowlisted, the diagnostics helper records `[omitted]` unless
 
 Do not log, print, emit, screenshot, or add to diagnostics:
 
-- standard OpenAI API keys, Realtime client secrets, session tokens, bearer tokens, cookies, or authorization headers
+- standard Gemini/OpenAI API keys, Realtime client secrets, session tokens, bearer tokens, cookies, or authorization headers
 - transcript text, translated text, prompt text, summary text, request bodies, response bodies, or raw payloads
 - microphone audio, audio chunks, audio-derived payloads, or playback buffers
 - recipient email addresses, recipient lists, export payloads, or native mail/share payload bodies

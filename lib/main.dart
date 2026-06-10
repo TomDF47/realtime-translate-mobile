@@ -348,6 +348,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   late final LiveSessionController _sessionController;
   late final LocalMeetingRepository _meetingRepository;
   late final OpenAiCredentialStore _openAiCredentialStore;
+  late final OpenAiCredentialStore _geminiCredentialStore;
   late final AiChatGateway _aiChatGateway;
   late final MeetingSummaryGateway _meetingSummaryGateway;
   late final LiveRealtimeTranslationCoordinator _realtimeCoordinator;
@@ -356,10 +357,13 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   final Set<String> _deletedMeetingIds = <String>{};
   OpenAiCredentialStatus _openAiCredentialStatus =
       const OpenAiCredentialStatus.missing();
+  OpenAiCredentialStatus _geminiCredentialStatus =
+      const OpenAiCredentialStatus.missing();
   String? _activeMeetingId;
   String? _debugRealtimeProofStatus;
-  TranslationLanguage _selectedSourceLanguage =
-      LanguageSupport.languageByCode('it');
+  TranslationLanguage _selectedSourceLanguage = LanguageSupport.languageByCode(
+    'it',
+  );
   TranslationLanguage _selectedTargetLanguage = LanguageSupport.languageByCode(
     'en',
   );
@@ -385,12 +389,16 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     _openAiCredentialStore = OpenAiCredentialStore(
       repository: _meetingRepository,
     );
+    _geminiCredentialStore = OpenAiCredentialStore.gemini(
+      repository: _meetingRepository,
+    );
     _aiChatGateway = widget.aiChatGateway ?? OpenAiResponsesAiChatGateway();
     _meetingSummaryGateway =
         widget.meetingSummaryGateway ?? OpenAiResponsesMeetingSummaryGateway();
     _realtimeCoordinator = LiveRealtimeTranslationCoordinator(
       sessionController: _sessionController,
-      credentialStore: _openAiCredentialStore,
+      credentialStore: _geminiCredentialStore,
+      textFallbackCredentialStore: _openAiCredentialStore,
       captureGateway:
           widget.microphoneCaptureGateway ??
           MethodChannelMicrophoneCaptureGateway(),
@@ -398,8 +406,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
           widget.translatedAudioPlaybackGateway ??
           MethodChannelTranslatedAudioPlaybackGateway(),
       realtimeGateway:
-          widget.realtimeTranslationGateway ??
-          OpenAiRealtimeTranslationGateway(),
+          widget.realtimeTranslationGateway ?? GeminiLiveTranslationGateway(),
       textInterpreterGateway: widget.textInterpreterGateway,
       onTranscriptCommitted: _scheduleTranscriptRefresh,
       // Phone MVP is text-first. Translated audio/reverse audio remain behind
@@ -408,7 +415,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       enableBidirectionalReverseSession: false,
     );
     unawaited(_loadStoredMeetings());
-    unawaited(_loadOpenAiCredentialStatus());
+    unawaited(_loadCredentialStatuses());
   }
 
   @override
@@ -600,7 +607,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return false;
     }
 
-    _openAiCredentialStatus = await _openAiCredentialStore.loadStatus();
+    await _loadCredentialStatuses();
     if (!mounted) {
       return false;
     }
@@ -671,13 +678,17 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
   }
 
-  Future<void> _loadOpenAiCredentialStatus() async {
-    final status = await _openAiCredentialStore.loadStatus();
+  Future<void> _loadCredentialStatuses() async {
+    final openAiStatus = await _openAiCredentialStore.loadStatus();
+    final geminiStatus = await _geminiCredentialStore.loadStatus();
     if (!mounted) {
       return;
     }
 
-    setState(() => _openAiCredentialStatus = status);
+    setState(() {
+      _openAiCredentialStatus = openAiStatus;
+      _geminiCredentialStatus = geminiStatus;
+    });
   }
 
   Future<void> _persistMeetingFromSession(LiveSessionViewData session) async {
@@ -721,7 +732,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     return OpenAiRealtimeTranslationConfig(
       sourceLanguageCode: sourceLanguageCode,
       targetLanguageCode: targetLanguageCode,
-      profile: _profileForLiveInterpretation(targetLanguageCode),
+      inputAudioRate: GeminiConfiguration.liveTranslateInputAudioRate,
+      outputAudioRate: GeminiConfiguration.liveTranslateOutputAudioRate,
       translationOutputEnabled: _translateTextEnabled,
       readAloudOutputEnabled: _readAloudEnabled,
     );
@@ -745,21 +757,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     return targetLanguageCode;
-  }
-
-  OpenAiRealtimeTranslationProfile _profileForLiveInterpretation(
-    String targetLanguageCode,
-  ) {
-    try {
-      final target = LanguageSupport.languageByCode(targetLanguageCode);
-      if (target.supportsRealtimeTarget) {
-        return OpenAiRealtimeTranslationProfile.dedicatedTranslation;
-      }
-    } on ArgumentError {
-      return OpenAiRealtimeTranslationProfile.dedicatedTranslation;
-    }
-
-    return OpenAiRealtimeTranslationProfile.dedicatedTranslation;
   }
 
   _AppSurface _surfaceForMeeting(StoredMeeting meeting) {
@@ -1056,9 +1053,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     if (nextSurface == _AppSurface.speakingPaused) {
       _sessionController.enterSpeakingPaused();
     } else {
-      _sessionController.resumeListening(
-        playbackQueueOpen: _readAloudEnabled,
-      );
+      _sessionController.resumeListening(playbackQueueOpen: _readAloudEnabled);
     }
 
     await _appendContinuationToMeeting(meeting: meeting, session: session);
@@ -1127,7 +1122,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     try {
       final language = LanguageSupport.languageByCode(code);
       if (language.code != LanguageSupport.autoDetectSource.code &&
-          (language.supportsRealtimeTarget || language.supportsDirectFallback)) {
+          (language.supportsRealtimeTarget ||
+              language.supportsDirectFallback)) {
         return language;
       }
     } on ArgumentError {
@@ -1430,7 +1426,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       config: OpenAiRealtimeTranslationConfig(
         sourceLanguageCode: sourceLanguageCode,
         targetLanguageCode: realtimeTargetLanguageCode,
-        profile: _profileForLiveInterpretation(realtimeTargetLanguageCode),
+        inputAudioRate: GeminiConfiguration.liveTranslateInputAudioRate,
+        outputAudioRate: GeminiConfiguration.liveTranslateOutputAudioRate,
         translationOutputEnabled: _translateTextEnabled,
         readAloudOutputEnabled: _readAloudEnabled,
       ),
@@ -1581,7 +1578,22 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       builder: (context) => _OpenAiSetupSheet(
         credentialStore: _openAiCredentialStore,
         initialStatus: _openAiCredentialStatus,
-        onCredentialChanged: _loadOpenAiCredentialStatus,
+        provider: LiveCredentialProvider.openAi,
+        onCredentialChanged: _loadCredentialStatuses,
+      ),
+    );
+  }
+
+  void _showGeminiSetupSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _OpenAiSetupSheet(
+        credentialStore: _geminiCredentialStore,
+        initialStatus: _geminiCredentialStatus,
+        provider: LiveCredentialProvider.gemini,
+        onCredentialChanged: _loadCredentialStatuses,
       ),
     );
   }
@@ -1880,9 +1892,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
 
     if (sessionState.phase == LiveSessionPhase.credentialInvalid) {
       return _OpenAiCredentialRequiredScreen(
-        status: _openAiCredentialStatus,
+        status: _geminiCredentialStatus,
         notice: sessionState.notice,
-        onOpenSetup: _showOpenAiSetupSheet,
+        provider: LiveCredentialProvider.gemini,
+        onOpenSetup: _showGeminiSetupSheet,
         onBack: _openSetup,
       );
     }
@@ -1891,6 +1904,7 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       _AppSurface.setup => LocalSetupScreen(
         onStartMeeting: _startMeeting,
         onOpenMeetingHistory: _showMeetingHistory,
+        onOpenGeminiSetup: _showGeminiSetupSheet,
         onOpenOpenAiSetup: _showOpenAiSetupSheet,
       ),
       _AppSurface.listening => LiveSessionScreen(
@@ -1961,6 +1975,7 @@ class LocalSetupScreen extends StatelessWidget {
     super.key,
     this.onStartMeeting,
     this.onOpenMeetingHistory,
+    this.onOpenGeminiSetup,
     this.onOpenOpenAiSetup,
   });
 
@@ -1969,6 +1984,7 @@ class LocalSetupScreen extends StatelessWidget {
 
   final VoidCallback? onStartMeeting;
   final VoidCallback? onOpenMeetingHistory;
+  final VoidCallback? onOpenGeminiSetup;
   final VoidCallback? onOpenOpenAiSetup;
 
   @override
@@ -1986,6 +2002,7 @@ class LocalSetupScreen extends StatelessWidget {
                   _LocalSetupActions(
                     onStartMeeting: onStartMeeting ?? () {},
                     onOpenMeetingHistory: onOpenMeetingHistory ?? () {},
+                    onOpenGeminiSetup: onOpenGeminiSetup ?? () {},
                     onOpenOpenAiSetup: onOpenOpenAiSetup ?? () {},
                   ),
                   const Padding(
@@ -2036,11 +2053,13 @@ class _LocalSetupActions extends StatelessWidget {
   const _LocalSetupActions({
     required this.onStartMeeting,
     required this.onOpenMeetingHistory,
+    required this.onOpenGeminiSetup,
     required this.onOpenOpenAiSetup,
   });
 
   final VoidCallback onStartMeeting;
   final VoidCallback onOpenMeetingHistory;
+  final VoidCallback onOpenGeminiSetup;
   final VoidCallback onOpenOpenAiSetup;
 
   @override
@@ -2055,6 +2074,7 @@ class _LocalSetupActions extends StatelessWidget {
             onPressed: switch (index) {
               0 => onStartMeeting,
               1 => onOpenMeetingHistory,
+              2 => onOpenGeminiSetup,
               _ => onOpenOpenAiSetup,
             },
           ),
@@ -2196,18 +2216,24 @@ class _OpenAiCredentialRequiredScreen extends StatelessWidget {
   const _OpenAiCredentialRequiredScreen({
     required this.status,
     required this.notice,
+    required this.provider,
     required this.onOpenSetup,
     required this.onBack,
   });
 
   final OpenAiCredentialStatus status;
   final String? notice;
+  final LiveCredentialProvider provider;
   final VoidCallback onOpenSetup;
   final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final providerLabel = switch (provider) {
+      LiveCredentialProvider.openAi => 'OpenAI',
+      LiveCredentialProvider.gemini => 'Gemini',
+    };
 
     return LiveTranslateShell(
       child: LayoutBuilder(
@@ -2221,7 +2247,7 @@ class _OpenAiCredentialRequiredScreen extends StatelessWidget {
                   const WaveLogo(accent: LiveAccent.amber),
                   const SizedBox(height: AppSpacing.xxl),
                   Text(
-                    'OpenAI setup required',
+                    '$providerLabel setup required',
                     textAlign: TextAlign.center,
                     style: AppTextStyles.display(
                       textTheme,
@@ -2229,13 +2255,13 @@ class _OpenAiCredentialRequiredScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   Text(
-                    notice ?? status.displayLabel,
+                    notice ?? status.displayLabelForProvider(provider),
                     textAlign: TextAlign.center,
                     style: AppTextStyles.body(textTheme).copyWith(fontSize: 18),
                   ),
                   const SizedBox(height: AppSpacing.xl),
                   _PermissionActionButton(
-                    label: 'Open OpenAI setup',
+                    label: 'Open $providerLabel setup',
                     icon: Icons.key_rounded,
                     onPressed: onOpenSetup,
                     isPrimary: true,
@@ -2249,7 +2275,7 @@ class _OpenAiCredentialRequiredScreen extends StatelessWidget {
                   const SizedBox(height: AppSpacing.xl),
                   const PrivacyNote(
                     label:
-                        'Your OpenAI credential is stored only in encrypted local device storage and is never bundled with the app.',
+                        'Your live translation credential is stored only in encrypted local device storage and is never bundled with the app. OpenAI setup is separate for AI chat and summaries.',
                     icon: Icons.lock_outline_rounded,
                   ),
                 ],
@@ -2440,7 +2466,7 @@ class _LiveStateNoticeBanner extends StatelessWidget {
     final isConnecting = state.phase == LiveSessionPhase.connecting;
     final accent = isConnecting ? LiveAccent.teal : LiveAccent.amber;
     final accentColor = AppColors.forAccent(accent);
-    final title = isConnecting ? 'Connecting to OpenAI' : 'Listening paused';
+    final title = isConnecting ? 'Connecting to Gemini' : 'Listening paused';
     final body = isConnecting
         ? 'Preparing live interpretation on this phone. Recording starts after the secure realtime session is ready.'
         : 'Microphone capture, realtime streaming, and translated audio are stopped. Transcript history stays on this device.';
@@ -2599,17 +2625,17 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
 
   String get _title {
     return switch (state.phase) {
-      LiveSessionPhase.reconnecting => 'Reconnecting to OpenAI',
+      LiveSessionPhase.reconnecting => 'Reconnecting to Gemini',
       LiveSessionPhase.offline => 'Live translation paused',
       LiveSessionPhase.error =>
         state.realtimeRecoveryAction ==
                 OpenAiRealtimeRecoveryAction.unsupportedLanguage
             ? 'Language not supported'
             : state.realtimeFailureKind == OpenAiRealtimeFailureKind.rateLimited
-            ? 'OpenAI rate limit reached'
+            ? 'Gemini rate limit reached'
             : state.realtimeFailureKind ==
                   OpenAiRealtimeFailureKind.transientOpenAiError
-            ? 'OpenAI temporarily unavailable'
+            ? 'Gemini temporarily unavailable'
             : 'Live translation stopped',
       _ => 'Live translation needs attention',
     };
@@ -2618,7 +2644,7 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
   String get _fallbackNotice {
     return switch (state.phase) {
       LiveSessionPhase.reconnecting =>
-        'Connection interrupted. Reconnecting to OpenAI shortly.',
+        'Connection interrupted. Reconnecting to Gemini shortly.',
       LiveSessionPhase.offline =>
         'Network connection appears offline. Live translation is paused.',
       LiveSessionPhase.error =>
@@ -2626,11 +2652,11 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
                 OpenAiRealtimeRecoveryAction.unsupportedLanguage
             ? 'This target language is not available for realtime output. Choose another target language.'
             : state.realtimeFailureKind == OpenAiRealtimeFailureKind.rateLimited
-            ? 'OpenAI rate limits persisted after retries. Restart when quota is available.'
+            ? 'Gemini rate limits persisted after retries. Restart when quota is available.'
             : state.realtimeFailureKind ==
                   OpenAiRealtimeFailureKind.transientOpenAiError
-            ? 'OpenAI realtime remained unavailable after retries. Restart when ready.'
-            : 'OpenAI realtime session stopped. Restart the meeting when ready.',
+            ? 'Gemini Live Translate remained unavailable after retries. Restart when ready.'
+            : 'Gemini Live Translate session stopped. Restart the meeting when ready.',
       _ => 'Live translation needs attention.',
     };
   }
@@ -3462,11 +3488,13 @@ class _OpenAiSetupSheet extends StatefulWidget {
   const _OpenAiSetupSheet({
     required this.credentialStore,
     required this.initialStatus,
+    required this.provider,
     required this.onCredentialChanged,
   });
 
   final OpenAiCredentialStore credentialStore;
   final OpenAiCredentialStatus initialStatus;
+  final LiveCredentialProvider provider;
   final Future<void> Function() onCredentialChanged;
 
   @override
@@ -3540,6 +3568,30 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final configuredAt = _status.configuredAt;
+    final providerLabel = switch (widget.provider) {
+      LiveCredentialProvider.openAi => 'OpenAI',
+      LiveCredentialProvider.gemini => 'Gemini',
+    };
+    final heading = switch (widget.provider) {
+      LiveCredentialProvider.openAi => 'OpenAI chat & summary setup',
+      LiveCredentialProvider.gemini => 'Gemini live setup',
+    };
+    final fieldLabel = switch (widget.provider) {
+      LiveCredentialProvider.openAi => 'OpenAI API key',
+      LiveCredentialProvider.gemini => 'Gemini API key',
+    };
+    final modelLabel = switch (widget.provider) {
+      LiveCredentialProvider.openAi =>
+        'AI chat and summaries: ${OpenAiConfiguration.aiChatModel} / ${OpenAiConfiguration.summaryModel}',
+      LiveCredentialProvider.gemini =>
+        'Live translation: ${GeminiConfiguration.liveTranslateModel}',
+    };
+    final note = switch (widget.provider) {
+      LiveCredentialProvider.openAi =>
+        'The app never displays a saved OpenAI credential. It is read back only for direct AI chat, text fallback, and summary requests initiated from this phone.',
+      LiveCredentialProvider.gemini =>
+        'The app never displays a saved Gemini credential. It is read back only for direct Gemini Live Translate sessions initiated from this phone.',
+    };
 
     return _SheetFrame(
       child: Column(
@@ -3551,10 +3603,10 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
             children: [
               const Icon(Icons.key_rounded, color: AppColors.teal),
               const SizedBox(width: AppSpacing.sm),
-              Text('OpenAI setup', style: AppTextStyles.title(textTheme)),
+              Text(heading, style: AppTextStyles.title(textTheme)),
               const Spacer(),
               IconButton(
-                tooltip: 'Close OpenAI setup',
+                tooltip: 'Close $providerLabel setup',
                 onPressed: () => Navigator.of(context).pop(),
                 icon: const Icon(Icons.close_rounded),
               ),
@@ -3562,7 +3614,7 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
           ),
           const SizedBox(height: AppSpacing.xs),
           StatusPill(
-            label: _status.displayLabel,
+            label: _status.displayLabelForProvider(widget.provider),
             accent: _status.isConfigured ? LiveAccent.teal : LiveAccent.amber,
           ),
           if (configuredAt != null) ...[
@@ -3573,11 +3625,7 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
             ),
           ],
           const SizedBox(height: AppSpacing.md),
-          Text(
-            'Realtime: ${OpenAiConfiguration.realtimeModel}  |  Fallback: '
-            '${OpenAiConfiguration.translationFallbackModel}',
-            style: AppTextStyles.compact(textTheme),
-          ),
+          Text(modelLabel, style: AppTextStyles.compact(textTheme)),
           const SizedBox(height: AppSpacing.md),
           TextField(
             controller: _credentialController,
@@ -3587,7 +3635,7 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
             autofillHints: const [AutofillHints.password],
             onChanged: (_) => setState(() => _errorLabel = null),
             decoration: InputDecoration(
-              labelText: 'OpenAI API key',
+              labelText: fieldLabel,
               helperText: 'Stored encrypted on this device only.',
               errorText: _errorLabel,
               border: OutlineInputBorder(
@@ -3620,11 +3668,7 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
             ),
           ],
           const SizedBox(height: AppSpacing.md),
-          const PrivacyNote(
-            label:
-                'The app never displays a saved credential. It is read back only for a direct OpenAI request initiated from this phone.',
-            icon: Icons.lock_outline_rounded,
-          ),
+          PrivacyNote(label: note, icon: Icons.lock_outline_rounded),
         ],
       ),
     );
