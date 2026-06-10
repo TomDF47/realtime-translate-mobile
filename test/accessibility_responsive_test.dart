@@ -55,6 +55,7 @@ void main() {
       );
 
       await tester.ensureVisible(find.text('Start interpreter'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Start interpreter'));
       await tester.pumpAndSettle();
       final activeMeeting = (await repository.loadSnapshot()).meetings.single;
