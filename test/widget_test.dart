@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:realtime_translate_mobile/main.dart';
-import 'package:realtime_translate_mobile/src/language/language_support.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
@@ -217,20 +216,72 @@ void main() {
     );
   });
 
+  testWidgets('Arabic target passes through to Gemini live config directly', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    final textGateway = _FakeTextInterpreterGateway();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+        textInterpreterGateway: textGateway,
+      ),
+    );
+
+    await tester.tap(find.text('Start interpreter'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
+    await tester.pumpAndSettle();
+    final englishSourceOption = find.text('English (US)');
+    await tester.ensureVisible(englishSourceOption);
+    await tester.pumpAndSettle();
+    await tester.tap(englishSourceOption);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
+    await tester.pumpAndSettle();
+    final arabicTargetOption = find.text('Arabic');
+    await tester.ensureVisible(arabicTargetOption);
+    await tester.pumpAndSettle();
+    await tester.tap(arabicTargetOption);
+    await tester.pumpAndSettle();
+
+    expect(find.text('English <-> Arabic'), findsOneWidget);
+    expect(
+      find.textContaining('Arabic uses direct OpenAI text fallback'),
+      findsNothing,
+    );
+    final primaryConfig = realtimeGateway.primaryConfig;
+    expect(primaryConfig.sourceLanguageCode, 'en');
+    expect(primaryConfig.targetLanguageCode, 'ar');
+
+    realtimeGateway.primarySession.addEvent(
+      const OpenAiRealtimeTranscriptCompleted(
+        type: 'session.input_transcript.done',
+        kind: OpenAiRealtimeTranscriptKind.source,
+        languageCode: 'en',
+        transcript: 'We can confirm the plan.',
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    expect(textGateway.requests, isEmpty);
+  });
+
   testWidgets(
-    'fallback-only target keeps realtime output on paired realtime language',
+    'supported Gemini target does not open OpenAI setup when OpenAI is missing',
     (tester) async {
       final repository = _testRepository();
       final realtimeGateway = _FakeRealtimeTranslationGateway();
-      final textGateway = _FakeTextInterpreterGateway()
-        ..results.add(
-          const TextInterpreterTurnResult(
-            detectedLanguageCode: 'en',
-            detectedLanguageLabel: 'English',
-            translatedText: 'Arabic fallback translation.',
-          ),
-        );
-      await _seedCredential(repository);
+      await _seedGeminiCredential(repository);
       await tester.pumpWidget(
         LiveTranslateApp(
           permissionGateway: _FakePermissionGateway.granted(),
@@ -238,57 +289,28 @@ void main() {
           microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
           translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
           realtimeTranslationGateway: realtimeGateway,
-          textInterpreterGateway: textGateway,
         ),
       );
 
       await tester.tap(find.text('Start interpreter'));
       await tester.pumpAndSettle();
-
-      await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
-      await tester.pumpAndSettle();
-      final englishSourceOption = find.text('English (US)');
-      await tester.ensureVisible(englishSourceOption);
-      await tester.pumpAndSettle();
-      await tester.tap(englishSourceOption);
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
-      await tester.pumpAndSettle();
-      final arabicTargetOption = find.text('Arabic');
-      await tester.ensureVisible(arabicTargetOption);
-      await tester.pumpAndSettle();
-      await tester.tap(arabicTargetOption);
-      await tester.pumpAndSettle();
-
-      expect(find.text('English <-> Arabic'), findsOneWidget);
-      expect(
-        find.textContaining('Arabic uses direct OpenAI text fallback'),
-        findsOneWidget,
-      );
-      final primaryConfig = realtimeGateway.primaryConfig;
-      expect(primaryConfig.sourceLanguageCode, 'en');
-      expect(primaryConfig.targetLanguageCode, 'en');
+      expect(find.text('Italian <-> English'), findsOneWidget);
 
       realtimeGateway.primarySession.addEvent(
         const OpenAiRealtimeTranscriptCompleted(
           type: 'session.input_transcript.done',
           kind: OpenAiRealtimeTranscriptKind.source,
           languageCode: 'en',
-          transcript: 'We can confirm the plan.',
+          transcript: 'We should use text fallback.',
         ),
       );
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
 
-      expect(textGateway.requests, hasLength(1));
-      expect(textGateway.requests.single.sourceLanguageCode, 'en');
-      expect(textGateway.requests.single.targetLanguageCode, 'ar');
-      expect(
-        textGateway.requests.single.routeType,
-        TranslationRouteType.directOpenAiFallback,
-      );
-      expect(find.text('Arabic fallback translation.'), findsOneWidget);
+      expect(find.text('OpenAI setup required'), findsNothing);
+      expect(find.text('Gemini setup required'), findsNothing);
+      expect(find.text('Open OpenAI setup'), findsNothing);
+      expect(find.text('Italian <-> English'), findsOneWidget);
     },
   );
 
@@ -552,36 +574,30 @@ void main() {
     expect(find.text('Italian <-> English'), findsOneWidget);
   });
 
-  testWidgets(
-    'active realtime path uses English Italian text fallback direction',
-    (tester) async {
-      final repository = _testRepository();
-      final realtimeGateway = _FakeRealtimeTranslationGateway();
-      final textGateway = _FakeTextInterpreterGateway();
-      textGateway.results.add(
-        const TextInterpreterTurnResult(
-          detectedLanguageCode: 'en',
-          detectedLanguageLabel: 'English',
-          translatedText: 'Possiamo confermare il piano.',
-        ),
-      );
-      await _seedCredential(repository);
-      await tester.pumpWidget(
-        LiveTranslateApp(
-          permissionGateway: _FakePermissionGateway.granted(),
-          meetingRepository: repository,
-          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
-          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
-          realtimeTranslationGateway: realtimeGateway,
-          textInterpreterGateway: textGateway,
-        ),
-      );
+  testWidgets('active Gemini path keeps English Italian turns on live route', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    final textGateway = _FakeTextInterpreterGateway();
+    await _seedCredential(repository);
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+        textInterpreterGateway: textGateway,
+      ),
+    );
 
-      await tester.tap(find.text('Start interpreter'));
-      await tester.pumpAndSettle();
-      expect(realtimeGateway.primaryConfig.targetLanguageCode, 'en');
+    await tester.tap(find.text('Start interpreter'));
+    await tester.pumpAndSettle();
+    expect(realtimeGateway.primaryConfig.targetLanguageCode, 'en');
 
-      realtimeGateway.primarySession.addEvent(
+    realtimeGateway.primarySession
+      ..addEvent(
         const OpenAiRealtimeTranscriptCompleted(
           type: 'session.input_transcript.done',
           kind: OpenAiRealtimeTranscriptKind.source,
@@ -589,55 +605,54 @@ void main() {
           languageCode: 'en',
           transcript: 'We can confirm the plan.',
         ),
+      )
+      ..addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.output_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          itemId: 'source-en-1',
+          transcript: 'Gemini live translation.',
+        ),
       );
-      await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump(const Duration(milliseconds: 250));
 
-      realtimeGateway.primarySession
-        ..addEvent(
-          const OpenAiRealtimeTranscriptCompleted(
-            type: 'session.input_transcript.done',
-            kind: OpenAiRealtimeTranscriptKind.source,
-            itemId: 'source-it-1',
-            languageCode: 'it',
-            transcript: 'Possiamo iniziare.',
-          ),
-        )
-        ..addEvent(
-          const OpenAiRealtimeTranscriptCompleted(
-            type: 'session.output_transcript.done',
-            kind: OpenAiRealtimeTranscriptKind.translation,
-            itemId: 'source-it-1',
-            transcript: 'We can begin.',
-          ),
-        );
-      await tester.pump(const Duration(milliseconds: 400));
-      await tester.pumpAndSettle();
-
-      final entries =
-          (await repository.loadSnapshot()).meetings.single.transcriptEntries;
-      expect(entries, hasLength(2));
-      expect(entries.first.languageCode, 'EN');
-      expect(entries.first.originalText, 'We can confirm the plan.');
-      expect(entries.first.translatedText, 'Possiamo confermare il piano.');
-      expect(entries.last.languageCode, 'IT');
-      expect(entries.last.originalText, 'Possiamo iniziare.');
-      expect(entries.last.translatedText, 'We can begin.');
-      expect(find.text('Italian <-> English'), findsOneWidget);
-      expect(find.text('Possiamo confermare il piano.'), findsOneWidget);
-      expect(find.text('We can begin.'), findsOneWidget);
-
-      expect(textGateway.requests, hasLength(1));
-      final request = textGateway.requests.single;
-      expect(request.sourceLanguageCode, 'en');
-      expect(request.targetLanguageCode, 'it');
-      expect(request.routeType, TranslationRouteType.directOpenAiFallback);
-      expect(request.knownLanguageCodes, ['it', 'en']);
-      expect(
-        textGateway.credentials.single,
-        'placeholder-local-openai-credential',
+    realtimeGateway.primarySession
+      ..addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'source-it-1',
+          languageCode: 'it',
+          transcript: 'Possiamo iniziare.',
+        ),
+      )
+      ..addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.output_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          itemId: 'source-it-1',
+          transcript: 'We can begin.',
+        ),
       );
-    },
-  );
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    final entries =
+        (await repository.loadSnapshot()).meetings.single.transcriptEntries;
+    expect(entries, hasLength(2));
+    expect(entries.first.languageCode, 'EN');
+    expect(entries.first.originalText, 'We can confirm the plan.');
+    expect(entries.first.translatedText, 'Gemini live translation.');
+    expect(entries.last.languageCode, 'IT');
+    expect(entries.last.originalText, 'Possiamo iniziare.');
+    expect(entries.last.translatedText, 'We can begin.');
+    expect(find.text('Italian <-> English'), findsOneWidget);
+    expect(find.text('Gemini live translation.'), findsOneWidget);
+    expect(find.text('We can begin.'), findsOneWidget);
+
+    expect(textGateway.requests, isEmpty);
+    expect(textGateway.credentials, isEmpty);
+  });
 
   testWidgets(
     'live header detects Italian then English without realtime language '
@@ -650,16 +665,6 @@ void main() {
       final repository = _testRepository();
       final realtimeGateway = _FakeRealtimeTranslationGateway();
       final textGateway = _FakeTextInterpreterGateway();
-      // English -> Italian is still a direct OpenAI text fallback turn in the
-      // primary English-output session because English speech is already in
-      // that session's configured output language.
-      textGateway.results.add(
-        const TextInterpreterTurnResult(
-          detectedLanguageCode: 'en',
-          detectedLanguageLabel: 'English',
-          translatedText: 'Grazie, qual e la tempistica?',
-        ),
-      );
       await _seedCredential(repository);
       await tester.pumpWidget(
         LiveTranslateApp(
@@ -724,7 +729,7 @@ void main() {
       expect(entries.first.status, 'final');
       expect(entries.last.languageCode, 'EN');
       expect(entries.last.originalText, 'Thank you, what is the timeline?');
-      expect(entries.last.translatedText, 'Grazie, qual e la tempistica?');
+      expect(entries.last.translatedText, isEmpty);
 
       expect(find.text('Italian <-> English'), findsOneWidget);
       expect(find.text('Ciao, grazie. Allora, buongiorno.'), findsOneWidget);
@@ -734,11 +739,7 @@ void main() {
       );
       expect(find.text('Thank you, what is the timeline?'), findsOneWidget);
 
-      // The English turn used the direct OpenAI text fallback (English ->
-      // Italian) keyed off the locally detected source language.
-      expect(textGateway.requests, hasLength(1));
-      expect(textGateway.requests.single.sourceLanguageCode, 'en');
-      expect(textGateway.requests.single.targetLanguageCode, 'it');
+      expect(textGateway.requests, isEmpty);
     },
   );
 
@@ -758,13 +759,6 @@ void main() {
       final repository = _testRepository();
       final realtimeGateway = _FakeRealtimeTranslationGateway();
       final textGateway = _FakeTextInterpreterGateway();
-      textGateway.results.add(
-        const TextInterpreterTurnResult(
-          detectedLanguageCode: 'en',
-          detectedLanguageLabel: 'English',
-          translatedText: 'Buongiorno a tutti.',
-        ),
-      );
       await _seedCredential(repository);
       await tester.pumpWidget(
         LiveTranslateApp(
@@ -800,6 +794,13 @@ void main() {
             type: 'session.input_transcript.done',
             kind: OpenAiRealtimeTranscriptKind.source,
             transcript: englishParagraph,
+          ),
+        )
+        ..addEvent(
+          const OpenAiRealtimeTranscriptCompleted(
+            type: 'session.output_transcript.done',
+            kind: OpenAiRealtimeTranscriptKind.translation,
+            transcript: 'Gemini live paragraph translation.',
           ),
         );
       await tester.pump(const Duration(milliseconds: 250));
@@ -845,7 +846,10 @@ void main() {
       expect(entries, hasLength(2));
       expect(entries.first.languageCode, 'EN');
       expect(entries.first.originalText, englishParagraph);
-      expect(entries.first.translatedText, 'Buongiorno a tutti.');
+      expect(
+        entries.first.translatedText,
+        'Gemini live paragraph translation.',
+      );
       expect(entries.last.languageCode, 'IT');
       expect(entries.last.originalText, 'Buongiorno, come stai?');
       expect(entries.last.translatedText, 'Good morning, how are you?');
@@ -861,34 +865,20 @@ void main() {
       // Both cards render their original speech; nothing stays pending.
       expect(find.text(englishParagraph), findsOneWidget);
       expect(find.text('Buongiorno, come stai?'), findsOneWidget);
-      expect(find.text('Buongiorno a tutti.'), findsOneWidget);
+      expect(find.text('Gemini live paragraph translation.'), findsOneWidget);
       expect(find.text('Good morning, how are you?'), findsOneWidget);
       expect(find.text('Original speech pending'), findsNothing);
 
-      // The English turn routed through the direct OpenAI text fallback.
-      expect(textGateway.requests, hasLength(1));
-      expect(textGateway.requests.single.sourceLanguageCode, 'en');
-      expect(textGateway.requests.single.targetLanguageCode, 'it');
-      expect(
-        textGateway.requests.single.routeType,
-        TranslationRouteType.directOpenAiFallback,
-      );
+      expect(textGateway.requests, isEmpty);
     },
   );
 
   testWidgets(
-    'live English source delta shows Italian translation without English echo',
+    'live English source delta does not call OpenAI fallback on Gemini target',
     (tester) async {
       final repository = _testRepository();
       final realtimeGateway = _FakeRealtimeTranslationGateway();
       final textGateway = _FakeTextInterpreterGateway();
-      textGateway.results.add(
-        const TextInterpreterTurnResult(
-          detectedLanguageCode: 'en',
-          detectedLanguageLabel: 'English',
-          translatedText: 'Ciao, come stai?',
-        ),
-      );
       await _seedCredential(repository);
       await tester.pumpWidget(
         LiveTranslateApp(
@@ -935,14 +925,17 @@ void main() {
       expect(entries, hasLength(1));
       expect(entries.single.languageCode, 'EN');
       expect(entries.single.originalText, 'Hello, how are you?');
-      expect(entries.single.translatedText, 'Ciao, come stai?');
-      expect(textGateway.requests, hasLength(1));
-      expect(textGateway.requests.single.sourceLanguageCode, 'en');
-      expect(textGateway.requests.single.targetLanguageCode, 'it');
+      expect(
+        entries.single.translatedText,
+        'Hello, how are you? Well, thank you too.',
+      );
+      expect(textGateway.requests, isEmpty);
 
       expect(find.text('Hello, how are you?'), findsOneWidget);
-      expect(find.text('Ciao, come stai?'), findsOneWidget);
-      expect(find.textContaining('Well, thank you too'), findsNothing);
+      expect(
+        find.text('Hello, how are you? Well, thank you too.'),
+        findsOneWidget,
+      );
       expect(find.text('Original speech pending'), findsNothing);
     },
   );
@@ -1373,6 +1366,10 @@ Future<void> _seedCredential(LocalMeetingRepository repository) async {
   await OpenAiCredentialStore(
     repository: repository,
   ).saveUserProvidedCredential('placeholder-local-openai-credential');
+  await _seedGeminiCredential(repository);
+}
+
+Future<void> _seedGeminiCredential(LocalMeetingRepository repository) async {
   await OpenAiCredentialStore(
     repository: repository,
     provider: LiveCredentialProvider.gemini,

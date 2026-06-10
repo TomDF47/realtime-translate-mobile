@@ -83,7 +83,14 @@ class OpenAiRealtimeTranslationConfig {
     this.translationOutputEnabled = true,
     this.readAloudOutputEnabled = true,
     this.sourceTranscriptionEnabled = true,
-  }) : outputAudioRate = outputAudioRate ?? inputAudioRate;
+    this.diagnosticProvider = 'openai',
+    String? diagnosticModel,
+  }) : outputAudioRate = outputAudioRate ?? inputAudioRate,
+       diagnosticModel =
+           diagnosticModel ??
+           (profile == OpenAiRealtimeTranslationProfile.primaryRealtime2
+               ? OpenAiConfiguration.realtimeModel
+               : OpenAiConfiguration.translationFallbackModel);
 
   final String sourceLanguageCode;
   final String targetLanguageCode;
@@ -93,6 +100,8 @@ class OpenAiRealtimeTranslationConfig {
   final String outputVoice;
   final bool translationOutputEnabled;
   final bool readAloudOutputEnabled;
+  final String diagnosticProvider;
+  final String diagnosticModel;
 
   /// Whether to request the source/original transcript on the dedicated
   /// translation endpoint by configuring `audio.input.transcription`.
@@ -115,6 +124,8 @@ class OpenAiRealtimeTranslationConfig {
     bool? translationOutputEnabled,
     bool? readAloudOutputEnabled,
     bool? sourceTranscriptionEnabled,
+    String? diagnosticProvider,
+    String? diagnosticModel,
   }) {
     return OpenAiRealtimeTranslationConfig(
       targetLanguageCode: targetLanguageCode ?? this.targetLanguageCode,
@@ -129,6 +140,9 @@ class OpenAiRealtimeTranslationConfig {
           readAloudOutputEnabled ?? this.readAloudOutputEnabled,
       sourceTranscriptionEnabled:
           sourceTranscriptionEnabled ?? this.sourceTranscriptionEnabled,
+      diagnosticProvider: diagnosticProvider ?? this.diagnosticProvider,
+      diagnosticModel:
+          diagnosticModel ?? (profile == null ? this.diagnosticModel : null),
     );
   }
 

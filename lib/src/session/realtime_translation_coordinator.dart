@@ -209,7 +209,9 @@ class LiveRealtimeTranslationCoordinator {
       return LiveRealtimeStartResult.failed;
     }
     if (credential == null || credential.isEmpty) {
-      sessionController.markCredentialInvalid();
+      sessionController.markCredentialInvalid(
+        provider: credentialStore.provider,
+      );
       return LiveRealtimeStartResult.missingCredential;
     }
 
@@ -262,7 +264,8 @@ class LiveRealtimeTranslationCoordinator {
         'live_realtime.streaming_started',
         fields: {
           'operation': 'realtime.streaming.start',
-          'model': config.profile.model,
+          'resource': config.diagnosticProvider,
+          'model': config.diagnosticModel,
           'realtimeProfile': config.profile.name,
           'targetLanguage': config.targetLanguageCode,
           'result': 'started',
@@ -279,7 +282,10 @@ class LiveRealtimeTranslationCoordinator {
         failure: OpenAiRealtimeFailure.fromSocketError(error),
         retryAttempt: sessionController.state.realtimeRetryAttempt + 1,
       );
-      sessionController.applyRealtimeRecoveryDecision(decision);
+      sessionController.applyRealtimeRecoveryDecision(
+        decision,
+        credentialProvider: credentialStore.provider,
+      );
       if (decision.shouldRetry) {
         _scheduleReconnect(decision);
       }
@@ -831,22 +837,12 @@ class LiveRealtimeTranslationCoordinator {
       return;
     }
 
-    // The single dedicated translation session is configured for ONE output
-    // language (the primary target). When a turn's source language already IS
-    // that output language, the session stays silent for it (the model does
-    // not translate speech that is already in the output language), so the
-    // reverse direction's TEXT must come from the direct OpenAI text path. This
-    // also covers non-realtime output targets (for example Arabic) that always
-    // use the text path. It is independent of whether a live reverse-audio
-    // session is up, so reverse-direction text appears reliably either way.
-    final primaryTarget = _activeConfig?.targetLanguageCode
-        .trim()
-        .toLowerCase();
-    final sourceMatchesPrimaryOutput =
-        primaryTarget != null && turn.sourceLanguageCode == primaryTarget;
+    // Gemini Live Translate supports the current app targets directly. The
+    // direct OpenAI text path is retained only for explicit fallback-only
+    // targets, not for old OpenAI Realtime output-language workarounds.
     final isTextOnlyTarget =
         direction.routePlan.type == TranslationRouteType.directOpenAiFallback;
-    if (!sourceMatchesPrimaryOutput && !isTextOnlyTarget) {
+    if (!isTextOnlyTarget) {
       return;
     }
 
@@ -1143,7 +1139,9 @@ class LiveRealtimeTranslationCoordinator {
       final credential = await textFallbackCredentialStore
           .readCredentialForNetworkUse();
       if (credential == null || credential.isEmpty) {
-        sessionController.markCredentialInvalid();
+        sessionController.markCredentialInvalid(
+          provider: textFallbackCredentialStore.provider,
+        );
         return;
       }
       final result = await textInterpreterGateway.interpretTurn(
@@ -1176,7 +1174,9 @@ class LiveRealtimeTranslationCoordinator {
       _fallbackCompletedEntryIds.add(turn.entry.id);
       onTranscriptCommitted?.call();
     } on TextInterpreterCredentialException {
-      sessionController.markCredentialInvalid();
+      sessionController.markCredentialInvalid(
+        provider: textFallbackCredentialStore.provider,
+      );
     } catch (error) {
       diagnostics.warning(
         'live_realtime.text_fallback_failed',
@@ -1362,7 +1362,10 @@ class LiveRealtimeTranslationCoordinator {
         graceful: false,
         finishTranscript: !shouldScheduleReconnect,
       );
-      sessionController.applyRealtimeRecoveryDecision(decision);
+      sessionController.applyRealtimeRecoveryDecision(
+        decision,
+        credentialProvider: credentialStore.provider,
+      );
       if (shouldScheduleReconnect) {
         _scheduleReconnect(decision);
       }
@@ -1454,7 +1457,8 @@ class LiveRealtimeTranslationCoordinator {
         'live_realtime.reconnect_succeeded',
         fields: {
           'operation': 'realtime.reconnect',
-          'model': config.profile.model,
+          'resource': config.diagnosticProvider,
+          'model': config.diagnosticModel,
           'realtimeProfile': config.profile.name,
           'targetLanguage': config.targetLanguageCode,
           'retryAttempt': decision.retryAttempt,

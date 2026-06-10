@@ -50,6 +50,10 @@ class LiveRealtimeTranscriptCommitter {
     bool forceNewSegment = false,
   }) {
     return _enqueue(() async {
+      final existingItemUpdate = await _commitTranslationForExistingItem(event);
+      if (existingItemUpdate != null) {
+        return existingItemUpdate;
+      }
       if (forceNewSegment && _hasTranscript) {
         _resetSegment();
       }
@@ -84,6 +88,10 @@ class LiveRealtimeTranscriptCommitter {
     bool forceNewSegment = false,
   }) {
     return _enqueue(() async {
+      final existingItemUpdate = await _commitTranslationForExistingItem(event);
+      if (existingItemUpdate != null) {
+        return existingItemUpdate;
+      }
       if (forceNewSegment && _hasTranscript) {
         _resetSegment();
       }
@@ -238,8 +246,8 @@ class LiveRealtimeTranscriptCommitter {
       // route has an explicit manual source, use that as the last resort;
       // auto-detect sessions stay neutral ('auto') until metadata or local
       // detection resolves the source.
-      languageCode: (resolvedSourceLanguage == null ||
-              resolvedSourceLanguage.isEmpty)
+      languageCode:
+          (resolvedSourceLanguage == null || resolvedSourceLanguage.isEmpty)
           ? 'auto'
           : resolvedSourceLanguage.toUpperCase(),
       originalText: _sourceBuffer.toString().trim(),
@@ -273,6 +281,14 @@ class LiveRealtimeTranscriptCommitter {
         nextKind == OpenAiRealtimeTranscriptKind.source &&
         _sourceItemId != null &&
         _sourceItemId != itemId) {
+      return true;
+    }
+
+    if (itemId != null &&
+        nextKind == OpenAiRealtimeTranscriptKind.translation &&
+        _sourceItemId != null &&
+        _sourceItemId != itemId &&
+        _translationItemId != itemId) {
       return true;
     }
 
@@ -489,6 +505,81 @@ class LiveRealtimeTranscriptCommitter {
       OpenAiRealtimeTranscriptKind.translation => _translationItemId == itemId,
     };
   }
+
+  Future<StoredTranscriptEntry?> _commitTranslationForExistingItem(
+    OpenAiRealtimeEvent event,
+  ) async {
+    String? itemId;
+    String? delta;
+    String? completedTranscript;
+    switch (event) {
+      case OpenAiRealtimeTranscriptDelta(
+        kind: OpenAiRealtimeTranscriptKind.translation,
+        itemId: final eventItemId,
+        delta: final eventDelta,
+      ):
+        itemId = eventItemId;
+        delta = eventDelta;
+        completedTranscript = null;
+      case OpenAiRealtimeTranscriptCompleted(
+        kind: OpenAiRealtimeTranscriptKind.translation,
+        itemId: final eventItemId,
+        transcript: final eventTranscript,
+      ):
+        itemId = eventItemId;
+        delta = null;
+        completedTranscript = eventTranscript;
+      default:
+        return null;
+    }
+
+    if (itemId == null || itemId.isEmpty) {
+      return null;
+    }
+
+    final entryId = _newEntryIdForRealtimeItem(target, itemId);
+    if (!_hasTranscript || entryId == _entryId) {
+      return null;
+    }
+
+    final snapshot = await target.repository.loadSnapshot();
+    StoredTranscriptEntry? existing;
+    for (final meeting in snapshot.meetings) {
+      if (meeting.id != target.meetingId) {
+        continue;
+      }
+      for (final entry in meeting.transcriptEntries) {
+        if (entry.id == entryId) {
+          existing = entry;
+          break;
+        }
+      }
+      break;
+    }
+
+    if (existing == null) {
+      return null;
+    }
+
+    final translatedText = completedTranscript?.trim().isNotEmpty == true
+        ? completedTranscript!.trim()
+        : '${existing.translatedText}${delta ?? ''}'.trim();
+    final updated = existing.copyWith(
+      translatedText: translatedText,
+      status:
+          existing.originalText.trim().isNotEmpty &&
+              translatedText.trim().isNotEmpty &&
+              completedTranscript != null
+          ? 'final'
+          : 'partial',
+    );
+    await target.repository.upsertTranscriptEntry(
+      meetingId: target.meetingId,
+      updatedAt: target.now().toUtc(),
+      entry: updated,
+    );
+    return updated;
+  }
 }
 
 const _readableBlockCharacterThreshold = 180;
@@ -536,7 +627,8 @@ String? _legacyDetectLanguageCode(String text) {
   // "Let me come in." does not resolve to a foreign language at score 1.
   final englishScore = scores['en'] ?? 0;
   final hasDistinctiveMarker =
-      bestCode != 'en' && _languageScore(normalized, _distinctiveMarkers(bestCode)) > 0;
+      bestCode != 'en' &&
+      _languageScore(normalized, _distinctiveMarkers(bestCode)) > 0;
   final minimumScore =
       (bestCode != 'en' && englishScore == 0 && hasDistinctiveMarker)
       ? _minimumDistinctiveLanguageScore

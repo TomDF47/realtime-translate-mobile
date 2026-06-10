@@ -51,6 +51,22 @@ OPENAI_API_KEY="<redacted local value>" dart run scripts/live_openai_smoke.dart 
 
 Gemini Live Translate is the default live runtime. Real Gemini live smokes should use an uncommitted local credential source only; do not add a Gemini key to `.env.example`, source, tests, screenshots, or build outputs. The app stores a user-provided Gemini live credential separately from OpenAI credential material in encrypted local device storage. Starting live interpretation without a saved Gemini credential stops at `Gemini setup required` before microphone permission or live resources open.
 
+Gemini invalid-key auth-path smoke, requiring no real secret:
+
+```bash
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+dart run scripts/live_gemini_smoke.dart
+```
+
+Full Gemini setupComplete smoke, only when Tom supplies a real key through the process environment:
+
+```bash
+export PATH=/home/tom/.local/share/flutter/bin:$PATH
+GEMINI_API_KEY="<redacted local value>" dart run scripts/live_gemini_smoke.dart --setup-complete
+```
+
+The invalid-key smoke verifies that the raw WebSocket endpoint/auth path reaches an expected auth failure with a fixed placeholder key and redacted output. It is not a full live setupComplete, microphone, transcript, translated-audio, or installed-app proof.
+
 `--all` includes direct Responses checks, no-microphone realtime session creation for both realtime profiles, a synthetic 200 ms non-speech PCM16 append check for the dedicated translation profile, a synthetic 200 ms non-speech PCM16 append schema check for the primary `gpt-realtime-2` profile, a local generated-Spanish-speech smoke for the dedicated translation profile when `espeak-ng` is installed, and a controlled generated-speech reconnect smoke for the dedicated translation profile. The primary check does not commit the buffer or claim spoken translation from synthetic audio. The generated-speech smokes validate transcript and translated-audio event arrival without printing payloads; the reconnect smoke intentionally closes a live socket after generated-speech chunks, opens a second session, and requires recovered transcript/audio evidence. These smokes do not prove Android physical microphone capture, installed-app transcript persistence, app-coordinator de-duplication, credential-expiry recovery, or audible Android speaker output. Real microphone translation smoke still requires a reliable emulator/device microphone source; if a credential is inserted into app storage for that smoke, clear app data afterward.
 
 Installed APK emulator E2E, only when `/home/tom/.openclaw/secrets/realtime-translate-openai-api-key` is readable and app data can be cleared afterward:

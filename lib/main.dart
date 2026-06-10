@@ -584,14 +584,10 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     );
     final sourceLanguageCode = _selectedSourceLanguage.code;
     final targetLanguageCode = _selectedTargetLanguage.code;
-    final realtimeTargetLanguageCode = _realtimeOutputLanguageCodeForRoute(
-      sourceLanguageCode: sourceLanguageCode,
-      targetLanguageCode: targetLanguageCode,
-    );
     final result = await _realtimeCoordinator.start(
       config: _realtimeConfigForRoute(
         sourceLanguageCode: sourceLanguageCode,
-        targetLanguageCode: realtimeTargetLanguageCode,
+        targetLanguageCode: targetLanguageCode,
       ),
       transcriptCommitTarget: meetingId == null
           ? null
@@ -736,27 +732,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       outputAudioRate: GeminiConfiguration.liveTranslateOutputAudioRate,
       translationOutputEnabled: _translateTextEnabled,
       readAloudOutputEnabled: _readAloudEnabled,
+      diagnosticProvider: 'gemini',
+      diagnosticModel: GeminiConfiguration.liveTranslateModel,
     );
-  }
-
-  String _realtimeOutputLanguageCodeForRoute({
-    required String sourceLanguageCode,
-    required String targetLanguageCode,
-  }) {
-    try {
-      final target = LanguageSupport.languageByCode(targetLanguageCode);
-      if (target.supportsRealtimeTarget) {
-        return target.code;
-      }
-      final source = LanguageSupport.languageByCode(sourceLanguageCode);
-      if (source.supportsRealtimeTarget) {
-        return source.code;
-      }
-    } on ArgumentError {
-      // Let the normal realtime recovery path surface stale language metadata.
-    }
-
-    return targetLanguageCode;
   }
 
   _AppSurface _surfaceForMeeting(StoredMeeting meeting) {
@@ -816,15 +794,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       return null;
     }
 
-    final realtimeOutputLanguage = _realtimeOutputLanguageCodeForRoute(
-      sourceLanguageCode: _selectedSourceLanguage.code,
-      targetLanguageCode: target.code,
-    );
-    final realtimeOutput = LanguageSupport.languageByCode(
-      realtimeOutputLanguage,
-    );
-    return '${target.name} uses direct OpenAI text fallback. Live audio stays '
-        'on ${realtimeOutput.name} when that direction is available.';
+    return '${target.name} uses direct OpenAI text fallback when Gemini Live '
+        'Translate cannot serve that target.';
   }
 
   String _interpreterRouteLabel() {
@@ -1414,10 +1385,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }) async {
     final sourceLanguageCode = _selectedSourceLanguage.code;
     final targetLanguageCode = _selectedTargetLanguage.code;
-    final realtimeTargetLanguageCode = _realtimeOutputLanguageCodeForRoute(
-      sourceLanguageCode: sourceLanguageCode,
-      targetLanguageCode: targetLanguageCode,
-    );
     _realtimeCoordinator.setRuntimeOutputOptions(
       translationOutputEnabled: _translateTextEnabled,
       readAloudOutputEnabled: _readAloudEnabled,
@@ -1425,11 +1392,13 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     await _realtimeCoordinator.start(
       config: OpenAiRealtimeTranslationConfig(
         sourceLanguageCode: sourceLanguageCode,
-        targetLanguageCode: realtimeTargetLanguageCode,
+        targetLanguageCode: targetLanguageCode,
         inputAudioRate: GeminiConfiguration.liveTranslateInputAudioRate,
         outputAudioRate: GeminiConfiguration.liveTranslateOutputAudioRate,
         translationOutputEnabled: _translateTextEnabled,
         readAloudOutputEnabled: _readAloudEnabled,
+        diagnosticProvider: 'gemini',
+        diagnosticModel: GeminiConfiguration.liveTranslateModel,
       ),
       transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
         repository: _meetingRepository,
@@ -1891,11 +1860,18 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     }
 
     if (sessionState.phase == LiveSessionPhase.credentialInvalid) {
-      return _OpenAiCredentialRequiredScreen(
-        status: _geminiCredentialStatus,
+      final provider =
+          sessionState.credentialRecoveryProvider ??
+          LiveCredentialProvider.gemini;
+      return _CredentialRequiredScreen(
+        status: provider == LiveCredentialProvider.openAi
+            ? _openAiCredentialStatus
+            : _geminiCredentialStatus,
         notice: sessionState.notice,
-        provider: LiveCredentialProvider.gemini,
-        onOpenSetup: _showGeminiSetupSheet,
+        provider: provider,
+        onOpenSetup: provider == LiveCredentialProvider.openAi
+            ? _showOpenAiSetupSheet
+            : _showGeminiSetupSheet,
         onBack: _openSetup,
       );
     }
@@ -2212,8 +2188,8 @@ class _MicrophonePermissionScreen extends StatelessWidget {
   }
 }
 
-class _OpenAiCredentialRequiredScreen extends StatelessWidget {
-  const _OpenAiCredentialRequiredScreen({
+class _CredentialRequiredScreen extends StatelessWidget {
+  const _CredentialRequiredScreen({
     required this.status,
     required this.notice,
     required this.provider,
@@ -2233,6 +2209,12 @@ class _OpenAiCredentialRequiredScreen extends StatelessWidget {
     final providerLabel = switch (provider) {
       LiveCredentialProvider.openAi => 'OpenAI',
       LiveCredentialProvider.gemini => 'Gemini',
+    };
+    final privacyNote = switch (provider) {
+      LiveCredentialProvider.openAi =>
+        'Your OpenAI credential is stored only in encrypted local device storage and is used for AI chat, summaries, and approved text fallback.',
+      LiveCredentialProvider.gemini =>
+        'Your Gemini live translation credential is stored only in encrypted local device storage and is never bundled with the app. OpenAI setup is separate for AI chat, summaries, and approved text fallback.',
     };
 
     return LiveTranslateShell(
@@ -2273,9 +2255,8 @@ class _OpenAiCredentialRequiredScreen extends StatelessWidget {
                     onPressed: onBack,
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  const PrivacyNote(
-                    label:
-                        'Your live translation credential is stored only in encrypted local device storage and is never bundled with the app. OpenAI setup is separate for AI chat and summaries.',
+                  PrivacyNote(
+                    label: privacyNote,
                     icon: Icons.lock_outline_rounded,
                   ),
                 ],
@@ -2885,7 +2866,7 @@ class _LanguageOptionsSheet extends StatelessWidget {
           const SizedBox(height: AppSpacing.xs),
           Text(
             isTarget
-                ? 'All app target languages are listed. Realtime-supported targets are marked separately from direct OpenAI fallback targets.'
+                ? 'All app target languages are sent directly to Gemini Live Translate.'
                 : 'Choose the other language in the conversation. The app uses this pair instead of waiting to discover it from audio.',
             style: AppTextStyles.body(textTheme),
           ),
