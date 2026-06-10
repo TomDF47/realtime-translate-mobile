@@ -8,9 +8,9 @@ This document summarizes the realtime translate app requirements as they stand n
 
 Build an Android-first Flutter mobile app, structured to remain iOS-compatible later, for phone-local two-party live interpretation.
 
-The MVP is phone-only except for direct OpenAI API calls. There is no app backend, AWS, Lambda, token broker, cloud identity gate, cloud sync, outbound mail backend, server-side transcript handling, or server-side export handling. User-provided OpenAI credential/session material is stored only in encrypted local device storage and must never be committed, bundled, logged, screenshotted, or placed in mobile config.
+The MVP is phone-only except for direct Gemini API calls for live translation and direct OpenAI API calls for AI chat, summaries, and approved text fallback. There is no app backend, AWS, Lambda, token broker, cloud identity gate, cloud sync, outbound mail backend, server-side transcript handling, or server-side export handling. User-provided Gemini/OpenAI credential/session material is stored only in encrypted local device storage and must never be committed, bundled, logged, screenshotted, or placed in mobile config.
 
-The active live experience is a text-first two-party interpreter. The user selects the two languages in use, the app treats that pair as locked from session start, transcript rows still use OpenAI metadata or deterministic local detection for source labels when available, and the meeting is preserved locally. Fully automatic bidirectional spoken audio must not be claimed in the active UI until validated. Existing realtime audio seams may remain for validation, but normal live human-speech translation should use `gpt-realtime-translate` on `/v1/realtime/translations`; `gpt-realtime-2` remains only an explicit compatibility/experimental voice-agent profile.
+The active live experience is a text-first two-party interpreter. The user selects the two languages in use, the app treats that pair as locked from session start, transcript rows use Gemini metadata or deterministic local detection for source labels when available, and the meeting is preserved locally. Fully automatic bidirectional spoken audio must not be claimed in the active UI until validated. Existing OpenAI realtime audio seams may remain for compatibility validation, but normal live human-speech translation uses Gemini Live Translate preview model `gemini-3.5-live-translate-preview`; `gpt-realtime-translate` and `gpt-realtime-2` remain only explicit compatibility/experimental profiles.
 
 ## User Goals
 
@@ -30,15 +30,15 @@ The active live experience is a text-first two-party interpreter. The user selec
 1. User opens the app and sees the mockup-derived dark navy `Live Translate` start surface.
 2. Primary actions are `Start interpreter`, `Open meeting history`, and phone-local OpenAI setup/status where needed.
 3. Provider sign-in buttons from the original mockup are V2/future only and must not gate the MVP.
-4. Starting without a saved credential shows `OpenAI setup required` before microphone permission, realtime, or capture resources open.
-5. The setup sheet accepts user-provided OpenAI credential/session material, stores it encrypted locally, does not redisplay the saved value, and provides removal/reset.
+4. Starting without a saved live credential shows `Gemini setup required` before microphone permission, realtime, or capture resources open.
+5. The Gemini setup sheet accepts user-provided Gemini credential/session material for live translation, stores it encrypted locally, does not redisplay the saved value, and provides removal/reset. OpenAI chat/summary setup is separately labeled.
 6. After a credential exists, starting a meeting requests Android microphone permission before recording.
 7. Denied, permanently denied, and revoked microphone permission states must be explicit and must not start capture.
 
 ### Live Interpreter Startup
 
 1. After `Start interpreter`, the app moves immediately to a visible live startup state instead of appearing stalled.
-2. Startup must show an explicit loading/connecting indicator such as `Connecting to OpenAI` because initial connection can take about 15 seconds.
+2. Startup must show an explicit loading/connecting indicator such as `Connecting to Gemini` because initial connection can take several seconds.
 3. Microphone capture must not start until the realtime session is ready or the app has reached a safe local state.
 4. Startup errors must keep the user on a useful live/recovery surface with sanitized labels.
 
@@ -129,7 +129,7 @@ The active live experience is a text-first two-party interpreter. The user selec
 ## Realtime Connection, Loading, And Recovery
 
 - Direct OpenAI calls are the only routine product network path.
-- Normal live translation uses `gpt-realtime-translate` on `/v1/realtime/translations`.
+- Normal live translation uses Gemini Live Translate preview model `gemini-3.5-live-translate-preview`.
 - Realtime startup waits for session readiness or a sanitized startup error before capture starts.
 - Connection startup should have a bounded timeout/recovery path and a visible loading state; it must not leave the user staring at a static start screen for the roughly 15 second startup window.
 - Credential expiry/rejection moves to `credentialInvalid` and closes capture/realtime/playback resources.
@@ -139,7 +139,7 @@ The active live experience is a text-first two-party interpreter. The user selec
 
 ## Privacy, Security, And Diagnostics
 
-- No standard OpenAI API keys in source, config, assets, tests, screenshots, build outputs, docs, or logs.
+- No standard Gemini or OpenAI API keys in source, config, assets, tests, screenshots, build outputs, docs, or logs.
 - No transcript, translated text, prompt, summary, recipient list, export payload, microphone audio, audio chunk, or audio-derived payload may be sent to app-owned backend infrastructure.
 - Local meetings, transcripts, summaries, generated exports, preferences, recipient preferences, and credential/session material are encrypted on device.
 - Android `RECORD_AUDIO` (live microphone capture) and `INTERNET` (the direct phone-to-OpenAI network path) are the only declared mobile permissions and must remain minimized/justified. Release builds must declare `INTERNET` in the main manifest, not rely on the debug/profile tooling overlay.
@@ -164,7 +164,7 @@ The active live experience is a text-first two-party interpreter. The user selec
 - Start screen shows phone-local MVP actions and on-device privacy reassurance; no Google/Microsoft sign-in is required for MVP.
 - Starting without a credential shows setup-required before microphone permission or capture.
 - Starting with a credential immediately shows a live connecting/loading state, then listening or sanitized recovery.
-- Initial connect shows `Connecting to OpenAI` or equivalent for the slow startup window.
+- Initial connect shows `Connecting to Gemini` or equivalent for the slow startup window.
 - Active live interpreter begins with visible source/target selectors and the selected pair as `<A> <-> <B>`.
 - Italian speech updates transcript row language labels when metadata or local detection is available and does not append to a previous-language completed block.
 - Every final transcript card includes visible original speech and translation fields, with no blank final original.

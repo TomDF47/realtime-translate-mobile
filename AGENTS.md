@@ -52,11 +52,11 @@ If the spec, README, mockup spec, decision log, and issue scope disagree, stop a
 
 - Mobile app: Flutter, Android-first, structured to remain iOS-compatible later.
 - MVP backend: none.
-- Routine network path: the phone app connects directly to the OpenAI API only.
-- Preferred realtime voice/translation model: `gpt-realtime-translate` on `/v1/realtime/translations` for normal live translation; keep `gpt-realtime-2` only as an explicit compatibility/experimental voice-agent profile.
+- Routine network path: the phone app connects directly to Gemini Live Translate for live speech translation and directly to OpenAI Responses for AI chat, summaries, and approved text fallback. No app backend.
+- Preferred live translation model: Gemini Live Translate preview model `gemini-3.5-live-translate-preview` on the Gemini Live API raw WebSocket contract. Keep OpenAI realtime translation code only as an explicit compatibility/fallback seam.
 - AI chat scope must be explicit: `This meeting` or `All meetings`.
-- Never embed a standard OpenAI API key in mobile code, mobile config, assets, build outputs, screenshots, or tests.
-- User-provided OpenAI credential/session material may be stored only in encrypted local device storage; ask Tom for an API key only at the first real OpenAI network smoke/integration test.
+- Never embed a standard Gemini or OpenAI API key in mobile code, mobile config, assets, build outputs, screenshots, or tests.
+- User-provided Gemini and OpenAI credential/session material may be stored only in encrypted local device storage under provider-specific labels; ask Tom for a real key only at the first provider-specific network smoke/integration test.
 - Do not add AWS API Gateway, Lambda, token broker, app backend, cloud sync, cloud identity gate, server mailer, or server-side transcript handling to the MVP.
 - User meeting transcripts, summaries, recipient lists, sensitive preferences, and credential/session material must stay in encrypted local device storage only for the MVP.
 - Logs, analytics, crashes, screenshots, diagnostics, and tests must redact secrets and exclude audio/transcript/prompt/summary/export payloads.
@@ -66,9 +66,9 @@ If the spec, README, mockup spec, decision log, and issue scope disagree, stop a
 
 Every change must protect these boundaries:
 
-- No standard OpenAI API keys in mobile source, config, assets, build outputs, tests, logs, screenshots, or committed docs.
+- No standard Gemini or OpenAI API keys in mobile source, config, assets, build outputs, tests, logs, screenshots, or committed docs.
 - No transcript, prompt, translated text, summary, microphone audio, audio-derived payload, recipient list, or export payload may be sent to app-owned backend infrastructure.
-- Direct OpenAI API calls are the only routine network path for product behavior.
+- Direct Gemini API calls for live translation and direct OpenAI API calls for AI chat, summaries, and approved text fallback are the only routine network paths for product behavior.
 - Email export must be user initiated and should use device-native mail/share composer semantics where practical; do not add an outbound mail backend.
 - Local meeting history, transcript history, summaries, recipient preferences, sensitive preferences, and credential/session material must be encrypted on device when implementation exists.
 - Mobile permissions must be minimized and justified.

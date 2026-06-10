@@ -11,8 +11,16 @@ class MicrophoneCaptureConfig {
     this.chunkDuration = const Duration(milliseconds: 200),
   });
 
-  const MicrophoneCaptureConfig.openAiRealtime({int sampleRateHz = 24000})
-    : this(sampleRateHz: sampleRateHz);
+  const MicrophoneCaptureConfig.openAiRealtime({
+    int sampleRateHz = 24000,
+    Duration chunkDuration = const Duration(milliseconds: 200),
+  }) : this(sampleRateHz: sampleRateHz, chunkDuration: chunkDuration);
+
+  const MicrophoneCaptureConfig.geminiLiveTranslate()
+    : this(
+        sampleRateHz: 16000,
+        chunkDuration: const Duration(milliseconds: 100),
+      );
 
   final int sampleRateHz;
   final int channelCount;

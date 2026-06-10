@@ -2,9 +2,37 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-10 - Gemini Live Translate Is The Default Live Runtime
+
+Status: Accepted for issue #53
+
+Context:
+
+- Tom requested the active live translation runtime move from OpenAI Realtime Translation to Google's Gemini Live Translate preview model.
+- The official Gemini Live Translate guide (last updated 2026-06-09 UTC) documents model `gemini-3.5-live-translate-preview`, raw WebSocket setup with `generationConfig.translationConfig.targetLanguageCode`, 16 kHz mono PCM16 input sent as `realtimeInput.audio` with `audio/pcm;rate=16000`, 100 ms audio chunks, and `serverContent` input/output transcripts plus inline translated audio.
+- AI chat, meeting summaries, and existing text fallback still use OpenAI Responses with `store: false`; the issue did not request replacing those paths.
+
+Decision:
+
+- Make Gemini Live Translate preview (`gemini-3.5-live-translate-preview`) the default live speech translation runtime.
+- Send the selected app target language, including Arabic, directly to Gemini Live Translate for active live sessions.
+- Do not invoke direct OpenAI text fallback solely as an artifact of the former OpenAI Realtime output-language limits.
+- Store Gemini live credentials separately from OpenAI credentials in encrypted local device storage, and label setup UI/provider errors distinctly.
+- Keep OpenAI realtime translation code available as compatibility/fallback code, but do not fake Gemini by sending a Gemini model string to an OpenAI endpoint.
+- Keep microphone capture provider-specific: Gemini live uses 16 kHz mono PCM16 with 100 ms chunks; OpenAI compatibility paths keep 24 kHz mono PCM16 with 200 ms chunks.
+- Map Gemini `serverContent.inputTranscription`, `serverContent.outputTranscription`, and `modelTurn.parts[].inlineData` into the existing `RealtimeTranslationSession` event types so the coordinator/committer/storage path remains narrow and testable.
+
+Implications:
+
+- The MVP remains phone-only with no app backend, token broker, AWS, server mailer, cloud sync, or server-side transcript handling.
+- Direct Gemini calls are now part of the routine product network path for live translation; direct OpenAI calls remain routine for AI chat, summaries, and approved text fallback.
+- Gemini and OpenAI credentials must never be bundled, committed, logged, or included in JSON setup/audio messages or diagnostics.
+- Missing or rejected Gemini live credentials route to Gemini setup; missing or rejected OpenAI chat/summary/text-fallback credentials route to OpenAI setup.
+- Open issue #6 still needs physical-device proof for live microphone capture and installed-app behavior against the Gemini route.
+
 ## 2026-06-03 - Text-First Live Interpreter Suppresses Default Speaker And Reverse Audio
 
-Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
+Status: Accepted; its OpenAI-output-limit text-fallback trigger is superseded for active Gemini live routing by `2026-06-10 - Gemini Live Translate Is The Default Live Runtime`
 
 Context:
 
@@ -16,8 +44,8 @@ Decision:
 
 - Default the active phone live interpreter to text-first: `_readAloudEnabled` starts false, the main app does not enable the best-effort reverse audio session, and the coordinator skips translated-audio playback queue startup whenever read-aloud is disabled.
 - Keep microphone capture and the primary `/v1/realtime/translations` text/transcript path active; only speaker playback/reverse audio are suppressed.
-- Let stable source deltas (sentence-ending punctuation or long text) trigger the same direct OpenAI fallback used by completed source turns when the detected source language is already the primary realtime output language or the selected target requires direct fallback.
-- Suppress no-item realtime output for a row once the direct text fallback has marked that row authoritative, so an English realtime echo cannot overwrite the Italian fallback translation.
+- Historical OpenAI-route behavior: stable source deltas could trigger direct OpenAI fallback when the detected source language was already the primary realtime output language or the selected target required direct fallback. This is no longer used to compensate for OpenAI Realtime output-language limits on the active Gemini route.
+- Historical OpenAI-route behavior: no-item realtime output was suppressed once the direct text fallback had marked that row authoritative, so an English realtime echo could not overwrite the Italian fallback translation.
 
 Implications:
 
@@ -27,7 +55,7 @@ Implications:
 
 ## 2026-06-02 - Restore Manual Two-Language Pair Selection For Live Interpreter
 
-Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
+Status: Superseded for active Gemini live routing by `2026-06-10 - Gemini Live Translate Is The Default Live Runtime`
 
 Context:
 
@@ -67,9 +95,9 @@ Decision:
 
 Implications:
 
-- English <-> Arabic starts realtime output in English, so Arabic speech can translate to English through realtime while English speech uses direct OpenAI text fallback to Arabic.
+- Historical OpenAI-route implication: English <-> Arabic started realtime output in English, so Arabic speech could translate to English through realtime while English speech used direct OpenAI text fallback to Arabic.
 - This adds no dependency, Android permission, backend route, app-owned network path, credential handling, microphone recording, or logging surface.
-- The installed-app physical microphone/audio proof for fallback-only target pairs remains under #6.
+- Historical OpenAI-route implication: installed-app physical microphone/audio proof for fallback-only target pairs remained under #6.
 
 ## 2026-06-02 - Split Source Cards On Supported-Language Changes Inside Continuous Samsung Streams
 
@@ -106,7 +134,7 @@ Context:
 Decision:
 
 - Ground truth first. Add a debug-only, content-free realtime wire-event recorder (`RealtimeEventDebugRecorder`, gated by `--dart-define=LIVE_TRANSLATE_DEBUG_EVENTS=true`) hooked at the raw socket-message boundary in `OpenAiRealtimeTranslationSession`. It logs only event type, JSON key names, payload lengths, language-code values, and item-id presence (never transcript/translation/audio content) as `LIVE_TX_EVENT` lines captured via `adb logcat`. Use it to confirm the real `/v1/realtime/translations` event shape on a physical device before further tuning committer/correlation logic.
-- Correct the realtime output-language table in `language_support.dart` to the 13 documented output languages (adds Italian, German, Japanese, Chinese, Korean, Portuguese, Russian, Indonesian, Vietnamese, Hindi as realtime targets). Arabic stays a direct-OpenAI fallback target (it is an input language, not one of the 13 outputs). This supersedes the conservative "English/Spanish/French only" realtime table (`2026-05-24 - Conservative Realtime Language Table`) and the `2026-05-31 - Bidirectional Interpreter Uses Explicit Pair Direction With Text Fallback` claim that Italian realtime output is unproven.
+- Historical OpenAI-route decision: correct the realtime output-language table in `language_support.dart` to the 13 documented output languages (adds Italian, German, Japanese, Chinese, Korean, Portuguese, Russian, Indonesian, Vietnamese, Hindi as realtime targets). Arabic stayed a direct-OpenAI fallback target for that OpenAI route because it was an input language, not one of the 13 outputs. This superseded the conservative "English/Spanish/French only" realtime table (`2026-05-24 - Conservative Realtime Language Table`) and the `2026-05-31 - Bidirectional Interpreter Uses Explicit Pair Direction With Text Fallback` claim that Italian realtime output was unproven.
 - Implement the documented two-party pattern as an additive, best-effort reverse session. The primary `/v1/realtime/translations` session (output = first/default language, English) remains the single writer of transcript rows. Once the pair locks, `LiveRealtimeTranslationCoordinator` can open a SECOND dedicated translation session whose output language is the OTHER detected language, with `sourceTranscriptionEnabled: false` so it is audio-only and never writes a duplicate sourceless card. It is opt-in (`enableBidirectionalReverseSession`) and best-effort (a reverse-session failure never disturbs the primary path). The later 2026-06-03 text-first decision keeps this disabled from the main phone UI by default.
 - Reverse-direction TEXT stays owned by the direct OpenAI text path, made principled: the text fallback now fires whenever a completed source turn's language equals the primary session's configured output language (the case where the single dedicated session stays silent because the speech is already in its output language) OR the target is a non-realtime-output language. This makes reverse-direction text appear reliably whether or not the reverse-audio session is up, and is independent of the corrected language table.
 

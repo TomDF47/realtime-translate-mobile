@@ -18,7 +18,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 - Start from a clean app data state.
 - Verify the local setup screen shows `Start interpreter`, `Open meeting history`, `OpenAI setup`, and the on-device privacy note.
-- Tap `Start interpreter` without a saved credential and verify `OpenAI setup required` appears before microphone permission.
+- Tap `Start interpreter` without a saved live credential and verify `Gemini setup required` appears before microphone permission.
 - Save only a placeholder or current test credential through `OpenAI setup`; verify the saved value is not displayed.
 - Start an interpreter session with fake or valid local credential and granted microphone permission.
 - Verify the live screen starts with the selected manual pair such as `Italian <-> English`, source/target language selectors, live status, elapsed timer, transcript area, `Stop Listening`, and `Pause Listening`.
@@ -78,7 +78,7 @@ Use this checklist before publishing APKs after UI, realtime, storage, export, o
 
 ## APK Release Sanity
 
-- Run the repeatable, offline-by-default release smoke with `scripts/android_release_smoke.sh` (or `scripts/android_release_smoke.sh --apk /tmp/<apk>.apk` for an already-built artifact, or `--release` for a release-mode build). This verifies APK metadata and signing before install, cold-boots the emulator resiliently, installs the APK, clears app state, launches it, and asserts startup reaches the offline `OpenAI setup required` bounded state and never remains on `Preparing live session`. The default path reads no OpenAI credential and makes no OpenAI network request; `--verify-invalid-credential-recovery` (live auth-rejection request with a non-secret placeholder) and `--with-live-credential` (real secret) are explicit opt-ins.
+- Run the repeatable, offline-by-default release smoke with `scripts/android_release_smoke.sh` (or `scripts/android_release_smoke.sh --apk /tmp/<apk>.apk` for an already-built artifact, or `--release` for a release-mode build). This verifies APK metadata and signing before install, cold-boots the emulator resiliently, installs the APK, clears app state, launches it, and asserts startup reaches the offline `Gemini setup required` bounded state and never remains on `Preparing live session`. The default path reads no Gemini/OpenAI credential and makes no Gemini/OpenAI network request; `--verify-invalid-credential-recovery` (live auth-rejection request with a non-secret placeholder) and `--with-live-credential` (real secret) are explicit opt-ins.
 - Confirm the printed result block under `/tmp/realtime-translate-mobile-release-smoke/release-smoke-result.md` shows each check as `pass`.
 - If the emulator cannot cold-boot on this host, confirm the smoke fails fast with a captured log tail under the artifact directory rather than hanging, then retry or attach a physical device.
 - For a metadata/signing-only check without an emulator, run `scripts/check_apk_metadata.sh --apk /tmp/<apk>.apk`.

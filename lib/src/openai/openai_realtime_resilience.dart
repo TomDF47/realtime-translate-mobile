@@ -205,15 +205,15 @@ class OpenAiRealtimeReconnectDecision {
       OpenAiRealtimeRecoveryAction.reconnectAfterBackoff => switch (failure
           .kind) {
         OpenAiRealtimeFailureKind.rateLimited =>
-          'OpenAI is rate limiting this live session. Retrying shortly.',
+          'Gemini is rate limiting this live session. Retrying shortly.',
         OpenAiRealtimeFailureKind.transientOpenAiError =>
-          'OpenAI realtime is temporarily unavailable. Retrying shortly.',
+          'Gemini Live Translate is temporarily unavailable. Retrying shortly.',
         OpenAiRealtimeFailureKind.lifecycleInterrupted =>
           'Live translation was interrupted by the app lifecycle. Reconnecting shortly.',
-        _ => 'Connection interrupted. Reconnecting to OpenAI shortly.',
+        _ => 'Connection interrupted. Reconnecting to Gemini shortly.',
       },
       OpenAiRealtimeRecoveryAction.credentialInvalid =>
-        'OpenAI credential expired or was rejected. Update the credential stored on this device.',
+        'Gemini credential expired or was rejected. Update the credential stored on this device.',
       OpenAiRealtimeRecoveryAction.unsupportedLanguage =>
         'The selected language is not available for this realtime route.',
       OpenAiRealtimeRecoveryAction.offline => switch (failure.kind) {
@@ -223,10 +223,11 @@ class OpenAiRealtimeReconnectDecision {
       },
       OpenAiRealtimeRecoveryAction.fatalError => switch (failure.kind) {
         OpenAiRealtimeFailureKind.rateLimited =>
-          'OpenAI rate limits persisted after retries. Restart when quota is available.',
+          'Gemini rate limits persisted after retries. Restart when quota is available.',
         OpenAiRealtimeFailureKind.transientOpenAiError =>
-          'OpenAI realtime remained unavailable after retries. Restart when ready.',
-        _ => 'OpenAI realtime session stopped. Restart the meeting when ready.',
+          'Gemini Live Translate remained unavailable after retries. Restart when ready.',
+        _ =>
+          'Gemini Live Translate session stopped. Restart the meeting when ready.',
       },
     };
   }

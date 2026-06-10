@@ -78,19 +78,30 @@ class OpenAiRealtimeTranslationConfig {
     this.sourceLanguageCode = 'auto',
     this.profile = OpenAiRealtimeTranslationProfile.dedicatedTranslation,
     this.inputAudioRate = 24000,
+    int? outputAudioRate,
     this.outputVoice = 'marin',
     this.translationOutputEnabled = true,
     this.readAloudOutputEnabled = true,
     this.sourceTranscriptionEnabled = true,
-  });
+    this.diagnosticProvider = 'openai',
+    String? diagnosticModel,
+  }) : outputAudioRate = outputAudioRate ?? inputAudioRate,
+       diagnosticModel =
+           diagnosticModel ??
+           (profile == OpenAiRealtimeTranslationProfile.primaryRealtime2
+               ? OpenAiConfiguration.realtimeModel
+               : OpenAiConfiguration.translationFallbackModel);
 
   final String sourceLanguageCode;
   final String targetLanguageCode;
   final OpenAiRealtimeTranslationProfile profile;
   final int inputAudioRate;
+  final int outputAudioRate;
   final String outputVoice;
   final bool translationOutputEnabled;
   final bool readAloudOutputEnabled;
+  final String diagnosticProvider;
+  final String diagnosticModel;
 
   /// Whether to request the source/original transcript on the dedicated
   /// translation endpoint by configuring `audio.input.transcription`.
@@ -108,16 +119,20 @@ class OpenAiRealtimeTranslationConfig {
     String? sourceLanguageCode,
     OpenAiRealtimeTranslationProfile? profile,
     int? inputAudioRate,
+    int? outputAudioRate,
     String? outputVoice,
     bool? translationOutputEnabled,
     bool? readAloudOutputEnabled,
     bool? sourceTranscriptionEnabled,
+    String? diagnosticProvider,
+    String? diagnosticModel,
   }) {
     return OpenAiRealtimeTranslationConfig(
       targetLanguageCode: targetLanguageCode ?? this.targetLanguageCode,
       sourceLanguageCode: sourceLanguageCode ?? this.sourceLanguageCode,
       profile: profile ?? this.profile,
       inputAudioRate: inputAudioRate ?? this.inputAudioRate,
+      outputAudioRate: outputAudioRate ?? this.outputAudioRate,
       outputVoice: outputVoice ?? this.outputVoice,
       translationOutputEnabled:
           translationOutputEnabled ?? this.translationOutputEnabled,
@@ -125,6 +140,9 @@ class OpenAiRealtimeTranslationConfig {
           readAloudOutputEnabled ?? this.readAloudOutputEnabled,
       sourceTranscriptionEnabled:
           sourceTranscriptionEnabled ?? this.sourceTranscriptionEnabled,
+      diagnosticProvider: diagnosticProvider ?? this.diagnosticProvider,
+      diagnosticModel:
+          diagnosticModel ?? (profile == null ? this.diagnosticModel : null),
     );
   }
 
@@ -281,6 +299,298 @@ class OpenAiRealtimeTranslationConfig {
       'Preserve meaning, tone, names, numbers, punctuation, and meeting terms '
           'as closely as possible.',
     ].join(' ');
+  }
+}
+
+class GeminiLiveTranslationGateway implements RealtimeTranslationGateway {
+  GeminiLiveTranslationGateway({
+    Uri? webSocketBaseUri,
+    RealtimeWebSocketFactory? webSocketFactory,
+    this.diagnostics = const PrivacySafeDiagnostics(),
+    this.debugRecorder = const RealtimeEventDebugRecorder(),
+  }) : webSocketBaseUri =
+           webSocketBaseUri ??
+           Uri.parse(GeminiConfiguration.liveTranslateWebSocketBaseUrl),
+       _webSocketFactory =
+           webSocketFactory ??
+           ((uri, headers) {
+             return WebSocket.connect(uri.toString(), headers: headers);
+           });
+
+  final Uri webSocketBaseUri;
+  final PrivacySafeDiagnostics diagnostics;
+  final RealtimeEventDebugRecorder debugRecorder;
+  final RealtimeWebSocketFactory _webSocketFactory;
+
+  Uri webSocketUri({required String apiKey}) {
+    final path = _joinPath(
+      webSocketBaseUri.path,
+      GeminiConfiguration.liveTranslateWebSocketPath,
+    );
+    return webSocketBaseUri.replace(
+      path: path,
+      queryParameters: {'key': apiKey},
+    );
+  }
+
+  @override
+  Future<GeminiLiveTranslationSession> connect({
+    required OpenAiRealtimeTranslationConfig config,
+    required String credential,
+  }) async {
+    final uri = webSocketUri(apiKey: credential);
+    diagnostics.info(
+      'gemini.live_translate_connect_started',
+      fields: {
+        'operation': 'gemini.liveTranslate.connect',
+        'endpoint': uri.host,
+        'model': GeminiConfiguration.liveTranslateModel,
+        'targetLanguage': config.targetLanguageCode,
+      },
+    );
+
+    final socket = await _webSocketFactory(uri, const <String, dynamic>{});
+    final session = GeminiLiveTranslationSession._(
+      socket: socket,
+      config: config,
+      diagnostics: diagnostics,
+      debugRecorder: debugRecorder,
+    );
+    try {
+      session.sendSessionUpdate();
+      await session.waitUntilReady();
+    } catch (error, stackTrace) {
+      _closeGeminiStartupSessionNonBlocking(session);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+    diagnostics.info(
+      'gemini.live_translate_connect_succeeded',
+      fields: {
+        'operation': 'gemini.liveTranslate.connect',
+        'endpoint': uri.host,
+        'model': GeminiConfiguration.liveTranslateModel,
+        'targetLanguage': config.targetLanguageCode,
+        'result': 'success',
+      },
+    );
+    return session;
+  }
+}
+
+class GeminiLiveTranslationSession implements RealtimeTranslationSession {
+  GeminiLiveTranslationSession._({
+    required this._socket,
+    required this.config,
+    required this.diagnostics,
+    this.debugRecorder = const RealtimeEventDebugRecorder(),
+  }) {
+    _subscription = _socket.listen(
+      _handleSocketMessage,
+      onError: _handleSocketError,
+      onDone: _handleSocketDone,
+      cancelOnError: false,
+    );
+  }
+
+  final OpenAiRealtimeTranslationConfig config;
+  final PrivacySafeDiagnostics diagnostics;
+  final RealtimeEventDebugRecorder debugRecorder;
+  final WebSocket _socket;
+  late final StreamSubscription<dynamic> _subscription;
+  final StreamController<OpenAiRealtimeEvent> _events =
+      StreamController<OpenAiRealtimeEvent>();
+  final Completer<void> _ready = Completer<void>();
+  bool _isClosed = false;
+
+  @override
+  Stream<OpenAiRealtimeEvent> get events => _events.stream;
+
+  Future<void> waitUntilReady() => _ready.future;
+
+  @override
+  void sendSessionUpdate() {
+    _send(
+      GeminiLiveTranslationMessages.setup(
+        targetLanguageCode: config.targetLanguageCode,
+      ),
+    );
+  }
+
+  @override
+  void appendPcm16Audio(List<int> pcm16Audio) {
+    _send(GeminiLiveTranslationMessages.audioAppend(pcm16Audio));
+  }
+
+  @override
+  void commitInputAudioBuffer() {}
+
+  @override
+  void createResponse() {}
+
+  @override
+  Future<void> closeGracefully() => closeImmediately();
+
+  @override
+  Future<void> closeImmediately() async {
+    if (_isClosed) {
+      return;
+    }
+
+    _isClosed = true;
+    await _subscription.cancel();
+    await _socket.close();
+    await _closeEventStream();
+  }
+
+  Future<void> _closeEventStream() async {
+    if (_events.isClosed) {
+      return;
+    }
+
+    if (_events.hasListener) {
+      await _events.close();
+      return;
+    }
+
+    unawaited(_events.close());
+  }
+
+  void _send(Map<String, Object?> event) {
+    _socket.add(jsonEncode(event));
+  }
+
+  void _handleSocketMessage(dynamic message) {
+    debugRecorder.recordRawMessage(message);
+    final event = GeminiLiveTranslationEventParser.parseMessage(message);
+    if (event == null || _events.isClosed) {
+      return;
+    }
+
+    _emitEvent(event);
+  }
+
+  void _handleSocketError(Object error) {
+    if (_events.isClosed) {
+      return;
+    }
+
+    diagnostics.warning(
+      'gemini.live_translate_socket_error',
+      fields: {
+        'operation': 'gemini.liveTranslate.receive',
+        'model': GeminiConfiguration.liveTranslateModel,
+        'targetLanguage': config.targetLanguageCode,
+        'errorCode': error.runtimeType.toString(),
+        'result': 'socketError',
+      },
+    );
+    _emitEvent(
+      OpenAiRealtimeError(
+        type: 'socket.error',
+        code: error.runtimeType.toString(),
+        eventId: null,
+        param: null,
+      ),
+    );
+  }
+
+  void _handleSocketDone() {
+    if (_events.isClosed) {
+      return;
+    }
+
+    final closeReason = _socket.closeReason;
+    if (closeReason != null && closeReason.isNotEmpty) {
+      _emitEvent(
+        OpenAiRealtimeError(
+          type: 'socket.closed',
+          code: closeReason,
+          eventId: null,
+          param: null,
+        ),
+      );
+    } else {
+      final closeCode = _socket.closeCode;
+      if (closeCode != null) {
+        _emitEvent(
+          OpenAiRealtimeError(
+            type: 'socket.closed',
+            code: 'socket.close_$closeCode',
+            eventId: null,
+            param: null,
+          ),
+        );
+      }
+    }
+
+    _emitEvent(const OpenAiRealtimeSessionClosed(type: 'socket.closed'));
+    unawaited(_events.close());
+  }
+
+  void _emitEvent(OpenAiRealtimeEvent event) {
+    if (_events.isClosed) {
+      return;
+    }
+
+    if (!_ready.isCompleted) {
+      switch (event) {
+        case OpenAiRealtimeSessionLifecycleEvent(type: 'setupComplete'):
+          _ready.complete();
+        case OpenAiRealtimeTranscriptDelta() || OpenAiRealtimeAudioDelta():
+          _ready.complete();
+        case OpenAiRealtimeError():
+          _ready.completeError(OpenAiRealtimeStartupException.fromError(event));
+        case OpenAiRealtimeSessionClosed():
+          _ready.completeError(
+            const OpenAiRealtimeStartupException('socket.closed'),
+          );
+        default:
+          break;
+      }
+    }
+
+    _events.add(event);
+  }
+}
+
+void _closeGeminiStartupSessionNonBlocking(
+  GeminiLiveTranslationSession session,
+) {
+  unawaited(
+    session
+        .closeImmediately()
+        .timeout(const Duration(milliseconds: 250), onTimeout: () {})
+        .catchError((Object error, StackTrace stackTrace) {}),
+  );
+}
+
+abstract final class GeminiLiveTranslationMessages {
+  static Map<String, Object?> setup({required String targetLanguageCode}) {
+    return {
+      'setup': {
+        'model': 'models/${GeminiConfiguration.liveTranslateModel}',
+        'generationConfig': {
+          'responseModalities': ['AUDIO'],
+          'inputAudioTranscription': <String, Object?>{},
+          'outputAudioTranscription': <String, Object?>{},
+          'translationConfig': {
+            'targetLanguageCode': targetLanguageCode,
+            'echoTargetLanguage': true,
+          },
+        },
+      },
+    };
+  }
+
+  static Map<String, Object?> audioAppend(List<int> pcm16Audio) {
+    return {
+      'realtimeInput': {
+        'audio': {
+          'data': base64Encode(pcm16Audio),
+          'mimeType': GeminiConfiguration.liveTranslateAudioMimeType,
+        },
+      },
+    };
   }
 }
 
@@ -667,6 +977,132 @@ class OpenAiRealtimeSessionClosed extends OpenAiRealtimeEvent {
 
 class OpenAiRealtimeUnknownEvent extends OpenAiRealtimeEvent {
   const OpenAiRealtimeUnknownEvent({required super.type});
+}
+
+abstract final class GeminiLiveTranslationEventParser {
+  static OpenAiRealtimeEvent? parseMessage(dynamic message) {
+    if (message is! String) {
+      return null;
+    }
+
+    final decoded = jsonDecode(message);
+    if (decoded is! Map<String, dynamic>) {
+      return null;
+    }
+
+    return parse(decoded);
+  }
+
+  static OpenAiRealtimeEvent? parse(Map<String, dynamic> event) {
+    if (event.containsKey('setupComplete')) {
+      return const OpenAiRealtimeSessionLifecycleEvent(type: 'setupComplete');
+    }
+
+    final error = event['error'];
+    if (error is Map<String, dynamic>) {
+      final code = error['code'] ?? error['status'] ?? error['message'];
+      return OpenAiRealtimeError(
+        type: 'error',
+        code: code is String ? code : null,
+        eventId: null,
+        param: null,
+      );
+    }
+
+    final content = event['serverContent'];
+    if (content is! Map<String, dynamic>) {
+      return OpenAiRealtimeUnknownEvent(
+        type: event.keys.isEmpty ? 'unknown' : event.keys.first,
+      );
+    }
+
+    final input = content['inputTranscription'];
+    if (input is Map<String, dynamic>) {
+      final text = _optionalText(input);
+      if (text != null) {
+        return OpenAiRealtimeTranscriptDelta(
+          type: 'serverContent.inputTranscription',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          delta: text,
+          languageCode: _optionalLanguageCode(input),
+        );
+      }
+    }
+
+    final output = content['outputTranscription'];
+    if (output is Map<String, dynamic>) {
+      final text = _optionalText(output);
+      if (text != null) {
+        return OpenAiRealtimeTranscriptDelta(
+          type: 'serverContent.outputTranscription',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          delta: text,
+          languageCode: _optionalLanguageCode(output),
+        );
+      }
+    }
+
+    final audio = _firstInlineAudio(content);
+    if (audio != null) {
+      return OpenAiRealtimeAudioDelta(
+        type: 'serverContent.modelTurn.inlineData',
+        base64Audio: audio,
+      );
+    }
+
+    return const OpenAiRealtimeUnknownEvent(type: 'serverContent');
+  }
+
+  static String? _optionalText(Map<String, dynamic> value) {
+    final text = value['text'];
+    if (text is String && text.trim().isNotEmpty) {
+      return text;
+    }
+
+    return null;
+  }
+
+  static String? _optionalLanguageCode(Map<String, dynamic> value) {
+    final language = value['languageCode'] ?? value['language_code'];
+    if (language is String && language.trim().isNotEmpty) {
+      return language.trim().toLowerCase();
+    }
+
+    return null;
+  }
+
+  static String? _firstInlineAudio(Map<String, dynamic> content) {
+    final modelTurn = content['modelTurn'];
+    if (modelTurn is! Map<String, dynamic>) {
+      return null;
+    }
+
+    final parts = modelTurn['parts'];
+    if (parts is! List<Object?>) {
+      return null;
+    }
+
+    for (final part in parts) {
+      if (part is! Map<String, dynamic>) {
+        continue;
+      }
+      final inlineData = part['inlineData'] ?? part['inline_data'];
+      if (inlineData is! Map<String, dynamic>) {
+        continue;
+      }
+      final mimeType = inlineData['mimeType'] ?? inlineData['mime_type'];
+      final data = inlineData['data'];
+      if (data is String &&
+          data.trim().isNotEmpty &&
+          (mimeType == null ||
+              mimeType is String &&
+                  mimeType.toLowerCase().startsWith('audio/'))) {
+        return data;
+      }
+    }
+
+    return null;
+  }
 }
 
 abstract final class OpenAiRealtimeEventParser {

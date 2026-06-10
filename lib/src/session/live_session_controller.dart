@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../diagnostics/privacy_safe_diagnostics.dart';
+import '../openai/openai_credential_store.dart';
 import '../openai/openai_realtime_resilience.dart';
 import 'microphone_permission.dart';
 
@@ -46,6 +47,7 @@ class LiveSessionState {
     required this.realtimeReconnectDelay,
     this.realtimeRecoveryAction,
     this.realtimeFailureKind,
+    this.credentialRecoveryProvider,
     this.notice,
   });
 
@@ -60,6 +62,7 @@ class LiveSessionState {
       realtimeReconnectDelay = Duration.zero,
       realtimeRecoveryAction = null,
       realtimeFailureKind = null,
+      credentialRecoveryProvider = null,
       notice = null;
 
   final LiveSessionPhase phase;
@@ -72,6 +75,7 @@ class LiveSessionState {
   final Duration realtimeReconnectDelay;
   final OpenAiRealtimeRecoveryAction? realtimeRecoveryAction;
   final OpenAiRealtimeFailureKind? realtimeFailureKind;
+  final LiveCredentialProvider? credentialRecoveryProvider;
   final String? notice;
 
   LiveSessionState copyWith({
@@ -87,6 +91,8 @@ class LiveSessionState {
     bool clearRealtimeRecoveryAction = false,
     OpenAiRealtimeFailureKind? realtimeFailureKind,
     bool clearRealtimeFailureKind = false,
+    LiveCredentialProvider? credentialRecoveryProvider,
+    bool clearCredentialRecoveryProvider = false,
     String? notice,
     bool clearNotice = false,
   }) {
@@ -108,6 +114,9 @@ class LiveSessionState {
       realtimeFailureKind: clearRealtimeFailureKind
           ? null
           : realtimeFailureKind ?? this.realtimeFailureKind,
+      credentialRecoveryProvider: clearCredentialRecoveryProvider
+          ? null
+          : credentialRecoveryProvider ?? this.credentialRecoveryProvider,
       notice: clearNotice ? null : notice ?? this.notice,
     );
   }
@@ -138,6 +147,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
         clearRealtimeFailureKind: true,
+        clearCredentialRecoveryProvider: true,
         notice: 'Microphone access is required before live translation starts.',
       ),
     );
@@ -155,6 +165,7 @@ class LiveSessionController extends ChangeNotifier {
           realtimeReconnectDelay: Duration.zero,
           clearRealtimeRecoveryAction: true,
           clearRealtimeFailureKind: true,
+          clearCredentialRecoveryProvider: true,
           notice:
               'No audio is captured before microphone permission is granted.',
         ),
@@ -173,6 +184,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
         clearRealtimeFailureKind: true,
+        clearCredentialRecoveryProvider: true,
         notice: 'Preparing the phone-local live session.',
       ),
     );
@@ -191,6 +203,7 @@ class LiveSessionController extends ChangeNotifier {
 
   void markCredentialInvalid({
     String? notice,
+    LiveCredentialProvider provider = LiveCredentialProvider.gemini,
     OpenAiRealtimeFailureKind failureKind =
         OpenAiRealtimeFailureKind.credentialRejected,
   }) {
@@ -205,9 +218,15 @@ class LiveSessionController extends ChangeNotifier {
         realtimeReconnectDelay: Duration.zero,
         realtimeRecoveryAction: OpenAiRealtimeRecoveryAction.credentialInvalid,
         realtimeFailureKind: failureKind,
+        credentialRecoveryProvider: provider,
         notice:
             notice ??
-            'Add an OpenAI credential stored on this device before live translation starts.',
+            switch (provider) {
+              LiveCredentialProvider.openAi =>
+                'Add an OpenAI credential stored on this device before using AI chat, summaries, or text fallback.',
+              LiveCredentialProvider.gemini =>
+                'Add a Gemini credential stored on this device before live translation starts.',
+            },
       ),
     );
   }
@@ -225,6 +244,7 @@ class LiveSessionController extends ChangeNotifier {
           realtimeReconnectDelay: Duration.zero,
           clearRealtimeRecoveryAction: true,
           clearRealtimeFailureKind: true,
+          clearCredentialRecoveryProvider: true,
           notice:
               'Read-aloud playback is paused; transcript capture stays gated.',
         ),
@@ -248,6 +268,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
         clearRealtimeFailureKind: true,
+        clearCredentialRecoveryProvider: true,
         clearNotice: true,
       ),
     );
@@ -269,6 +290,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
         clearRealtimeFailureKind: true,
+        clearCredentialRecoveryProvider: true,
         notice:
             'Listening is paused. Microphone capture and OpenAI realtime are stopped until you resume.',
       ),
@@ -291,6 +313,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
         clearRealtimeFailureKind: true,
+        clearCredentialRecoveryProvider: true,
         clearNotice: true,
       ),
     );
@@ -308,6 +331,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
         clearRealtimeFailureKind: true,
+        clearCredentialRecoveryProvider: true,
         clearNotice: true,
       ),
     );
@@ -330,6 +354,7 @@ class LiveSessionController extends ChangeNotifier {
               realtimeReconnectDelay: Duration.zero,
               clearRealtimeRecoveryAction: true,
               clearRealtimeFailureKind: true,
+              clearCredentialRecoveryProvider: true,
               notice:
                   'Session paused while the app is not foregrounded. Resume when ready.',
             ),
@@ -364,7 +389,10 @@ class LiveSessionController extends ChangeNotifier {
     _setState(_state.copyWith(audioRoute: route));
   }
 
-  void applyRealtimeRecoveryDecision(OpenAiRealtimeReconnectDecision decision) {
+  void applyRealtimeRecoveryDecision(
+    OpenAiRealtimeReconnectDecision decision, {
+    LiveCredentialProvider credentialProvider = LiveCredentialProvider.gemini,
+  }) {
     _pausedByLifecycle = false;
     switch (decision.action) {
       case OpenAiRealtimeRecoveryAction.reconnectAfterBackoff:
@@ -391,6 +419,7 @@ class LiveSessionController extends ChangeNotifier {
           severity: DiagnosticSeverity.warning,
         );
         markCredentialInvalid(
+          provider: credentialProvider,
           notice: decision.userFacingNotice,
           failureKind: decision.failure.kind,
         );
@@ -467,6 +496,7 @@ class LiveSessionController extends ChangeNotifier {
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
         clearRealtimeFailureKind: true,
+        clearCredentialRecoveryProvider: true,
         clearNotice: true,
       ),
     );

@@ -50,11 +50,10 @@ class TranslationRoutePlan {
 }
 
 abstract final class LanguageSupport {
-  // Verified against the official Realtime Translation guide and cookbook,
-  // which enumerate the 13 supported output languages (Spanish, Portuguese,
-  // French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian,
-  // Vietnamese, Italian, English) and 70+ auto-detected input languages.
-  static const verifiedDate = '2026-06-01';
+  // Verified for the active Gemini Live Translate route. The retained OpenAI
+  // Realtime table is compatibility context only; Gemini supports the current
+  // app language set as live translation targets, including Arabic.
+  static const verifiedDate = '2026-06-10';
   static const realtimeDocsUrl =
       'https://developers.openai.com/api/docs/guides/realtime-translation';
   static const realtimeCookbookUrl =
@@ -179,15 +178,12 @@ abstract final class LanguageSupport {
       supportsRealtimeTarget: true,
       supportsDirectFallback: true,
     ),
-    // Arabic is a supported *input* (auto-detected source) language but is not
-    // one of the 13 Realtime Translation output languages, so it stays a
-    // direct-OpenAI fallback target only.
     TranslationLanguage(
       code: 'ar',
       name: 'Arabic',
       regionLabel: '',
       supportsSource: true,
-      supportsRealtimeTarget: false,
+      supportsRealtimeTarget: true,
       supportsDirectFallback: true,
     ),
   ];
@@ -253,7 +249,7 @@ abstract final class LanguageSupport {
         target: target,
         type: TranslationRouteType.realtime,
         availability: TranslationRouteAvailability.available,
-        userMessage: '${target.name} is available in the realtime target list.',
+        userMessage: '${target.name} is available in Gemini Live Translate.',
       );
     }
 

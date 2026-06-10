@@ -3,11 +3,153 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:realtime_translate_mobile/src/diagnostics/privacy_safe_diagnostics.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_configuration.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 
 void main() {
+  test('builds Gemini live translate setup and audio messages', () {
+    final setup = GeminiLiveTranslationMessages.setup(targetLanguageCode: 'it');
+    final audio = GeminiLiveTranslationMessages.audioAppend([1, 2, 3, 4]);
+    final serializedSetup = jsonEncode(setup);
+    final serializedAudio = jsonEncode(audio);
+
+    expect(
+      serializedSetup,
+      contains('"model":"models/gemini-3.5-live-translate-preview"'),
+    );
+    expect(serializedSetup, contains('"responseModalities":["AUDIO"]'));
+    expect(serializedSetup, contains('"inputAudioTranscription":{}'));
+    expect(serializedSetup, contains('"outputAudioTranscription":{}'));
+    expect(serializedSetup, contains('"targetLanguageCode":"it"'));
+    expect(serializedSetup, contains('"echoTargetLanguage":true'));
+    expect(serializedSetup, isNot(contains('placeholder-local-gemini-key')));
+
+    expect(serializedAudio, contains('"realtimeInput"'));
+    expect(serializedAudio, contains('"mimeType":"audio/pcm;rate=16000"'));
+    expect(serializedAudio, contains('"data":"AQIDBA=="'));
+    expect(serializedAudio, isNot(contains('placeholder-local-gemini-key')));
+  });
+
+  test('parses Gemini serverContent transcripts and translated audio', () {
+    final input = GeminiLiveTranslationEventParser.parse({
+      'serverContent': {
+        'inputTranscription': {'text': 'ciao', 'languageCode': 'it'},
+      },
+    });
+    expect(input, isA<OpenAiRealtimeTranscriptDelta>());
+    final parsedInput = input! as OpenAiRealtimeTranscriptDelta;
+    expect(parsedInput.kind, OpenAiRealtimeTranscriptKind.source);
+    expect(parsedInput.delta, 'ciao');
+    expect(parsedInput.languageCode, 'it');
+
+    final output = GeminiLiveTranslationEventParser.parse({
+      'serverContent': {
+        'outputTranscription': {'text': 'hello', 'languageCode': 'en'},
+      },
+    });
+    expect(output, isA<OpenAiRealtimeTranscriptDelta>());
+    final parsedOutput = output! as OpenAiRealtimeTranscriptDelta;
+    expect(parsedOutput.kind, OpenAiRealtimeTranscriptKind.translation);
+    expect(parsedOutput.delta, 'hello');
+    expect(parsedOutput.languageCode, 'en');
+
+    final audio = GeminiLiveTranslationEventParser.parse({
+      'serverContent': {
+        'modelTurn': {
+          'parts': [
+            {
+              'inlineData': {
+                'mimeType': 'audio/pcm;rate=24000',
+                'data': 'base64-audio',
+              },
+            },
+          ],
+        },
+      },
+    });
+    expect(audio, isA<OpenAiRealtimeAudioDelta>());
+    expect((audio! as OpenAiRealtimeAudioDelta).base64Audio, 'base64-audio');
+  });
+
+  test(
+    'Gemini websocket keeps API key out of JSON messages and diagnostics',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final receivedMessages = <String>[];
+      final serverDone = Completer<void>();
+      final sink = MemoryPrivacySafeDiagnosticsSink();
+      Uri? requestUri;
+      String? authorization;
+
+      unawaited(
+        server.first.then((request) async {
+          requestUri = request.uri;
+          authorization = request.headers.value(
+            HttpHeaders.authorizationHeader,
+          );
+          final socket = await WebSocketTransformer.upgrade(request);
+          await for (final message in socket) {
+            receivedMessages.add(message as String);
+            if (message.contains('"setup"')) {
+              socket.add(jsonEncode({'setupComplete': {}}));
+            }
+            if (message.contains('"realtimeInput"')) {
+              await socket.close();
+              break;
+            }
+          }
+          serverDone.complete();
+        }),
+      );
+
+      final gateway = GeminiLiveTranslationGateway(
+        webSocketBaseUri: Uri.parse('ws://127.0.0.1:${server.port}'),
+        diagnostics: PrivacySafeDiagnostics(sink: sink),
+      );
+      final session = await gateway.connect(
+        config: const OpenAiRealtimeTranslationConfig(
+          targetLanguageCode: 'es',
+          inputAudioRate: GeminiConfiguration.liveTranslateInputAudioRate,
+          outputAudioRate: GeminiConfiguration.liveTranslateOutputAudioRate,
+        ),
+        credential: 'placeholder-local-gemini-key',
+      );
+      await session.events.first.timeout(const Duration(seconds: 3));
+      session.appendPcm16Audio([1, 2, 3, 4]);
+      await serverDone.future.timeout(const Duration(seconds: 3));
+      await session.closeImmediately();
+      await server.close(force: true);
+
+      expect(requestUri?.path, GeminiConfiguration.liveTranslateWebSocketPath);
+      expect(
+        requestUri?.queryParameters['key'],
+        'placeholder-local-gemini-key',
+      );
+      expect(authorization, isNull);
+      expect(receivedMessages, hasLength(2));
+      expect(receivedMessages.first, contains('"targetLanguageCode":"es"'));
+      expect(receivedMessages.last, contains('"audio/pcm;rate=16000"'));
+      expect(
+        receivedMessages.join('\n'),
+        isNot(contains('placeholder-local-gemini-key')),
+      );
+      expect(
+        sink.records
+            .map(
+              (record) => jsonEncode({
+                'event': record.event,
+                'severity': record.severity.name,
+                'fields': record.fields,
+              }),
+            )
+            .join('\n'),
+        isNot(contains('placeholder-local-gemini-key')),
+      );
+    },
+  );
+
   test('builds primary realtime2 websocket session config', () {
     const config = OpenAiRealtimeTranslationConfig(
       targetLanguageCode: 'es',
@@ -93,51 +235,48 @@ void main() {
     expect(config.gracefulCloseEvent(), {'type': 'session.close'});
   });
 
-  test(
-    'dedicated translation session enables source input transcription',
-    () {
-      // Regression for Tom's installed-app retest after PR #49: the original
-      // speech never appeared and every turn collapsed into one block because
-      // the dedicated `/v1/realtime/translations` session never enabled input
-      // transcription, so the endpoint emitted no source
-      // (`session.input_transcript`) events at all. Without source events the
-      // committer never reaches a source-turn boundary, so output transcript
-      // deltas keep appending to a single block.
-      //
-      // Per the official OpenAI Realtime Translation guide and cookbook, the
-      // source/original transcript is only emitted when
-      // `session.audio.input.transcription` is configured. This test fails on
-      // main/a7a2743 (no `input` key) and passes once the config requests the
-      // streaming transcription model.
-      const config = OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es');
+  test('dedicated translation session enables source input transcription', () {
+    // Regression for Tom's installed-app retest after PR #49: the original
+    // speech never appeared and every turn collapsed into one block because
+    // the dedicated `/v1/realtime/translations` session never enabled input
+    // transcription, so the endpoint emitted no source
+    // (`session.input_transcript`) events at all. Without source events the
+    // committer never reaches a source-turn boundary, so output transcript
+    // deltas keep appending to a single block.
+    //
+    // Per the official OpenAI Realtime Translation guide and cookbook, the
+    // source/original transcript is only emitted when
+    // `session.audio.input.transcription` is configured. This test fails on
+    // main/a7a2743 (no `input` key) and passes once the config requests the
+    // streaming transcription model.
+    const config = OpenAiRealtimeTranslationConfig(targetLanguageCode: 'es');
 
-      final sessionUpdate = config.initialSessionUpdate();
-      final session = sessionUpdate['session']! as Map<String, Object?>;
-      final audio = session['audio']! as Map<String, Object?>;
-      final input = audio['input']! as Map<String, Object?>;
-      final transcription = input['transcription']! as Map<String, Object?>;
-      final noiseReduction = input['noise_reduction']! as Map<String, Object?>;
+    final sessionUpdate = config.initialSessionUpdate();
+    final session = sessionUpdate['session']! as Map<String, Object?>;
+    final audio = session['audio']! as Map<String, Object?>;
+    final input = audio['input']! as Map<String, Object?>;
+    final transcription = input['transcription']! as Map<String, Object?>;
+    final noiseReduction = input['noise_reduction']! as Map<String, Object?>;
 
-      expect(
-        transcription['model'],
-        OpenAiConfiguration.translationTranscriptionModel,
-        reason:
-            'input transcription must be configured so the endpoint emits '
-            'session.input_transcript source events',
-      );
-      expect(transcription['model'], 'gpt-realtime-whisper');
-      expect(
-        noiseReduction['type'],
-        OpenAiConfiguration.realtimeInputNoiseReduction,
-      );
-      // The translation endpoint rejects custom prompting and voice selection,
-      // and source language is detected server-side, so we still send no
-      // model, instructions, or source language.
-      final serialized = jsonEncode(sessionUpdate);
-      expect(serialized, isNot(contains('instructions')));
-      expect(serialized, isNot(contains('"language":"auto"')));
-    },
-  );
+    expect(
+      transcription['model'],
+      OpenAiConfiguration.translationTranscriptionModel,
+      reason:
+          'input transcription must be configured so the endpoint emits '
+          'session.input_transcript source events',
+    );
+    expect(transcription['model'], 'gpt-realtime-whisper');
+    expect(
+      noiseReduction['type'],
+      OpenAiConfiguration.realtimeInputNoiseReduction,
+    );
+    // The translation endpoint rejects custom prompting and voice selection,
+    // and source language is detected server-side, so we still send no
+    // model, instructions, or source language.
+    final serialized = jsonEncode(sessionUpdate);
+    expect(serialized, isNot(contains('instructions')));
+    expect(serialized, isNot(contains('"language":"auto"')));
+  });
 
   test('reverse-direction session omits source input transcription', () {
     // The reverse (B-to-A) audio session must NOT request input transcription:

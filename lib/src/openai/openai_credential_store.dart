@@ -3,6 +3,8 @@ import '../storage/local_meeting_repository.dart';
 
 enum OpenAiCredentialAvailability { missing, configured }
 
+enum LiveCredentialProvider { openAi, gemini }
+
 class OpenAiCredentialStatus {
   const OpenAiCredentialStatus({
     required this.availability,
@@ -19,31 +21,73 @@ class OpenAiCredentialStatus {
   bool get isConfigured =>
       availability == OpenAiCredentialAvailability.configured;
 
-  String get displayLabel {
+  String displayLabelForProvider(LiveCredentialProvider provider) {
+    final providerLabel = switch (provider) {
+      LiveCredentialProvider.openAi => 'OpenAI',
+      LiveCredentialProvider.gemini => 'Gemini',
+    };
     return switch (availability) {
       OpenAiCredentialAvailability.configured =>
-        'OpenAI credential stored on this device',
-      OpenAiCredentialAvailability.missing => 'OpenAI setup required',
+        '$providerLabel credential stored on this device',
+      OpenAiCredentialAvailability.missing => '$providerLabel setup required',
     };
   }
+
+  String get displayLabel =>
+      displayLabelForProvider(LiveCredentialProvider.openAi);
 }
 
 class OpenAiCredentialStore {
   OpenAiCredentialStore({
     required this.repository,
     this.diagnostics = const PrivacySafeDiagnostics(),
+    this.provider = LiveCredentialProvider.openAi,
   });
+
+  OpenAiCredentialStore.gemini({
+    required LocalMeetingRepository repository,
+    PrivacySafeDiagnostics diagnostics = const PrivacySafeDiagnostics(),
+  }) : this(
+         repository: repository,
+         diagnostics: diagnostics,
+         provider: LiveCredentialProvider.gemini,
+       );
 
   static const apiKeyStorageKey = 'openai_user_provided_api_key';
   static const configuredAtStorageKey =
       'openai_user_provided_api_key_configured_at';
+  static const geminiApiKeyStorageKey = 'gemini_user_provided_api_key';
+  static const geminiConfiguredAtStorageKey =
+      'gemini_user_provided_api_key_configured_at';
 
   final LocalMeetingRepository repository;
   final PrivacySafeDiagnostics diagnostics;
+  final LiveCredentialProvider provider;
+
+  String get _apiKeyStorageKey {
+    return switch (provider) {
+      LiveCredentialProvider.openAi => apiKeyStorageKey,
+      LiveCredentialProvider.gemini => geminiApiKeyStorageKey,
+    };
+  }
+
+  String get _configuredAtStorageKey {
+    return switch (provider) {
+      LiveCredentialProvider.openAi => configuredAtStorageKey,
+      LiveCredentialProvider.gemini => geminiConfiguredAtStorageKey,
+    };
+  }
+
+  String get _diagnosticPrefix {
+    return switch (provider) {
+      LiveCredentialProvider.openAi => 'openai',
+      LiveCredentialProvider.gemini => 'gemini',
+    };
+  }
 
   Future<OpenAiCredentialStatus> loadStatus() async {
     final material = await repository.loadCredentialSessionMaterial();
-    final credential = material[apiKeyStorageKey]?.trim();
+    final credential = material[_apiKeyStorageKey]?.trim();
     if (credential == null || credential.isEmpty) {
       _recordStatus(const OpenAiCredentialStatus.missing());
       return const OpenAiCredentialStatus.missing();
@@ -51,7 +95,7 @@ class OpenAiCredentialStore {
 
     final status = OpenAiCredentialStatus(
       availability: OpenAiCredentialAvailability.configured,
-      configuredAt: DateTime.tryParse(material[configuredAtStorageKey] ?? ''),
+      configuredAt: DateTime.tryParse(material[_configuredAtStorageKey] ?? ''),
     );
     _recordStatus(status);
     return status;
@@ -72,15 +116,15 @@ class OpenAiCredentialStore {
 
     final savedAt = configuredAt ?? DateTime.now().toUtc();
     await repository.saveCredentialSessionMaterial(
-      key: apiKeyStorageKey,
+      key: _apiKeyStorageKey,
       value: trimmed,
     );
     await repository.saveCredentialSessionMaterial(
-      key: configuredAtStorageKey,
+      key: _configuredAtStorageKey,
       value: savedAt.toIso8601String(),
     );
     diagnostics.info(
-      'openai.credential_saved',
+      '$_diagnosticPrefix.credential_saved',
       fields: {
         'credentialStatus': OpenAiCredentialAvailability.configured.name,
         'storageArea': 'credentialSessionMaterial',
@@ -91,10 +135,10 @@ class OpenAiCredentialStore {
 
   Future<String?> readCredentialForNetworkUse() async {
     final material = await repository.loadCredentialSessionMaterial();
-    final credential = material[apiKeyStorageKey]?.trim();
+    final credential = material[_apiKeyStorageKey]?.trim();
     if (credential == null || credential.isEmpty) {
       diagnostics.info(
-        'openai.credential_read',
+        '$_diagnosticPrefix.credential_read',
         fields: {
           'credentialStatus': OpenAiCredentialAvailability.missing.name,
           'operation': 'networkCredentialRead',
@@ -105,7 +149,7 @@ class OpenAiCredentialStore {
     }
 
     diagnostics.info(
-      'openai.credential_read',
+      '$_diagnosticPrefix.credential_read',
       fields: {
         'credentialStatus': OpenAiCredentialAvailability.configured.name,
         'operation': 'networkCredentialRead',
@@ -117,11 +161,11 @@ class OpenAiCredentialStore {
 
   Future<void> clearCredential() async {
     await repository.deleteCredentialSessionMaterialKeys({
-      apiKeyStorageKey,
-      configuredAtStorageKey,
+      _apiKeyStorageKey,
+      _configuredAtStorageKey,
     });
     diagnostics.info(
-      'openai.credential_removed',
+      '$_diagnosticPrefix.credential_removed',
       fields: {
         'credentialStatus': OpenAiCredentialAvailability.missing.name,
         'storageArea': 'credentialSessionMaterial',
@@ -132,7 +176,7 @@ class OpenAiCredentialStore {
 
   void _recordStatus(OpenAiCredentialStatus status) {
     diagnostics.info(
-      'openai.credential_status',
+      '$_diagnosticPrefix.credential_status',
       fields: {
         'credentialStatus': status.availability.name,
         'configured': status.isConfigured,
