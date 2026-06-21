@@ -1504,6 +1504,67 @@ void main() {
   );
 
   test(
+    'batched transcription reconnect keeps using transcription sessions',
+    () async {
+      final transcriptionGateway = _FakeAudioTranscriptionGateway();
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+        transcriptionGateway: transcriptionGateway,
+      );
+      final startedAt = DateTime.utc(2026, 6, 7, 10, 30);
+      await harness.repository.upsertMeeting(
+        StoredMeeting(
+          id: 'meeting-1',
+          title: 'Batched reconnect',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          sourceLanguageLabel: 'English (US)',
+          targetLanguageLabel: 'Italian (IT)',
+          transcriptEntries: const [],
+          summaryMetadata: const StoredSummaryMetadata.empty(),
+        ),
+      );
+
+      await harness.coordinator.start(
+        config: const OpenAiRealtimeTranslationConfig(
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+        ),
+        transcriptCommitTarget: LiveRealtimeTranscriptCommitTarget(
+          repository: harness.repository,
+          meetingId: 'meeting-1',
+          sourceLanguageCode: 'en',
+          targetLanguageCode: 'it',
+          now: () => startedAt,
+        ),
+      );
+      transcriptionGateway.session.addEvent(
+        const OpenAiRealtimeTranscriptionSessionClosed(type: 'socket.closed'),
+      );
+      await _drainAsync();
+
+      expect(harness.controller.state.phase, LiveSessionPhase.listening);
+      expect(transcriptionGateway.connectCount, 2);
+      expect(harness.realtimeGateway.connectCount, 0);
+      expect(harness.captureGateway.startCount, 2);
+      expect(
+        harness.captureGateway.lastConfig,
+        isA<MicrophoneCaptureConfig>()
+            .having(
+              (value) => value.androidAudioSource,
+              'androidAudioSource',
+              AndroidAudioSource.room,
+            )
+            .having(
+              (value) => value.androidInputEffectsEnabled,
+              'androidInputEffectsEnabled',
+              isFalse,
+            ),
+      );
+    },
+  );
+
+  test(
     'live English paragraph then Italian turn splits blocks without item ids '
     'or language metadata',
     () async {

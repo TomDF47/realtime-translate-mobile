@@ -2241,15 +2241,29 @@ class LiveRealtimeTranslationCoordinator {
     _clearPendingReconnectDelay();
     final generation = ++_reconnectGeneration;
     final transcriptCommitTarget = _activeTranscriptCommitTarget;
-    unawaited(
-      _reconnectAfterBackoff(
-        generation: generation,
-        decision: decision,
-        config: config,
-        transcriptCommitTarget: transcriptCommitTarget,
-        keepPaused: keepPaused,
-      ),
-    );
+    final activeTranscriptionGateway = transcriptionGateway;
+    if (activeTranscriptionGateway != null) {
+      unawaited(
+        _reconnectBatchedTranscriptionAfterBackoff(
+          generation: generation,
+          decision: decision,
+          config: config,
+          transcriptCommitTarget: transcriptCommitTarget,
+          keepPaused: keepPaused,
+          transcriptionGateway: activeTranscriptionGateway,
+        ),
+      );
+    } else {
+      unawaited(
+        _reconnectAfterBackoff(
+          generation: generation,
+          decision: decision,
+          config: config,
+          transcriptCommitTarget: transcriptCommitTarget,
+          keepPaused: keepPaused,
+        ),
+      );
+    }
   }
 
   bool _isCurrentStart(int generation) {
@@ -2339,6 +2353,80 @@ class LiveRealtimeTranslationCoordinator {
         return;
       }
       await realtimeSession?.closeImmediately();
+      await _handleRealtimeFailure(
+        OpenAiRealtimeFailure.fromSocketError(error),
+        allowReconnect: true,
+      );
+    }
+  }
+
+  Future<void> _reconnectBatchedTranscriptionAfterBackoff({
+    required int generation,
+    required OpenAiRealtimeReconnectDecision decision,
+    required OpenAiRealtimeTranslationConfig config,
+    required LiveRealtimeTranscriptCommitTarget? transcriptCommitTarget,
+    required bool keepPaused,
+    required AudioTranscriptionGateway transcriptionGateway,
+  }) async {
+    await _waitForReconnectDelay(decision.delay);
+    if (_isDisposed || generation != _reconnectGeneration) {
+      return;
+    }
+
+    AudioTranscriptionSession? transcriptionSession;
+    try {
+      final credential = await credentialStore.readCredentialForNetworkUse();
+      if (credential == null || credential.isEmpty) {
+        await _handleRealtimeFailure(
+          const OpenAiRealtimeFailure(
+            kind: OpenAiRealtimeFailureKind.credentialRejected,
+            diagnosticCode: 'credential_missing',
+          ),
+          allowReconnect: false,
+        );
+        return;
+      }
+
+      transcriptionSession = await _connectTranscriptionWithTimeout(
+        config: OpenAiRealtimeTranscriptionConfig(
+          inputAudioRate: config.inputAudioRate,
+        ),
+        credential: credential,
+        gateway: transcriptionGateway,
+      );
+      if (_isDisposed || generation != _reconnectGeneration) {
+        await transcriptionSession.closeImmediately();
+        return;
+      }
+
+      _bindTranscriptionSession(transcriptionSession);
+      transcriptionSession = null;
+
+      final shouldStayPaused =
+          keepPaused ||
+          (sessionController.state.phase == LiveSessionPhase.listeningPaused &&
+              !sessionController.state.isMicrophoneCaptureOpen);
+      if (shouldStayPaused) {
+        sessionController.markRealtimePreparedPaused(playbackQueueOpen: false);
+      } else {
+        await _startRoomTranscriptionMicrophoneCapture(config);
+        sessionController.markRealtimeRecovered(playbackQueueOpen: false);
+      }
+
+      diagnostics.info(
+        'live_realtime.batched_transcription_reconnect_succeeded',
+        fields: {
+          'operation': 'realtimeTranscription.reconnect',
+          'model': OpenAiConfiguration.translationTranscriptionModel,
+          'retryAttempt': decision.retryAttempt,
+          'result': 'success',
+        },
+      );
+    } catch (error) {
+      if (_isDisposed || generation != _reconnectGeneration) {
+        return;
+      }
+      await transcriptionSession?.closeImmediately();
       await _handleRealtimeFailure(
         OpenAiRealtimeFailure.fromSocketError(error),
         allowReconnect: true,
