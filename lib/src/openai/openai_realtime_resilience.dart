@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'openai_realtime_transcription.dart';
 import 'openai_realtime_translation.dart';
 
 enum OpenAiRealtimeFailureKind {
@@ -45,6 +46,9 @@ class OpenAiRealtimeFailure {
 
   factory OpenAiRealtimeFailure.fromSocketError(Object error) {
     if (error is OpenAiRealtimeStartupException) {
+      return OpenAiRealtimeFailure.classifyCode(error.code);
+    }
+    if (error is OpenAiRealtimeTranscriptionStartupException) {
       return OpenAiRealtimeFailure.classifyCode(error.code);
     }
 
@@ -103,6 +107,10 @@ class OpenAiRealtimeFailure {
       'forbidden',
       'invalid_client_secret',
       'credential_rejected',
+      'insufficient_quota',
+      'payment_required',
+      'billing',
+      'quota_exceeded',
       '401',
       '403',
     ])) {

@@ -440,7 +440,7 @@ abstract final class OpenAiRealtimeTranscriptionEventParser {
     if (type == 'error') {
       final error = event['error'];
       final code = error is Map<String, dynamic>
-          ? error['code']
+          ? error['code'] ?? error['type']
           : event['code'];
       final eventId = error is Map<String, dynamic>
           ? error['event_id']

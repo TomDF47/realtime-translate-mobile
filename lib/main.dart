@@ -3691,8 +3691,14 @@ class _OpenAiSetupSheetState extends State<_OpenAiSetupSheet> {
           ],
           const SizedBox(height: AppSpacing.md),
           Text(
-            'Realtime: ${OpenAiConfiguration.realtimeModel}  |  Fallback: '
-            '${OpenAiConfiguration.translationFallbackModel}',
+            'Active live intake: '
+            '${OpenAiConfiguration.realtimeTranscriptionModel}',
+            style: AppTextStyles.compact(textTheme),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Translations run directly from this phone through OpenAI '
+            'Responses.',
             style: AppTextStyles.compact(textTheme),
           ),
           const SizedBox(height: AppSpacing.md),

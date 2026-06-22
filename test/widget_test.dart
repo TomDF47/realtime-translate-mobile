@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_translate_mobile/main.dart';
 import 'package:realtime_translate_mobile/src/language/language_support.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_configuration.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
@@ -94,6 +95,29 @@ void main() {
         repository: repository,
       ).readCredentialForNetworkUse(),
       isNull,
+    );
+  });
+
+  testWidgets('OpenAI setup describes the active transcription path', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    await tester.pumpWidget(LiveTranslateApp(meetingRepository: repository));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'OpenAI setup'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Active live intake: ${OpenAiConfiguration.realtimeTranscriptionModel}',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining(OpenAiConfiguration.realtimeModel), findsNothing);
+    expect(
+      find.textContaining(OpenAiConfiguration.translationFallbackModel),
+      findsNothing,
     );
   });
 

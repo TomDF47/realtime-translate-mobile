@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_transcription.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 
 void main() {
@@ -66,6 +67,25 @@ void main() {
 
     expect(failure.kind, OpenAiRealtimeFailureKind.credentialRejected);
     expect(failure.diagnosticCode, 'invalid_api_key');
+  });
+
+  test('classifies transcription startup exception code directly', () {
+    final authFailure = OpenAiRealtimeFailure.fromSocketError(
+      const OpenAiRealtimeTranscriptionStartupException('invalid_api_key'),
+    );
+    final quotaFailure = OpenAiRealtimeFailure.fromSocketError(
+      const OpenAiRealtimeTranscriptionStartupException('insufficient_quota'),
+    );
+    final modelFailure = OpenAiRealtimeFailure.fromSocketError(
+      const OpenAiRealtimeTranscriptionStartupException('model_not_found'),
+    );
+
+    expect(authFailure.kind, OpenAiRealtimeFailureKind.credentialRejected);
+    expect(authFailure.diagnosticCode, 'invalid_api_key');
+    expect(quotaFailure.kind, OpenAiRealtimeFailureKind.credentialRejected);
+    expect(quotaFailure.diagnosticCode, 'insufficient_quota');
+    expect(modelFailure.kind, OpenAiRealtimeFailureKind.fatal);
+    expect(modelFailure.diagnosticCode, 'model_not_found');
   });
 
   test('plans bounded exponential backoff with deterministic jitter', () {

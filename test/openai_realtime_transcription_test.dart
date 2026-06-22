@@ -63,4 +63,21 @@ void main() {
     expect(completed.transcript, 'Hello from the table');
     expect(completed.languageCode, 'en');
   });
+
+  test('parses nested error type when code is omitted', () {
+    final event = OpenAiRealtimeTranscriptionEventParser.parse({
+      'type': 'error',
+      'error': {
+        'type': 'authentication_error',
+        'event_id': 'event-1',
+        'param': 'session',
+      },
+    });
+
+    expect(event, isA<OpenAiRealtimeTranscriptionError>());
+    final error = event! as OpenAiRealtimeTranscriptionError;
+    expect(error.code, 'authentication_error');
+    expect(error.eventId, 'event-1');
+    expect(error.param, 'session');
+  });
 }
