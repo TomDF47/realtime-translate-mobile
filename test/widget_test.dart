@@ -160,6 +160,9 @@ void main() {
       expect(find.text('Connecting to OpenAI'), findsOneWidget);
       expect(find.text('Italian <-> English'), findsOneWidget);
       expect(find.text('Preparing live session'), findsNothing);
+
+      transcriptionGateway.completeConnect();
+      await tester.pump(const Duration(milliseconds: 50));
     },
   );
 
@@ -1829,6 +1832,7 @@ class _ThrowingAudioTranscriptionGateway implements AudioTranscriptionGateway {
 
 class _BlockingAudioTranscriptionGateway implements AudioTranscriptionGateway {
   final _connectCompleter = Completer<AudioTranscriptionSession>();
+  final session = _FakeAudioTranscriptionSession();
   bool connectStarted = false;
 
   @override
@@ -1839,6 +1843,37 @@ class _BlockingAudioTranscriptionGateway implements AudioTranscriptionGateway {
     connectStarted = true;
     return _connectCompleter.future;
   }
+
+  void completeConnect() {
+    if (!_connectCompleter.isCompleted) {
+      _connectCompleter.complete(session);
+    }
+  }
+}
+
+class _FakeAudioTranscriptionSession implements AudioTranscriptionSession {
+  final _events = StreamController<OpenAiRealtimeTranscriptionEvent>.broadcast(
+    sync: true,
+  );
+  int closeImmediatelyCount = 0;
+
+  @override
+  Stream<OpenAiRealtimeTranscriptionEvent> get events => _events.stream;
+
+  @override
+  void appendPcm16Audio(List<int> pcm16Audio) {}
+
+  @override
+  void commitInputAudioBuffer() {}
+
+  @override
+  Future<void> closeImmediately() async {
+    closeImmediatelyCount += 1;
+    unawaited(_events.close());
+  }
+
+  @override
+  void sendSessionUpdate() {}
 }
 
 class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {

@@ -912,9 +912,6 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
   }
 
   String _interpreterRouteLabel() {
-    if (_sessionController.state.phase == LiveSessionPhase.connecting) {
-      return 'Preparing live interpretation on this phone...';
-    }
     final manualLabel = _selectedInterpreterPairLabel();
     final activeMeeting = _activeMeeting;
     final storedLabel = _interpreterLabelForTranscriptEntries(
