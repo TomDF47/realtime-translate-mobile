@@ -303,7 +303,7 @@ void main() {
     );
     expect(
       controller.state.notice,
-      'OpenAI credential expired or was rejected. Update the credential stored on this device.',
+      'OpenAI credential or project access was rejected. Update the credential stored on this device.',
     );
     expect(controller.state.isMicrophoneCaptureOpen, isFalse);
     expect(controller.state.isRealtimeSessionOpen, isFalse);

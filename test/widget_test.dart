@@ -9,6 +9,7 @@ import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_configuration.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_transcription.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_text_interpreter.dart';
 import 'package:realtime_translate_mobile/src/mock/mock_live_translate_data.dart';
@@ -59,6 +60,7 @@ void main() {
       find.text('OpenAI setup required'),
     );
 
+    expect(find.text('Preparing live session'), findsNothing);
     expect(find.textContaining('OpenAI setup'), findsWidgets);
 
     final openSetupAction = find.text('Open OpenAI setup').evaluate().isNotEmpty
@@ -97,6 +99,69 @@ void main() {
       isNull,
     );
   });
+
+  testWidgets(
+    'transcription model access failure returns to OpenAI setup not stopped banner',
+    (tester) async {
+      final repository = _testRepository();
+      await _seedCredential(repository);
+      await tester.pumpWidget(
+        LiveTranslateApp(
+          permissionGateway: _FakePermissionGateway.granted(),
+          meetingRepository: repository,
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+          realtimeTranscriptionGateway: _ThrowingAudioTranscriptionGateway(
+            const OpenAiRealtimeTranscriptionStartupException(
+              'model_not_found',
+            ),
+          ),
+        ),
+      );
+
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('OpenAI setup required'),
+      );
+
+      expect(find.text('OpenAI setup required'), findsOneWidget);
+      expect(find.text('Preparing live session'), findsNothing);
+      expect(find.text('Live translation stopped'), findsNothing);
+      expect(find.text('Retry live session'), findsNothing);
+      expect(find.textContaining('model_not_found'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'production transcription startup stays on live surface while connecting',
+    (tester) async {
+      final repository = _testRepository();
+      final transcriptionGateway = _BlockingAudioTranscriptionGateway();
+      await _seedCredential(repository);
+      await tester.pumpWidget(
+        LiveTranslateApp(
+          permissionGateway: _FakePermissionGateway.granted(),
+          meetingRepository: repository,
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+          realtimeTranscriptionGateway: transcriptionGateway,
+        ),
+      );
+
+      await tester.tap(find.text('Start interpreter'));
+      for (var index = 0; index < 10; index++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        if (find.text('Connecting to OpenAI').evaluate().isNotEmpty) {
+          break;
+        }
+      }
+
+      expect(transcriptionGateway.connectStarted, isTrue);
+      expect(find.text('Connecting to OpenAI'), findsOneWidget);
+      expect(find.text('Italian <-> English'), findsOneWidget);
+      expect(find.text('Preparing live session'), findsNothing);
+    },
+  );
 
   testWidgets('OpenAI setup describes the active transcription path', (
     tester,
@@ -1745,6 +1810,34 @@ class _ThrowingRealtimeTranslationGateway
     required String credential,
   }) async {
     throw StateError('socket connection interrupted');
+  }
+}
+
+class _ThrowingAudioTranscriptionGateway implements AudioTranscriptionGateway {
+  const _ThrowingAudioTranscriptionGateway(this.error);
+
+  final Object error;
+
+  @override
+  Future<AudioTranscriptionSession> connect({
+    required OpenAiRealtimeTranscriptionConfig config,
+    required String credential,
+  }) async {
+    throw error;
+  }
+}
+
+class _BlockingAudioTranscriptionGateway implements AudioTranscriptionGateway {
+  final _connectCompleter = Completer<AudioTranscriptionSession>();
+  bool connectStarted = false;
+
+  @override
+  Future<AudioTranscriptionSession> connect({
+    required OpenAiRealtimeTranscriptionConfig config,
+    required String credential,
+  }) {
+    connectStarted = true;
+    return _connectCompleter.future;
   }
 }
 
