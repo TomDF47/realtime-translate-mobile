@@ -385,17 +385,23 @@ class LanguageRoutePreference {
     required this.sourceLanguageLabel,
     required this.targetLanguageLabel,
     required this.updatedAt,
+    this.sourceSpokenOutputEnabled = false,
+    this.targetSpokenOutputEnabled = false,
   });
 
   final String sourceLanguageLabel;
   final String targetLanguageLabel;
   final DateTime updatedAt;
+  final bool sourceSpokenOutputEnabled;
+  final bool targetSpokenOutputEnabled;
 
   Map<String, Object?> toJson() {
     return {
       'sourceLanguageLabel': sourceLanguageLabel,
       'targetLanguageLabel': targetLanguageLabel,
       'updatedAt': updatedAt.toIso8601String(),
+      'sourceSpokenOutputEnabled': sourceSpokenOutputEnabled,
+      'targetSpokenOutputEnabled': targetSpokenOutputEnabled,
     };
   }
 
@@ -404,6 +410,10 @@ class LanguageRoutePreference {
       sourceLanguageLabel: json['sourceLanguageLabel'] as String? ?? '',
       targetLanguageLabel: json['targetLanguageLabel'] as String? ?? '',
       updatedAt: _dateTime(json['updatedAt']),
+      sourceSpokenOutputEnabled:
+          json['sourceSpokenOutputEnabled'] as bool? ?? false,
+      targetSpokenOutputEnabled:
+          json['targetSpokenOutputEnabled'] as bool? ?? false,
     );
   }
 }

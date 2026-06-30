@@ -323,6 +323,45 @@ void main() {
     },
   );
 
+  test('stores per-side spoken output choices with recent language route', () async {
+    final repository = LocalMeetingRepository(
+      store: MemoryEncryptedLocalStore(),
+    );
+    final now = DateTime.utc(2026, 6, 4, 9);
+
+    await repository.saveRecentLanguageRoute(
+      LanguageRoutePreference(
+        sourceLanguageLabel: 'English (US)',
+        targetLanguageLabel: 'Italian (IT)',
+        updatedAt: now,
+        sourceSpokenOutputEnabled: true,
+        targetSpokenOutputEnabled: false,
+      ),
+    );
+
+    final snapshot = await repository.loadSnapshot();
+    final route = snapshot.recentLanguageRoutes.single;
+    expect(route.sourceLanguageLabel, 'English (US)');
+    expect(route.targetLanguageLabel, 'Italian (IT)');
+    expect(route.sourceSpokenOutputEnabled, isTrue);
+    expect(route.targetSpokenOutputEnabled, isFalse);
+
+    final restored = LocalStorageSnapshot.fromJson(snapshot.toJson());
+    expect(restored.recentLanguageRoutes.single.sourceSpokenOutputEnabled, isTrue);
+    expect(restored.recentLanguageRoutes.single.targetSpokenOutputEnabled, isFalse);
+  });
+
+  test('defaults legacy route spoken output choices to off', () {
+    final route = LanguageRoutePreference.fromJson({
+      'sourceLanguageLabel': 'English (US)',
+      'targetLanguageLabel': 'Italian (IT)',
+      'updatedAt': '2026-06-04T09:00:00.000Z',
+    });
+
+    expect(route.sourceSpokenOutputEnabled, isFalse);
+    expect(route.targetSpokenOutputEnabled, isFalse);
+  });
+
   test('deleteAllLocalData clears sensitive local storage document', () async {
     final repository = LocalMeetingRepository(
       store: MemoryEncryptedLocalStore(),

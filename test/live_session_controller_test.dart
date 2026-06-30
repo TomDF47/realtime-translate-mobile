@@ -99,7 +99,7 @@ void main() {
   });
 
   test(
-    'manual listening pause keeps transcript state but closes resources',
+    'manual listening pause keeps transcript state and warm realtime',
     () async {
       final controller = LiveSessionController(
         permissionGateway: _FixedPermissionGateway(
@@ -113,7 +113,7 @@ void main() {
 
       expect(controller.state.phase, LiveSessionPhase.listeningPaused);
       expect(controller.state.isMicrophoneCaptureOpen, isFalse);
-      expect(controller.state.isRealtimeSessionOpen, isFalse);
+      expect(controller.state.isRealtimeSessionOpen, isTrue);
       expect(controller.state.isPlaybackQueueOpen, isFalse);
 
       controller.resumeListening();
@@ -303,7 +303,7 @@ void main() {
     );
     expect(
       controller.state.notice,
-      'OpenAI credential expired or was rejected. Update the credential stored on this device.',
+      'OpenAI credential or project access was rejected. Update the credential stored on this device.',
     );
     expect(controller.state.isMicrophoneCaptureOpen, isFalse);
     expect(controller.state.isRealtimeSessionOpen, isFalse);

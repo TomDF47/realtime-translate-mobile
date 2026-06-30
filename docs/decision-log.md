@@ -2,9 +2,108 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback
+
+Status: Accepted as code direction (local Windows checkout still relies on CI/Fedora for Flutter analyzer, tests, APK build, and installed-device proof)
+
+Context:
+
+- Tom's Samsung retest showed the prior live path was still not sensitive enough, especially for the person across the table, and translated audio controls were not on the speech bubbles.
+- The app does not need local VAD to decide whether speech is important. The more reliable contract is to send captured audio continuously, batch commits around pauses or a hard cap, then translate the returned transcript.
+- The language-card voice button still had "latest translation for side" ambiguity. A communication log needs row-level playback so the user knows exactly which translation will be spoken.
+
+Decision:
+
+- The production `LiveTranslateApp` opts into a Realtime transcription-only session using `gpt-realtime-whisper` on `/v1/realtime` with `session.type = transcription` and manual `input_audio_buffer.commit`.
+- Android forwards every captured PCM16 chunk to OpenAI. Local pause detection and the hard cap decide only when to commit the already-forwarded buffer; they do not gate whether audio is sent.
+- A completed transcription batch creates a stable transcript row immediately. The direct Responses text interpreter translates that text with `store: false` and updates the same row instead of merging into another box.
+- The active Android capture config requests room capture (`UNPROCESSED` where available, else `MIC`) and disables platform acoustic echo cancellation/noise suppression for this path so across-table speech is less likely to be filtered out.
+- The active UI removes language-card voice buttons. Each translated transcript row exposes its own voice button. Pressing it flushes pending mic audio, pauses capture, speaks that row's translated text through phone-local TextToSpeech, and resumes listening only if capture was active before the tap.
+- The legacy `/v1/realtime/translations` translation gateway and committer remain in the repo for compatibility/debug tests, but they are no longer the default phone-test loop.
+
+Implications:
+
+- Future #6 validation should prove room pickup from both speakers, stable chronological transcript rows, direct Responses translations in the matching rows, and per-row audible TTS playback.
+- A future live OpenAI smoke should be added for the transcription-first path; the existing dedicated-translation smoke proves only the retained legacy gateway.
+- This adds no dependency, Android permission, backend route, app-owned server path, live credential read, microphone recording persistence, transcript/audio logging, or analytics/crash sink. The phone-only direct-OpenAI privacy boundary is unchanged.
+
+## 2026-06-05 - Manual Language-Card Voice Playback Replaces Output Voice Checkboxes
+
+Status: Superseded in the active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
+
+Context:
+
+- Tom's Samsung retest showed the automatic spoken-output loop was still unreliable: voice output was often absent, when it did play it could stop after one word, and transcript content could merge or overwrite into the wrong card.
+- The desired product shape is simple: keep a clear communication log, translate each turn as it arrives, and let the user explicitly play a translated line when they need audio.
+- The prior checkbox model made spoken output feel like a background process. That increased the chance of app TTS fighting the live microphone and made persisted checkbox state part of the live-capture critical path.
+
+Decision:
+
+- Hide the active `Output voice` checkboxes.
+- Keep the live interpreter text-first. Finalized transcript cards remain the source of truth for original and translated text.
+- Add one voice button to each `From`/`To` language card. The button is enabled only when that side has a finalized transcript row with both original and translated text.
+- Pressing a voice button pauses microphone forwarding, speaks the latest finalized translation for that side through the phone-local TextToSpeech gateway, and resumes listening only if microphone capture was active before the tap.
+- Active runtime output options no longer enable automatic source-side or target-side spoken output from finalized cards. Legacy spoken-output booleans may remain in encrypted route storage for compatibility, but the active live UI does not expose or apply them.
+- If OpenAI sends a cumulative completed source transcript after a finished row, strip the already-committed prefix before creating the next source row so old speech does not merge into the new communication card.
+
+Implications:
+
+- The active flow has fewer audio states: live microphone capture and explicit manual playback are serialized instead of competing.
+- Validation should focus on a clear EN/IT transcript log first, then on manual voice-button playback pausing and resuming capture.
+- This adds no dependency, Android permission, backend route, app-owned network path, credential handling change, microphone recording persistence, transcript/audio logging, or analytics/crash sink. The phone-only direct-OpenAI privacy boundary is unchanged.
+
+## 2026-06-07 - Start Interpreter Begins Active Listening
+
+Status: Accepted
+
+Context:
+
+- Tom's latest Samsung retest showed the app sitting in a paused state and missing too much speech from both speakers.
+- The transcription-first batch loop is intended to keep forwarding microphone audio continuously, commit buffered audio in short batches or on pauses, translate each completed transcript batch, and keep a chronological communication log.
+
+Decision:
+
+- With a saved credential, `Start interpreter` requests microphone permission, opens the realtime transcription session, starts room microphone capture, and lands on active `listening` with `Pause Listening` visible.
+- `Pause Listening` remains available as an explicit privacy/control action: it flushes pending microphone audio, stops capture and spoken output, and keeps the realtime transcription session warm when available.
+- Manual row playback pauses capture only while that row's translated text is spoken, then resumes capture if listening was active before playback.
+
+Implications:
+
+- The previous warm-paused startup behavior is superseded for the active UI.
+- Credential and microphone permission gates still fail closed before capture or transcript routing.
+- The phone-only direct-OpenAI privacy boundary is unchanged.
+
+## 2026-06-04 - Warm Paused Startup With Serialized Phone-Local Spoken Output
+
+Status: Superseded in the active UI by `2026-06-07 - Start Interpreter Begins Active Listening`
+
+Context:
+
+- Tom's Samsung retest showed the app could create English and Italian transcript boxes after a pause/resume cycle, but startup and language changes were still fragile: the first microphone permission flow could fall back to a preparing screen, English-to-Italian speech sometimes wrote English into the translation field, and unexpected translated audio played.
+- The desired interpreter contract is a manual two-language pair, not automatic pair discovery. For English <-> Italian, English speech should create an EN card with English original and Italian translation; Italian speech should create an IT card with Italian original and English translation.
+- Spoken output should be available, but it is not the default. Users need side-specific control because each speaker may or may not want the phone to speak the translation after their own utterances.
+- Tom's next spoken-output retest showed two simultaneous voices when both checkboxes were checked, app speech feeding the microphone, janky output, persisted checkboxes not enabling audio until cycled, and an Italian-to-English turn with incomplete translation.
+
+Decision:
+
+- Starting an interpreter with a saved OpenAI credential opens the live screen in `listeningPaused`, connects the primary `/v1/realtime/translations` session in the background, and does not request microphone permission or start capture until the user taps `Resume Listening`.
+- Pausing listening stops microphone capture, legacy realtime audio playback, and any in-progress spoken output, but keeps the realtime session warm when available. Resume reuses the warm session and only requests microphone permission/capture at that point.
+- Each active `From` and `To` language card has an `Output voice` checkbox. Both checkboxes default off, persist with the recent language route, and are restored across sessions like the language pair.
+- The checkbox on the side whose speaker just talked controls whether the app speaks that turn's translated text. In an English <-> Italian pair, checking English speaks the Italian translation after English speech; checking Italian speaks the English translation after Italian speech.
+- The active UI speaks finalized translated card text through a fakeable phone-local output gateway backed on Android by TextToSpeech. It does not open simultaneous primary/reverse realtime audio output for normal spoken-output behavior.
+- Spoken output is serialized: a new source utterance stops any prior voice, and the coordinator deduplicates each finalized card so one turn produces at most one spoken output.
+- Microphone chunks are suppressed while app TTS is speaking so the phone does not immediately translate its own speaker output. A loud PCM16 speech interrupt stops TTS and resumes forwarding the new human speech to OpenAI. Android capture enables platform acoustic echo cancellation and noise suppression when available.
+- Text transcript cards remain the single source of truth and still use direct OpenAI text fallback for reverse/text-only directions.
+
+Implications:
+
+- The active UI remains text-first by default while allowing intentional spoken translation output without reintroducing hidden global read-aloud controls.
+- This adds no dependency, Android permission, backend route, app-owned network path, credential handling change, microphone recording persistence, or logging surface. The phone-only direct-OpenAI privacy boundary is unchanged.
+- Historical regression coverage for this superseded checkbox flow included warm paused startup, pause/resume warm reuse, per-side checkbox persistence, restored checkbox state activating before the first spoken turn, English then Italian separate cards, one spoken utterance per finalized card, no reverse realtime audio session for active UI spoken output, previous voice interruption on new speech, and microphone suppression during app speech.
+
 ## 2026-06-03 - Text-First Live Interpreter Suppresses Default Speaker And Reverse Audio
 
-Status: Accepted as code direction (Flutter analyzer/tests/APK build still need the Fedora toolchain)
+Status: Partially superseded by `2026-06-04 - Warm Paused Startup With Serialized Phone-Local Spoken Output`
 
 Context:
 
@@ -14,7 +113,7 @@ Context:
 
 Decision:
 
-- Default the active phone live interpreter to text-first: `_readAloudEnabled` starts false, the main app does not enable the best-effort reverse audio session, and the coordinator skips translated-audio playback queue startup whenever read-aloud is disabled.
+- Default the active phone live interpreter to text-first: at that point the legacy `_readAloudEnabled` flag started false, the main app did not enable the best-effort reverse audio session, and the coordinator skipped translated-audio playback queue startup whenever read-aloud was disabled. The 2026-06-05 decision supersedes the global flag with manual language-card voice buttons, leaving reverse realtime audio closed in normal active UI operation.
 - Keep microphone capture and the primary `/v1/realtime/translations` text/transcript path active; only speaker playback/reverse audio are suppressed.
 - Let stable source deltas (sentence-ending punctuation or long text) trigger the same direct OpenAI fallback used by completed source turns when the detected source language is already the primary realtime output language or the selected target requires direct fallback.
 - Suppress no-item realtime output for a row once the direct text fallback has marked that row authoritative, so an English realtime echo cannot overwrite the Italian fallback translation.
@@ -44,7 +143,7 @@ Decision:
 
 Implications:
 
-- This reduces dependence on live language discovery for the header, reverse-session startup, and text fallback routing while preserving local language detection as a transcript-row fallback when OpenAI metadata is absent.
+- This reduces dependence on live language discovery for the header, spoken-output routing, and text fallback routing while preserving local language detection as a transcript-row fallback when OpenAI metadata is absent.
 - No dependency, Android permission, backend route, app-owned network path, credential handling, microphone recording, or logging surface is added. The phone-only direct-OpenAI privacy boundary is unchanged.
 - Product docs and regression checks now require visible source/target selectors in the active live interpreter and absence of only the secondary controls listed above.
 
@@ -149,7 +248,7 @@ Implications:
 
 ## 2026-06-01 - Enable Source Input Transcription On The Realtime Translation Session, And Keep Debug-Signed Release APKs Out Of Tester Distribution
 
-Status: Accepted
+Status: Superseded in the active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
 
 Context:
 
@@ -176,7 +275,7 @@ Implications:
 
 ## 2026-06-01 - Live Block Splitting And Language Attribution For The Real Translation Wire Shape
 
-Status: Accepted
+Status: Accepted, with live model routing superseded in active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
 
 Decision:
 
@@ -327,7 +426,7 @@ Implications:
 
 ## 2026-05-24 - Direct OpenAI Credential And Model Preference
 
-Status: Accepted
+Status: Accepted, with live model routing superseded in active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
 
 Decision:
 
@@ -350,11 +449,11 @@ Implications:
 
 - Credential UX, encrypted storage, redaction, reset/removal, and credential-invalid recovery are MVP implementation requirements.
 - A real OpenAI network smoke test requires Tom to provide a key out-of-band or interactively at that point; no placeholder or real key belongs in the repo.
-- Future changes that route live interpretation away from `gpt-realtime-translate` need a fresh accepted decision and must not add backend infrastructure.
+- The fresh accepted decision that routes active live interpretation away from `gpt-realtime-translate` is `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`; future route changes still need an accepted decision and must not add backend infrastructure.
 
 ## 2026-05-26 - Live Interpretation Uses Dedicated Realtime Translation Profile
 
-Status: Accepted
+Status: Superseded in the active UI by `2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback`
 
 Decision:
 
@@ -627,7 +726,7 @@ Rationale:
 
 Implications:
 
-- Real audible translated-audio validation still requires a real streaming session or controllable translated-audio source; do not claim spoken end-to-end translation from fake PCM16 queue tests.
+- Real audible translated-audio validation still requires a real streaming session or controllable translated-audio source; do not claim spoken end-to-end translation from fake PCM16 queue tests. For the active 2026-06-04 UI path, audible spoken-output validation is now Android TextToSpeech from finalized translated card text.
 - Future iOS output must stay behind the same gateway and receive equivalent privacy/security review.
 - Any future playback package, resampler, audio effects SDK, route-management permission, or persisted audio cache must update the cybersecurity report and rerun supply-chain checks.
 

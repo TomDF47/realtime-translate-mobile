@@ -38,6 +38,8 @@ done < <(
     -path ./.gradle -prune -o \
     -path ./android/.gradle -prune -o \
     -path ./build -prune -o \
+    -path ./artifacts -prune -o \
+    -path ./.codex-remote-attachments -prune -o \
     -name '*.md' -type f -print0 |
   xargs -0 perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV|$1\n" }'
 )
@@ -50,6 +52,8 @@ secret_hits="$(
     -path ./.gradle -prune -o \
     -path ./android/.gradle -prune -o \
     -path ./build -prune -o \
+    -path ./artifacts -prune -o \
+    -path ./.codex-remote-attachments -prune -o \
     -path ./assets/mockups -prune -o \
     -type f -print0 |
   xargs -0 perl -ne 'while (/(sk-[A-Za-z0-9_-]{20,}|sess-[A-Za-z0-9_-]{20,}|ek_[A-Za-z0-9_-]{20,})/g) { print "$ARGV:$.:$1\n" }'

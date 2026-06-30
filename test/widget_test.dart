@@ -6,14 +6,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_translate_mobile/main.dart';
 import 'package:realtime_translate_mobile/src/language/language_support.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_ai_chat.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_configuration.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_credential_store.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_transcription.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_text_interpreter.dart';
 import 'package:realtime_translate_mobile/src/mock/mock_live_translate_data.dart';
 import 'package:realtime_translate_mobile/src/session/live_session_controller.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_capture.dart';
 import 'package:realtime_translate_mobile/src/session/microphone_permission.dart';
+import 'package:realtime_translate_mobile/src/session/spoken_translation_output.dart';
 import 'package:realtime_translate_mobile/src/session/translated_audio_playback.dart';
 import 'package:realtime_translate_mobile/src/storage/encrypted_local_store.dart';
 import 'package:realtime_translate_mobile/src/storage/local_meeting_repository.dart';
@@ -52,13 +55,18 @@ void main() {
     await tester.pumpWidget(LiveTranslateApp(meetingRepository: repository));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('OpenAI setup required'),
+    );
 
-    expect(find.text('OpenAI setup required'), findsWidgets);
-    expect(find.text('Open OpenAI setup'), findsOneWidget);
+    expect(find.text('Preparing live session'), findsNothing);
+    expect(find.textContaining('OpenAI setup'), findsWidgets);
 
-    await tester.tap(find.text('Open OpenAI setup'));
+    final openSetupAction = find.text('Open OpenAI setup').evaluate().isNotEmpty
+        ? find.text('Open OpenAI setup')
+        : find.text('OpenAI setup').last;
+    await tester.tap(openSetupAction);
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byType(TextField).last,
@@ -82,7 +90,7 @@ void main() {
     await tester.tap(find.text('Remove credential from this device'));
     await tester.pumpAndSettle();
 
-    expect(find.text('OpenAI setup required'), findsWidgets);
+    expect(find.textContaining('OpenAI setup'), findsWidgets);
     expect(find.text('Remove credential from this device'), findsNothing);
     expect(
       await OpenAiCredentialStore(
@@ -92,27 +100,119 @@ void main() {
     );
   });
 
+  testWidgets(
+    'transcription model access failure returns to OpenAI setup not stopped banner',
+    (tester) async {
+      final repository = _testRepository();
+      await _seedCredential(repository);
+      await tester.pumpWidget(
+        LiveTranslateApp(
+          permissionGateway: _FakePermissionGateway.granted(),
+          meetingRepository: repository,
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+          realtimeTranscriptionGateway: _ThrowingAudioTranscriptionGateway(
+            const OpenAiRealtimeTranscriptionStartupException(
+              'model_not_found',
+            ),
+          ),
+        ),
+      );
+
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('OpenAI setup required'),
+      );
+
+      expect(find.text('OpenAI setup required'), findsOneWidget);
+      expect(find.text('Preparing live session'), findsNothing);
+      expect(find.text('Live translation stopped'), findsNothing);
+      expect(find.text('Retry live session'), findsNothing);
+      expect(find.textContaining('model_not_found'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'production transcription startup stays on live surface while connecting',
+    (tester) async {
+      final repository = _testRepository();
+      final transcriptionGateway = _BlockingAudioTranscriptionGateway();
+      await _seedCredential(repository);
+      await tester.pumpWidget(
+        LiveTranslateApp(
+          permissionGateway: _FakePermissionGateway.granted(),
+          meetingRepository: repository,
+          microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+          translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+          realtimeTranscriptionGateway: transcriptionGateway,
+        ),
+      );
+
+      await tester.tap(find.text('Start interpreter'));
+      for (var index = 0; index < 10; index++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        if (find.text('Connecting to OpenAI').evaluate().isNotEmpty) {
+          break;
+        }
+      }
+
+      expect(transcriptionGateway.connectStarted, isTrue);
+      expect(find.text('Connecting to OpenAI'), findsOneWidget);
+      expect(find.text('Italian <-> English'), findsOneWidget);
+      expect(find.text('Preparing live session'), findsNothing);
+
+      transcriptionGateway.completeConnect();
+      await tester.pump(const Duration(milliseconds: 50));
+    },
+  );
+
+  testWidgets('OpenAI setup describes the active transcription path', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    await tester.pumpWidget(LiveTranslateApp(meetingRepository: repository));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'OpenAI setup'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Active live intake: ${OpenAiConfiguration.realtimeTranscriptionModel}',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining(OpenAiConfiguration.realtimeModel), findsNothing);
+    expect(
+      find.textContaining(OpenAiConfiguration.translationFallbackModel),
+      findsNothing,
+    );
+  });
+
   testWidgets('opens teal listening with manual pair controls', (
     tester,
   ) async {
     final repository = _testRepository();
     await _seedCredential(repository);
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
     await tester.pumpWidget(
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.granted(),
         meetingRepository: repository,
         microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
-        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
+        realtimeTranslationGateway: realtimeGateway,
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
 
-    expect(find.text('Italian <-> English'), findsOneWidget);
-    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Listening'), findsOneWidget);
+    expect(find.text('Auto-detect Spanish -> English'), findsNothing);
     expect(find.text('Pause Listening'), findsOneWidget);
     expect(find.bySemanticsLabel('Pause listening'), findsOneWidget);
     expect(find.text('Translate Text'), findsNothing);
@@ -147,6 +247,101 @@ void main() {
     expect(find.text('Open generated exports'), findsNothing);
   });
 
+  testWidgets('language cards hide output controls and row voice starts pending', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    await _seedCredential(repository);
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+      ),
+    );
+
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
+
+    expect(find.text('Output voice'), findsNothing);
+    expect(
+      find.bySemanticsLabel('Read latest translation for Italian'),
+      findsNothing,
+    );
+    expect(
+      find.bySemanticsLabel('Read latest translation for English'),
+      findsNothing,
+    );
+    expect(find.byTooltip('Read this translation aloud'), findsNothing);
+  });
+
+  testWidgets('transcript row voice button speaks translation and resumes mic', (
+    tester,
+  ) async {
+    final repository = _testRepository();
+    final captureGateway = _FakeMicrophoneCaptureGateway();
+    final realtimeGateway = _FakeRealtimeTranslationGateway();
+    final spokenOutputGateway = _FakeSpokenTranslationOutputGateway();
+    await _seedCredential(repository);
+
+    await tester.pumpWidget(
+      LiveTranslateApp(
+        permissionGateway: _FakePermissionGateway.granted(),
+        meetingRepository: repository,
+        microphoneCaptureGateway: captureGateway,
+        translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: realtimeGateway,
+        spokenTranslationOutputGateway: spokenOutputGateway,
+      ),
+    );
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
+
+    realtimeGateway.primarySession
+      ..addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.input_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.source,
+          itemId: 'source-it-1',
+          languageCode: 'it',
+          transcript: 'La tempistica e stata concordata.',
+        ),
+      )
+      ..addEvent(
+        const OpenAiRealtimeTranscriptCompleted(
+          type: 'session.output_transcript.done',
+          kind: OpenAiRealtimeTranscriptKind.translation,
+          itemId: 'source-it-1',
+          transcript: 'Timeline was agreed.',
+        ),
+      );
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Read this translation aloud'));
+    await tester.pumpAndSettle();
+
+    expect(spokenOutputGateway.utterances, hasLength(1));
+    expect(
+      spokenOutputGateway.utterances.single.text,
+      'Timeline was agreed.',
+    );
+    expect(spokenOutputGateway.utterances.single.outputLanguageCode, 'en');
+    expect(captureGateway.stopCount, greaterThanOrEqualTo(1));
+    expect(captureGateway.startCount, 2);
+    expect(captureGateway.isCapturing, isTrue);
+    expect(find.text('Pause Listening'), findsOneWidget);
+  });
+
   testWidgets('starts interpreter with manual language pair controls', (
     tester,
   ) async {
@@ -163,9 +358,12 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
-    expect(find.text('Italian <-> English'), findsOneWidget);
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
+    expect(find.text('Listening'), findsOneWidget);
     final primaryConfig = realtimeGateway.configs.firstWhere(
       (config) => config.sourceTranscriptionEnabled,
     );
@@ -202,7 +400,12 @@ void main() {
     await tester.tap(spanishOption);
     await tester.pumpAndSettle();
 
-    expect(find.text('Spanish <-> English'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('From language selector: Spanish \\(ES\\)'),
+      ),
+      findsOneWidget,
+    );
     final restartedPrimaryConfig = realtimeGateway.configs.lastWhere(
       (config) => config.sourceTranscriptionEnabled,
     );
@@ -239,12 +442,15 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Start interpreter'));
-      await tester.pumpAndSettle();
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
 
       await tester.tap(find.bySemanticsLabel(RegExp('From language selector')));
       await tester.pumpAndSettle();
-      final englishSourceOption = find.text('English (US)');
+      final englishSourceOption = find.text('English (US)').last;
       await tester.ensureVisible(englishSourceOption);
       await tester.pumpAndSettle();
       await tester.tap(englishSourceOption);
@@ -252,7 +458,7 @@ void main() {
 
       await tester.tap(find.bySemanticsLabel(RegExp('To language selector')));
       await tester.pumpAndSettle();
-      final arabicTargetOption = find.text('Arabic');
+      final arabicTargetOption = find.text('Arabic').last;
       await tester.ensureVisible(arabicTargetOption);
       await tester.pumpAndSettle();
       await tester.tap(arabicTargetOption);
@@ -305,30 +511,18 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pump();
-    await tester.pump();
+    await _tapStartInterpreterUntil(tester, find.text('Connecting to OpenAI'));
 
-    expect(
-      find.text('Preparing live interpretation on this phone...'),
-      findsOneWidget,
-    );
     expect(find.text('Listening for languages...'), findsNothing);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
-    expect(find.text('Connecting'), findsOneWidget);
     expect(find.text('Connecting to OpenAI'), findsOneWidget);
-    expect(
-      find.text(
-        'Preparing live interpretation on this phone. Recording starts after the secure realtime session is ready.',
-      ),
-      findsOneWidget,
-    );
     expect(find.text('Start interpreter'), findsNothing);
 
     realtimeGateway.completeConnect();
     await tester.pumpAndSettle();
 
     expect(find.text('Listening'), findsOneWidget);
+    expect(find.text('Pause Listening'), findsOneWidget);
   });
 
   testWidgets('pause and resume listening controls keep meeting transcript', (
@@ -347,11 +541,13 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     final meetingId = (await repository.loadSnapshot()).meetings.single.id;
     await _appendStoredTranscriptLine(repository, meetingId);
-    realtimeGateway.sessions.first.delayGracefulClose();
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pumpAndSettle();
 
@@ -359,29 +555,27 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('Listening paused'), findsWidgets);
+    expect(find.text('Paused'), findsOneWidget);
     expect(find.text('Resume Listening'), findsOneWidget);
     expect(find.bySemanticsLabel('Resume listening'), findsOneWidget);
     expect(
       find.text('They agreed to meet on Tuesday at 10 AM.'),
       findsOneWidget,
     );
-    expect(realtimeGateway.sessions.first.closeGracefullyCount, 1);
-
-    realtimeGateway.sessions.first.completeGracefulClose();
-    await tester.pumpAndSettle();
+    expect(realtimeGateway.sessions.first.closeGracefullyCount, 0);
+    expect(realtimeGateway.sessions.first.closeImmediatelyCount, 0);
 
     await tester.tap(find.bySemanticsLabel('Resume listening'));
     await tester.pumpAndSettle();
 
     expect(find.text('Pause Listening'), findsOneWidget);
     expect(find.text('Resume Listening'), findsNothing);
-    expect(realtimeGateway.sessions, hasLength(2));
+    expect(realtimeGateway.sessions, hasLength(1));
     expect(
       realtimeGateway.configs
           .where((config) => config.sourceTranscriptionEnabled)
           .length,
-      2,
+      1,
     );
     expect(
       realtimeGateway.configs
@@ -410,8 +604,10 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Reconnecting to OpenAI'),
+    );
 
     expect(find.text('Italian <-> English'), findsOneWidget);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
@@ -441,8 +637,11 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Start interpreter'));
-      await tester.pumpAndSettle();
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(find.text('Italian <-> English'), findsOneWidget);
       expect(find.text('Auto-detect Spanish -> English'), findsNothing);
       final primaryConfig = realtimeGateway.configs.firstWhere(
@@ -485,8 +684,11 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Waiting for speech'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     expect(find.text('Waiting for speech'), findsOneWidget);
 
     realtimeGateway.primarySession
@@ -574,8 +776,11 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Start interpreter'));
-      await tester.pumpAndSettle();
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(realtimeGateway.primaryConfig.targetLanguageCode, 'en');
 
       realtimeGateway.primarySession.addEvent(
@@ -669,8 +874,11 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Start interpreter'));
-      await tester.pumpAndSettle();
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(find.text('Italian <-> English'), findsOneWidget);
 
       // Italian is spoken first with no realtime language metadata, so the app
@@ -774,8 +982,11 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Start interpreter'));
-      await tester.pumpAndSettle();
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(find.text('Italian <-> English'), findsOneWidget);
 
       const englishParagraph =
@@ -857,6 +1068,8 @@ void main() {
 
       // Both cards render their original speech; nothing stays pending.
       expect(find.text(englishParagraph), findsOneWidget);
+      await tester.drag(find.byType(ListView).last, const Offset(0, -300));
+      await tester.pumpAndSettle();
       expect(find.text('Buongiorno, come stai?'), findsOneWidget);
       expect(find.text('Buongiorno a tutti.'), findsOneWidget);
       expect(find.text('Good morning, how are you?'), findsOneWidget);
@@ -898,8 +1111,11 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Start interpreter'));
-      await tester.pumpAndSettle();
+      await _tapStartInterpreterUntil(
+        tester,
+        find.text('Pause Listening'),
+        isReady: () => realtimeGateway.sessions.isNotEmpty,
+      );
       expect(find.text('Italian <-> English'), findsOneWidget);
 
       realtimeGateway.primarySession
@@ -1092,8 +1308,11 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     final activeMeeting = (await repository.loadSnapshot()).meetings.single;
     await _appendStoredTranscriptLine(repository, activeMeeting.id);
 
@@ -1135,8 +1354,11 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Waiting for speech'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
 
     expect(find.text('Italian <-> English'), findsOneWidget);
     expect(find.text('Auto-detect Spanish -> English'), findsNothing);
@@ -1175,8 +1397,11 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     _expectManualPairActiveLiveControls();
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -1205,12 +1430,16 @@ void main() {
       LiveTranslateApp(
         permissionGateway: _FakePermissionGateway.denied(),
         meetingRepository: repository,
+        microphoneCaptureGateway: _FakeMicrophoneCaptureGateway(),
         translatedAudioPlaybackGateway: NoopTranslatedAudioPlaybackGateway(),
+        realtimeTranslationGateway: _FakeRealtimeTranslationGateway(),
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Microphone access needed'),
+    );
 
     expect(find.text('Microphone access needed'), findsOneWidget);
     expect(find.text('Try microphone permission again'), findsOneWidget);
@@ -1240,8 +1469,11 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(
+      tester,
+      find.text('Pause Listening'),
+      isReady: () => realtimeGateway.sessions.isNotEmpty,
+    );
     expect((await repository.loadSnapshot()).meetings, hasLength(1));
     expect(captureGateway.isCapturing, isTrue);
 
@@ -1295,8 +1527,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Start interpreter'));
-    await tester.pumpAndSettle();
+    await _tapStartInterpreterUntil(tester, find.text('Pause Listening'));
 
     final initialMeeting = (await repository.loadSnapshot()).meetings.single;
 
@@ -1372,10 +1603,42 @@ Future<void> _seedCredential(LocalMeetingRepository repository) {
   ).saveUserProvidedCredential('placeholder-local-openai-credential');
 }
 
+Future<void> _tapStartInterpreterUntil(
+  WidgetTester tester,
+  Finder expectedSurface, {
+  bool Function()? isReady,
+  int maxPumps = 60,
+}) async {
+  await tester.tap(find.text('Start interpreter'));
+  for (var index = 0; index < maxPumps; index++) {
+    await tester.pump(const Duration(milliseconds: 50));
+    if (expectedSurface.evaluate().isNotEmpty && (isReady?.call() ?? true)) {
+      return;
+    }
+  }
+
+  await tester.pumpAndSettle();
+  if (expectedSurface.evaluate().isEmpty || !(isReady?.call() ?? true)) {
+    final visibleText = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((widget) => widget.data ?? widget.textSpan?.toPlainText() ?? '')
+        .where((text) => text.trim().isNotEmpty)
+        .take(20)
+        .join(' | ');
+    fail(
+      'Expected start surface did not appear or was not ready. '
+      'Visible text: $visibleText',
+    );
+  }
+}
+
 Future<void> _appendStoredTranscriptLine(
   LocalMeetingRepository repository,
-  String meetingId,
-) async {
+  String meetingId, {
+  String languageCode = 'EN',
+  String originalText = 'Timeline was agreed.',
+  String translatedText = 'They agreed to meet on Tuesday at 10 AM.',
+}) async {
   final snapshot = await repository.loadSnapshot();
   final meeting = snapshot.meetings.singleWhere((item) => item.id == meetingId);
   final currentTime = DateTime.now().toUtc();
@@ -1388,9 +1651,9 @@ Future<void> _appendStoredTranscriptLine(
     entry: StoredTranscriptEntry(
       id: '$meetingId-test-line',
       meetingId: meetingId,
-      languageCode: 'EN',
-      originalText: 'Timeline was agreed.',
-      translatedText: 'They agreed to meet on Tuesday at 10 AM.',
+      languageCode: languageCode,
+      originalText: originalText,
+      translatedText: translatedText,
       timestamp: now,
       speakerLabel: null,
       confidence: null,
@@ -1435,6 +1698,7 @@ Widget _liveSessionHarness(LiveSessionState state) {
       onOpenAssistant: () {},
       onOpenSourceLanguageOptions: () {},
       onOpenTargetLanguageOptions: () {},
+      onTranscriptVoicePressed: (_) {},
       onDirectionSwitch: () {},
       onRetryLiveSession: () {},
       onBottomAction: (_) {},
@@ -1475,14 +1739,18 @@ class _FakeMicrophoneCaptureGateway implements MicrophoneCaptureGateway {
   bool get isCapturing => _isCapturing;
 
   bool _isCapturing = false;
+  int startCount = 0;
+  int stopCount = 0;
 
   @override
   Future<void> start(MicrophoneCaptureConfig config) async {
+    startCount += 1;
     _isCapturing = true;
   }
 
   @override
   Future<void> stop() async {
+    stopCount += 1;
     _isCapturing = false;
   }
 }
@@ -1499,7 +1767,10 @@ class _FakeRealtimeTranslationGateway implements RealtimeTranslationGateway {
   }
 
   OpenAiRealtimeTranslationConfig get primaryConfig {
-    return configs.lastWhere((config) => config.sourceTranscriptionEnabled);
+    final index = configs.lastIndexWhere(
+      (config) => config.sourceTranscriptionEnabled,
+    );
+    return configs[index < 0 ? configs.length - 1 : index];
   }
 
   @override
@@ -1543,6 +1814,66 @@ class _ThrowingRealtimeTranslationGateway
   }) async {
     throw StateError('socket connection interrupted');
   }
+}
+
+class _ThrowingAudioTranscriptionGateway implements AudioTranscriptionGateway {
+  const _ThrowingAudioTranscriptionGateway(this.error);
+
+  final Object error;
+
+  @override
+  Future<AudioTranscriptionSession> connect({
+    required OpenAiRealtimeTranscriptionConfig config,
+    required String credential,
+  }) async {
+    throw error;
+  }
+}
+
+class _BlockingAudioTranscriptionGateway implements AudioTranscriptionGateway {
+  final _connectCompleter = Completer<AudioTranscriptionSession>();
+  final session = _FakeAudioTranscriptionSession();
+  bool connectStarted = false;
+
+  @override
+  Future<AudioTranscriptionSession> connect({
+    required OpenAiRealtimeTranscriptionConfig config,
+    required String credential,
+  }) {
+    connectStarted = true;
+    return _connectCompleter.future;
+  }
+
+  void completeConnect() {
+    if (!_connectCompleter.isCompleted) {
+      _connectCompleter.complete(session);
+    }
+  }
+}
+
+class _FakeAudioTranscriptionSession implements AudioTranscriptionSession {
+  final _events = StreamController<OpenAiRealtimeTranscriptionEvent>.broadcast(
+    sync: true,
+  );
+  int closeImmediatelyCount = 0;
+
+  @override
+  Stream<OpenAiRealtimeTranscriptionEvent> get events => _events.stream;
+
+  @override
+  void appendPcm16Audio(List<int> pcm16Audio) {}
+
+  @override
+  void commitInputAudioBuffer() {}
+
+  @override
+  Future<void> closeImmediately() async {
+    closeImmediatelyCount += 1;
+    unawaited(_events.close());
+  }
+
+  @override
+  void sendSessionUpdate() {}
 }
 
 class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
@@ -1593,6 +1924,26 @@ class _FakeRealtimeTranslationSession implements RealtimeTranslationSession {
     if (completer != null && !completer.isCompleted) {
       completer.complete();
     }
+  }
+}
+
+class _FakeSpokenTranslationOutputGateway
+    implements SpokenTranslationOutputGateway {
+  final List<SpokenTranslationUtterance> utterances = [];
+  bool _isSpeaking = false;
+
+  @override
+  bool get isSpeaking => _isSpeaking;
+
+  @override
+  Future<void> speak(SpokenTranslationUtterance utterance) async {
+    utterances.add(utterance);
+    _isSpeaking = false;
+  }
+
+  @override
+  Future<void> stop() async {
+    _isSpeaking = false;
   }
 }
 

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'openai_realtime_transcription.dart';
 import 'openai_realtime_translation.dart';
 
 enum OpenAiRealtimeFailureKind {
@@ -45,6 +46,9 @@ class OpenAiRealtimeFailure {
 
   factory OpenAiRealtimeFailure.fromSocketError(Object error) {
     if (error is OpenAiRealtimeStartupException) {
+      return OpenAiRealtimeFailure.classifyCode(error.code);
+    }
+    if (error is OpenAiRealtimeTranscriptionStartupException) {
       return OpenAiRealtimeFailure.classifyCode(error.code);
     }
 
@@ -103,8 +107,20 @@ class OpenAiRealtimeFailure {
       'forbidden',
       'invalid_client_secret',
       'credential_rejected',
+      'insufficient_quota',
+      'payment_required',
+      'billing',
+      'quota_exceeded',
+      'model_not_found',
+      'model_access',
+      'permission_denied',
+      'access_denied',
+      'not_authorized',
+      'project_not_found',
+      'organization_not_found',
       '401',
       '403',
+      '404',
     ])) {
       return OpenAiRealtimeFailure(
         kind: OpenAiRealtimeFailureKind.credentialRejected,
@@ -213,7 +229,7 @@ class OpenAiRealtimeReconnectDecision {
         _ => 'Connection interrupted. Reconnecting to OpenAI shortly.',
       },
       OpenAiRealtimeRecoveryAction.credentialInvalid =>
-        'OpenAI credential expired or was rejected. Update the credential stored on this device.',
+        'OpenAI credential or project access was rejected. Update the credential stored on this device.',
       OpenAiRealtimeRecoveryAction.unsupportedLanguage =>
         'The selected language is not available for this realtime route.',
       OpenAiRealtimeRecoveryAction.offline => switch (failure.kind) {
@@ -341,6 +357,7 @@ String _socketDiagnosticCode(Object error) {
   for (final status in const [
     '401',
     '403',
+    '404',
     '429',
     '500',
     '502',

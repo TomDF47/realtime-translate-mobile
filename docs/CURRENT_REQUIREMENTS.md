@@ -1,6 +1,6 @@
 # Current Product Requirements
 
-Last synthesized: 2026-06-02
+Last synthesized: 2026-06-07
 
 This document summarizes the realtime translate app requirements as they stand now, based on the repository documentation and latest operator notes. If this document conflicts with older docs, the latest operator notes and accepted decision log entries win. The canonical long-form source remains [live-translate-build-spec.md](live-translate-build-spec.md).
 
@@ -10,7 +10,7 @@ Build an Android-first Flutter mobile app, structured to remain iOS-compatible l
 
 The MVP is phone-only except for direct OpenAI API calls. There is no app backend, AWS, Lambda, token broker, cloud identity gate, cloud sync, outbound mail backend, server-side transcript handling, or server-side export handling. User-provided OpenAI credential/session material is stored only in encrypted local device storage and must never be committed, bundled, logged, screenshotted, or placed in mobile config.
 
-The active live experience is a text-first two-party interpreter. The user selects the two languages in use, the app treats that pair as locked from session start, transcript rows still use OpenAI metadata or deterministic local detection for source labels when available, and the meeting is preserved locally. Fully automatic bidirectional spoken audio must not be claimed in the active UI until validated. Existing realtime audio seams may remain for validation, but normal live human-speech translation should use `gpt-realtime-translate` on `/v1/realtime/translations`; `gpt-realtime-2` remains only an explicit compatibility/experimental voice-agent profile.
+The active live experience is a transcription-first two-party interpreter with on-demand spoken output per transcript row. The user selects the two languages in use, the app treats that pair as locked from session start, and the meeting is preserved locally. Android forwards every captured PCM16 chunk to a Realtime transcription-only session using `gpt-realtime-whisper`; local pause/hard-cap batching decides only when to commit the already-forwarded OpenAI input buffer. Each completed transcription batch creates one stable local transcript row immediately, and the direct Responses text interpreter translates it with `store: false` into that same row. Spoken translated audio is not automatic: a translated transcript row has a voice button. Pressing it flushes any pending mic buffer, speaks that row's finalized translation through phone-local Android TextToSpeech, pauses microphone forwarding during playback, and resumes listening only if capture was active before the tap. Normal active UI operation must not create simultaneous primary/reverse realtime audio output. `gpt-realtime-translate` on `/v1/realtime/translations` and `gpt-realtime-2` remain explicit compatibility/debug profiles only.
 
 ## User Goals
 
@@ -18,6 +18,7 @@ The active live experience is a text-first two-party interpreter. The user selec
 - Resume a previous local meeting without losing prior transcript history.
 - Select the two conversation languages once, then speak naturally in either language without choosing direction manually.
 - See the original speech and translated text clearly, with confidence/status when one side is pending.
+- Play a specific translated transcript row aloud on demand.
 - Know when the app is connecting, listening, paused, reconnecting, offline, credential-invalid, or in error.
 - Pause live listening without ending the meeting or deleting local transcript state.
 - Review local meeting history, ask scoped AI chat questions, and generate local encrypted exports.
@@ -32,33 +33,36 @@ The active live experience is a text-first two-party interpreter. The user selec
 3. Provider sign-in buttons from the original mockup are V2/future only and must not gate the MVP.
 4. Starting without a saved credential shows `OpenAI setup required` before microphone permission, realtime, or capture resources open.
 5. The setup sheet accepts user-provided OpenAI credential/session material, stores it encrypted locally, does not redisplay the saved value, and provides removal/reset.
-6. After a credential exists, starting a meeting requests Android microphone permission before recording.
-7. Denied, permanently denied, and revoked microphone permission states must be explicit and must not start capture.
+6. After a credential exists, starting a meeting requests microphone permission, connects OpenAI realtime transcription, and opens active listening.
+7. Android microphone permission is requested during live startup before capture starts.
+8. Denied, permanently denied, and revoked microphone permission states must be explicit and must not start capture.
 
 ### Live Interpreter Startup
 
 1. After `Start interpreter`, the app moves immediately to a visible live startup state instead of appearing stalled.
 2. Startup must show an explicit loading/connecting indicator such as `Connecting to OpenAI` because initial connection can take about 15 seconds.
-3. Microphone capture must not start until the realtime session is ready or the app has reached a safe local state.
-4. Startup errors must keep the user on a useful live/recovery surface with sanitized labels.
+3. With a saved credential and microphone permission, startup should reach active `listening` with microphone capture open and `Pause Listening` visible.
+4. Microphone capture must not start until permission is granted.
+5. Startup errors must keep the user on a useful live/recovery surface with sanitized labels.
 
 ### Manual Language Pair And Translation
 
-1. The live screen begins with visible `From` and `To` selectors for the two-language pair, defaulting to Italian <-> English.
+1. The live screen begins with visible `From` and `To` selectors for the two-language pair, defaulting to the last saved route when available and otherwise Italian <-> English.
 2. `Auto-detect` is not offered as a source choice in the manual pair picker.
 3. The top status shows the selected pair as `<A> <-> <B>` from session start.
-4. The app must still detect Italian and other supported source languages from realtime metadata when available, and must fall back to deterministic local detection for source-row labels when metadata is missing.
-5. The top status must not depend on successful language discovery to know the two-language pair.
-6. Later turns translate A-to-B and B-to-A without manual direction switching.
-7. First-turn translation may be pending while source/translation events arrive, but it must be backfilled into the correct transcript block.
-8. The runtime tracks the selected pair and per-turn direction explicitly. For English/Italian, Italian-to-English can use the realtime-capable English target, while English-to-Italian can use the reverse realtime audio session and/or phone-only direct OpenAI text fallback when the primary English-output session is silent.
+4. Language selectors do not expose voice buttons or `Output voice` checkboxes in the active flow.
+5. Each translated transcript row has a voice button that reads only that row's translated text on demand.
+6. The top status must not depend on successful language discovery to know the two-language pair.
+7. Later turns translate A-to-B and B-to-A without manual direction switching.
+8. First-turn translation may be pending while transcription and text translation complete, but it must be backfilled into the correct transcript row.
+9. The runtime tracks the selected pair and per-turn direction explicitly. For English/Italian, English speech creates an EN card with English original and Italian translation, while Italian speech creates an IT card with Italian original and English translation.
 
 ### Listening Controls
 
 1. The active live screen has `Stop Listening`.
 2. The active live screen must also have `Pause Listening` and `Resume Listening`.
-3. `Pause Listening` is privacy-first: it stops microphone capture, the realtime session, and translated-audio playback while preserving the active encrypted local meeting, transcript rows, detected languages, and resume target.
-4. `Resume Listening` reconnects with the active realtime config and transcript commit target.
+3. `Pause Listening` is privacy-first: it commits pending microphone audio when present, stops microphone capture and any in-progress spoken output while preserving the active encrypted local meeting, transcript rows, selected pair, resume target, and warm realtime transcription session when available.
+4. `Resume Listening` reuses the warm realtime transcription session when available, otherwise reconnects with the active realtime config and transcript commit target.
 5. The elapsed timer advances only while microphone capture is open, pauses while listening is paused/reconnecting/offline/backgrounded, and resets for a new meeting.
 
 ### Meeting History
@@ -91,7 +95,7 @@ The active live experience is a text-first two-party interpreter. The user selec
 
 - Preserve the supplied Android mockup visual direction: premium dark navy UI, teal listening accent, blue translation accent, amber speaking/read-aloud reference state, compact controls, restrained card radii, safe areas, and readable typography.
 - The active MVP first screen focuses on starting or resuming interpretation, not cloud sign-in or a technical dashboard.
-- The active live interpreter shows source and target language pickers, and hides direction switch, `Translate Text` toggle, read-aloud controls, speaker/headphone chips, live-header AI chat, and live-screen export controls.
+- The active live interpreter shows source and target language pickers without language-card voice buttons, and hides direction switch, `Translate Text` toggle, `Output voice` checkboxes, legacy global read-aloud controls, speaker/headphone chips, live-header AI chat, and live-screen export controls.
 - Screenshotting or opening incidental device/app overlays must not cause hidden old direction-switch/read-aloud/export/chat controls to appear in the active live interpreter flow.
 - Required session states include at least `localSetup`, `meetingSelection`, `connecting`, `listening`, `listeningPaused`, `speaking`, `readAloudPaused`, `reconnecting`, `offline`, `credentialInvalid`, and `error`.
 - User-visible recovery labels must be sanitized and must not expose raw OpenAI server details, credentials, prompts, transcript text, or payloads.
@@ -104,33 +108,30 @@ The active live experience is a text-first two-party interpreter. The user selec
 - Every visible transcript card must have both an original speech section and a translation section.
 - Original speech must be shown. A final row with missing original speech is a defect.
 - Pending halves use explicit placeholders such as `Original speech pending` or translation pending status, not blank cards.
-- Realtime source/original transcript deltas and translated output deltas must update separate fields in the same logical block.
-- Translation-first rows must be backfilled when original speech arrives.
-- Blocks roll on source item changes, source language changes, or a new source after a completed source-plus-translation pair.
+- Completed transcription batches and translated text results must update separate fields in the same logical row.
+- Transcription-first rows must be backfilled with the matching translation when the direct Responses request completes.
+- Local batching rolls rows on committed transcription batches; later completed speech must not overwrite an earlier row.
 - When the user switches from one language to another, such as English to Italian, the Italian speech must create a new block rather than appending to the existing previous-language block.
 - A language change inside the same visible block is a defect unless it is an explicitly unfinished partial that resolves before finalization.
-- Roughly every two completed spoken sentences should form a separate readable block when the source/language continuity allows it.
+- Detected pauses should commit a readable batch, and a hard cap must prevent long-running speech from staying uncommitted indefinitely.
 - Partial text should update the current visible block before final completion.
 - Duplicate completed transcript events after reconnect must not create duplicate rows.
 - Transcript rows are stored with meeting ID, language, original text, translated text, timestamp, speaker ownership, confidence/status, accent, playback state, and lifecycle status.
 
 ## Language Detection And Translation Behavior
 
-- Source language is automatic in the active interpreter flow.
-- The app detects the first language, waits for a second distinct language, then locks the pair.
-- Italian must be recognized in the top status and transcript block language labels when spoken.
-- Common nested realtime language metadata must be parsed.
-- Deterministic local fallback detection must cover at least English, Italian, Spanish, and French when realtime metadata is absent.
-- The realtime target table covers the 13 documented OpenAI Realtime Translation output languages: Spanish, Portuguese, French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian, Vietnamese, Italian, and English (corrected 2026-06-01 from the earlier English/Spanish/French-only conservative table per the OpenAI cookbook).
-- Arabic and other auto-detected input languages that are not among the 13 outputs may be shown in picker/fallback contexts, but must be labeled as direct-OpenAI fallback targets.
-- Fallback behavior must be explicit in UI and must stay phone-only with direct OpenAI calls only.
-- Italian is a realtime output target. The two-party bidirectional design uses a primary `/v1/realtime/translations` session (English output, the single transcript writer) plus an additive reverse session (Italian output, audio-only) once the pair locks; reverse-direction text is produced by the direct OpenAI text path.
+- Source-row language labels are automatic in the active interpreter flow, but the interpreter pair itself is selected manually and locked from session start.
+- The app does not wait to detect the first and second language before showing the pair.
+- Italian and other supported languages should appear in transcript row language labels when transcription metadata or deterministic local detection can resolve them.
+- The retained realtime target table covers the 13 documented OpenAI Realtime Translation output languages for compatibility/debug routes: Spanish, Portuguese, French, Japanese, Russian, Chinese, German, Korean, Hindi, Indonesian, Vietnamese, Italian, and English.
+- Arabic and other languages that are not among the retained realtime output targets may be shown in picker/fallback contexts, but fallback behavior must stay phone-only with direct OpenAI calls only.
+- The active two-party bidirectional design uses transcription-only Realtime intake as the single audio writer, direct Responses text translation for both directions, and serialized phone-local TTS from finalized translated row text. It does not open an additive reverse realtime audio session.
 
 ## Realtime Connection, Loading, And Recovery
 
 - Direct OpenAI calls are the only routine product network path.
-- Normal live translation uses `gpt-realtime-translate` on `/v1/realtime/translations`.
-- Realtime startup waits for session readiness or a sanitized startup error before capture starts.
+- Normal live intake uses Realtime transcription-only sessions with `gpt-realtime-whisper`, manual `input_audio_buffer.commit`, and direct Responses translation with `store: false`.
+- Realtime startup reaches active listening after microphone permission. The paused state is entered by `Pause Listening` and can keep the realtime transcription session warm.
 - Connection startup should have a bounded timeout/recovery path and a visible loading state; it must not leave the user staring at a static start screen for the roughly 15 second startup window.
 - Credential expiry/rejection moves to `credentialInvalid` and closes capture/realtime/playback resources.
 - Retryable network drops, socket closes, rate limits, transient OpenAI failures, connect timeouts, and lifecycle interruptions use bounded reconnect/backoff and show `reconnecting` or recovery UI.
@@ -149,14 +150,11 @@ The active live experience is a text-first two-party interpreter. The user selec
 
 ## Known Defects And Gaps
 
-- Latest operator report says the translate app is still not working as expected when language detection is expected to infer the pair.
+- Physical Samsung validation still needs to prove the new room-capture path hears both people, commits real transcript batches, translates into distinct chronological rows, and speaks the selected row through Android TTS.
 - After screenshotting, secondary options must not leak into the active interpreter UI.
-- Original speech is not reliably shown; final rows with missing original speech must be prevented.
-- Italian speech appended onto an existing `1124` block instead of creating a new block; block splitting must honor source item and language changes.
-- The top status should not depend on detecting that Italian was spoken; the manually selected pair should be visible before speech arrives.
-- A dedicated `Pause Listening` control is required if not already present in the tested build.
-- Initial connect takes about 15 seconds and needs a visible loading indicator.
-- Physical microphone translation, installed-app committed transcript validation from live speech, app-coordinator de-duplication under real live reconnect, live credential-expiry/network/rate-limit validation, and audible Android speaker recovery still require further validation.
+- Final rows with missing original speech must be prevented.
+- Initial connect can take about 15 seconds and needs a visible loading indicator.
+- App-coordinator de-duplication under real live reconnect, live credential-expiry/network/rate-limit validation, production-volume storage behavior, and iOS share handoff still require further validation.
 - Store-ready Android signing is not complete without local signing material.
 
 ## Acceptance Criteria
@@ -166,10 +164,10 @@ The active live experience is a text-first two-party interpreter. The user selec
 - Starting with a credential immediately shows a live connecting/loading state, then listening or sanitized recovery.
 - Initial connect shows `Connecting to OpenAI` or equivalent for the slow startup window.
 - Active live interpreter begins with visible source/target selectors and the selected pair as `<A> <-> <B>`.
-- Italian speech updates transcript row language labels when metadata or local detection is available and does not append to a previous-language completed block.
+- English then Italian speech creates distinct chronological transcript rows and does not append new speech to a previous completed row.
 - Every final transcript card includes visible original speech and translation fields, with no blank final original.
-- Translation-first rows backfill original speech into the same block when it arrives.
-- Pause Listening closes capture/realtime/playback while preserving local meeting and transcript state; Resume Listening reconnects.
+- Completed transcription rows backfill the matching translation into the same row when the Responses request returns.
+- Pause Listening commits pending mic audio when present, closes capture/spoken output while preserving local meeting and transcript state, and Resume Listening reuses the warm transcription session when available.
 - Hidden active-flow controls remain hidden before and after screenshot/overlay/menu interactions: direction switch, `Translate Text`, read-aloud, speaker/headphone, live-header AI chat, and live-screen export controls.
 - Meeting history can continue and delete encrypted local meetings.
 - AI chat always shows `This meeting` or `All meetings` scope and sends context only through direct OpenAI with `store: false`.
@@ -182,7 +180,7 @@ The active live experience is a text-first two-party interpreter. The user selec
 
 - What exactly triggers "after screenshotting, other options appear": Android screenshot overlay, app menu, debug overlay, lifecycle pause/resume, or a specific screenshot tool?
 - What is the `1124` block identifier: a visible timestamp, internal transcript row ID, meeting ID suffix, or UI test label?
-- Resolved 2026-06-01: Italian is one of the 13 documented Realtime Translation output languages, so it is now a realtime output target (no longer text-fallback-only). Remaining validation is the on-device EN+IT bidirectional confirmation under #6/#31.
+- Resolved 2026-06-07: Italian remains in the retained realtime output-language table, but the active phone-test path no longer depends on realtime output-language support because it transcribes first and translates text batches.
 - What exact text should be used for pending placeholders in production: `Original speech pending`, `Translation pending`, or shorter labels?
 - Should `Pause Listening` be the primary center control, or should it sit beside `Stop Listening` in a simplified bottom bar?
 - Which device/emulator path should be used for the next real microphone validation: host-audio emulator, physical Android device, or a controllable virtual audio route?

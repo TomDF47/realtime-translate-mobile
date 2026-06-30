@@ -10,11 +10,32 @@ void main() {
     expect(config.sampleRateHz, 24000);
     expect(config.channelCount, 1);
     expect(config.chunkDuration, const Duration(milliseconds: 200));
+    expect(config.androidAudioSource, AndroidAudioSource.voiceRecognition);
+    expect(config.androidInputEffectsEnabled, isTrue);
     expect(config.bytesPerChunk, 9600);
     expect(config.toMethodArguments(), {
       'sampleRateHz': 24000,
       'channelCount': 1,
       'chunkDurationMs': 200,
+      'androidAudioSource': 'voiceRecognition',
+      'androidInputEffectsEnabled': true,
+    });
+  });
+
+  test('room transcription capture disables phone-call input processing', () {
+    const config = MicrophoneCaptureConfig.roomTranscription();
+
+    expect(config.sampleRateHz, 24000);
+    expect(config.channelCount, 1);
+    expect(config.chunkDuration, const Duration(milliseconds: 200));
+    expect(config.androidAudioSource, AndroidAudioSource.room);
+    expect(config.androidInputEffectsEnabled, isFalse);
+    expect(config.toMethodArguments(), {
+      'sampleRateHz': 24000,
+      'channelCount': 1,
+      'chunkDurationMs': 200,
+      'androidAudioSource': 'room',
+      'androidInputEffectsEnabled': false,
     });
   });
 

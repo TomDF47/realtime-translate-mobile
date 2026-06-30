@@ -24,6 +24,7 @@ extension LiveSessionPhaseLabels on LiveSessionPhase {
   bool get isActive {
     return switch (this) {
       LiveSessionPhase.listening ||
+      LiveSessionPhase.listeningPaused ||
       LiveSessionPhase.speaking ||
       LiveSessionPhase.readAloudPaused ||
       LiveSessionPhase.reconnecting => true,
@@ -181,6 +182,71 @@ class LiveSessionController extends ChangeNotifier {
     // WebSocket, playback queue, and microphone capture have opened.
   }
 
+  void preparePausedMeeting() {
+    _pausedByLifecycle = false;
+    _setState(
+      _state.copyWith(
+        phase: LiveSessionPhase.connecting,
+        isMicrophoneCaptureOpen: false,
+        isRealtimeSessionOpen: false,
+        isPlaybackQueueOpen: false,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
+        notice: 'Connecting to OpenAI while listening is paused.',
+      ),
+    );
+  }
+
+  Future<bool> requestMicrophoneForListening() async {
+    _setState(
+      _state.copyWith(
+        phase: LiveSessionPhase.requestingMicrophonePermission,
+        isMicrophoneCaptureOpen: false,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
+        notice: 'Microphone access is required before listening starts.',
+      ),
+    );
+
+    final permission = await permissionGateway.request();
+    if (!permission.isGranted) {
+      _setState(
+        _state.copyWith(
+          phase: _permissionDeniedPhase(permission),
+          microphonePermission: permission,
+          isMicrophoneCaptureOpen: false,
+          isRealtimeSessionOpen: false,
+          isPlaybackQueueOpen: false,
+          realtimeRetryAttempt: 0,
+          realtimeReconnectDelay: Duration.zero,
+          clearRealtimeRecoveryAction: true,
+          clearRealtimeFailureKind: true,
+          notice:
+              'No audio is captured before microphone permission is granted.',
+        ),
+      );
+      return false;
+    }
+
+    _setState(
+      _state.copyWith(
+        phase: LiveSessionPhase.connecting,
+        microphonePermission: permission,
+        isMicrophoneCaptureOpen: false,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
+        notice: 'Starting microphone capture.',
+      ),
+    );
+    return true;
+  }
+
   Future<void> retryMicrophonePermission() {
     return startMeeting();
   }
@@ -253,24 +319,40 @@ class LiveSessionController extends ChangeNotifier {
     );
   }
 
-  void pauseListening() {
-    if (!_state.microphonePermission.isGranted) {
-      return;
-    }
-
+  void pauseListening({bool keepRealtimeSessionOpen = true}) {
     _pausedByLifecycle = false;
     _setState(
       _state.copyWith(
         phase: LiveSessionPhase.listeningPaused,
         isMicrophoneCaptureOpen: false,
-        isRealtimeSessionOpen: false,
+        isRealtimeSessionOpen: keepRealtimeSessionOpen,
         isPlaybackQueueOpen: false,
         realtimeRetryAttempt: 0,
         realtimeReconnectDelay: Duration.zero,
         clearRealtimeRecoveryAction: true,
         clearRealtimeFailureKind: true,
         notice:
-            'Listening is paused. Microphone capture and OpenAI realtime are stopped until you resume.',
+            keepRealtimeSessionOpen
+            ? 'Listening is paused. OpenAI stays connected; microphone capture and translated audio are stopped.'
+            : 'Listening is paused. Microphone capture and OpenAI realtime are stopped until you resume.',
+      ),
+    );
+  }
+
+  void markRealtimePreparedPaused({bool playbackQueueOpen = false}) {
+    _pausedByLifecycle = false;
+    _setState(
+      _state.copyWith(
+        phase: LiveSessionPhase.listeningPaused,
+        isMicrophoneCaptureOpen: false,
+        isRealtimeSessionOpen: true,
+        isPlaybackQueueOpen: playbackQueueOpen,
+        realtimeRetryAttempt: 0,
+        realtimeReconnectDelay: Duration.zero,
+        clearRealtimeRecoveryAction: true,
+        clearRealtimeFailureKind: true,
+        notice:
+            'Listening is paused. OpenAI is connected; resume when you are ready to speak.',
       ),
     );
   }

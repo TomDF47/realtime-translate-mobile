@@ -91,6 +91,8 @@ class LanguageSelectorData {
     required this.secondaryLabel,
     required this.icon,
     required this.accent,
+    this.spokenOutputEnabled = false,
+    this.voicePlaybackAvailable = false,
   });
 
   final String eyebrow;
@@ -98,6 +100,8 @@ class LanguageSelectorData {
   final String secondaryLabel;
   final IconData icon;
   final LiveAccent accent;
+  final bool spokenOutputEnabled;
+  final bool voicePlaybackAvailable;
 }
 
 class FeatureChipData {
@@ -118,6 +122,7 @@ class FeatureChipData {
 
 class TranscriptEntryData {
   const TranscriptEntryData({
+    this.id = '',
     required this.languageCode,
     required this.originalText,
     required this.translatedText,
@@ -128,6 +133,7 @@ class TranscriptEntryData {
     this.playbackState = TranscriptPlaybackState.playable,
   });
 
+  final String id;
   final String languageCode;
   final String originalText;
   final String translatedText;

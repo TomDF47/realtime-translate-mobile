@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_resilience.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_transcription.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 
 void main() {
@@ -59,6 +60,21 @@ void main() {
     },
   );
 
+  test(
+    'classifies websocket upgrade model access failures as credential rejection',
+    () {
+      final failure = OpenAiRealtimeFailure.fromSocketError(
+        Exception(
+          'WebSocketException: Connection was not upgraded to websocket, '
+          'HTTP status code: 404',
+        ),
+      );
+
+      expect(failure.kind, OpenAiRealtimeFailureKind.credentialRejected);
+      expect(failure.diagnosticCode, 'socket.http_404');
+    },
+  );
+
   test('classifies startup exception code directly', () {
     final failure = OpenAiRealtimeFailure.fromSocketError(
       const OpenAiRealtimeStartupException('invalid_api_key'),
@@ -66,6 +82,33 @@ void main() {
 
     expect(failure.kind, OpenAiRealtimeFailureKind.credentialRejected);
     expect(failure.diagnosticCode, 'invalid_api_key');
+  });
+
+  test('classifies transcription startup exception code directly', () {
+    final authFailure = OpenAiRealtimeFailure.fromSocketError(
+      const OpenAiRealtimeTranscriptionStartupException('invalid_api_key'),
+    );
+    final quotaFailure = OpenAiRealtimeFailure.fromSocketError(
+      const OpenAiRealtimeTranscriptionStartupException('insufficient_quota'),
+    );
+    final modelFailure = OpenAiRealtimeFailure.fromSocketError(
+      const OpenAiRealtimeTranscriptionStartupException('model_not_found'),
+    );
+    final projectAccessFailure = OpenAiRealtimeFailure.fromSocketError(
+      const OpenAiRealtimeTranscriptionStartupException('permission_denied'),
+    );
+
+    expect(authFailure.kind, OpenAiRealtimeFailureKind.credentialRejected);
+    expect(authFailure.diagnosticCode, 'invalid_api_key');
+    expect(quotaFailure.kind, OpenAiRealtimeFailureKind.credentialRejected);
+    expect(quotaFailure.diagnosticCode, 'insufficient_quota');
+    expect(modelFailure.kind, OpenAiRealtimeFailureKind.credentialRejected);
+    expect(modelFailure.diagnosticCode, 'model_not_found');
+    expect(
+      projectAccessFailure.kind,
+      OpenAiRealtimeFailureKind.credentialRejected,
+    );
+    expect(projectAccessFailure.diagnosticCode, 'permission_denied');
   });
 
   test('plans bounded exponential backoff with deterministic jitter', () {

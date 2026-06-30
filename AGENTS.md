@@ -53,7 +53,7 @@ If the spec, README, mockup spec, decision log, and issue scope disagree, stop a
 - Mobile app: Flutter, Android-first, structured to remain iOS-compatible later.
 - MVP backend: none.
 - Routine network path: the phone app connects directly to the OpenAI API only.
-- Preferred realtime voice/translation model: `gpt-realtime-translate` on `/v1/realtime/translations` for normal live translation; keep `gpt-realtime-2` only as an explicit compatibility/experimental voice-agent profile.
+- Active MVP live intake model: Realtime transcription-only sessions using `gpt-realtime-whisper` on `/v1/realtime` with manual input-buffer commits. Keep `gpt-realtime-translate` on `/v1/realtime/translations` and `gpt-realtime-2` only as explicit compatibility/debug profiles unless a later accepted decision changes the active path.
 - AI chat scope must be explicit: `This meeting` or `All meetings`.
 - Never embed a standard OpenAI API key in mobile code, mobile config, assets, build outputs, screenshots, or tests.
 - User-provided OpenAI credential/session material may be stored only in encrypted local device storage; ask Tom for an API key only at the first real OpenAI network smoke/integration test.

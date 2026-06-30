@@ -88,22 +88,23 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - Waveform icon.
   - Text shows the selected manual pair as `<A> <-> <B>` from session start.
   - While connecting, text may show a short preparation label such as `Preparing live interpretation on this phone...`.
-  - Status pill: `Listening`.
+  - Status pill: `Paused` during the warm startup state, then `Listening` after the user resumes microphone capture.
   - Elapsed timer: `00:05:23`.
 - Language controls:
   - The active live interpreter shows two compact language selector cards: `From` and `To`.
   - The default pair is Italian <-> English.
   - Do not show a direction switch in the live interpreter flow; the selected pair is bidirectional.
+  - Language cards do not include voice buttons in the active transcription-first flow. Spoken output belongs to individual translated transcript rows.
 - Feature toggles row:
   - Hide `Translate Text` from the active issue #30 live interpreter flow.
-  - Hide read-aloud, speaker, and headphone controls until spoken bidirectional audio is safely supportable.
+  - Hide legacy global read-aloud, speaker, headphone controls, language-card voice buttons, and `Output voice` checkboxes. Spoken output belongs to per-row translated playback instead of automatic turn playback or a global read-aloud toggle.
 - Transcript list:
   - Card per utterance or translation pair.
   - Language badge: `ES` or `EN`.
   - Original text smaller.
   - Translated text larger and bolder.
   - Timestamp.
-  - Per-line speaker or play icon.
+  - Per-line speaker/play button on the right; disabled while translation is pending and enabled only for that row's translated text.
   - Spanish/source cards use teal accent border.
   - English/target cards use blue accent border.
   - Include sample meeting content around Tuesday at 10 AM, deliverables, and project timeline.
@@ -112,7 +113,9 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
   - `Jump to Live` chip.
 - Fixed bottom control bar:
   - Large circular `Stop Listening` red button.
-  - Do not show read-aloud or switch-direction controls in the active issue #30 interpreter flow.
+  - Show `Pause Listening` during active capture and `Resume Listening` only after the user pauses listening.
+  - Show `Pause Listening` after microphone capture is active.
+  - Do not show legacy read-aloud or switch-direction controls in the active issue #30 interpreter flow.
 - Live menu:
   - Keep meeting history available.
   - Do not expose generated export controls from the active live interpreter menu.
@@ -120,6 +123,7 @@ The product architecture changed after mockup intake. The MVP is phone-only asid
 ### Required States
 
 - Listening status is visually active and calm, not alarming.
+- Paused/warm-connected status is clear but not alarming; it should communicate that OpenAI is connected while microphone capture, realtime audio playback, and phone-local spoken output are stopped.
 - Toggle states must be clear without requiring explanatory text.
 - Transcript list should support scrolling behind the fixed bottom control bar with safe bottom padding.
 - `Jump to Live` appears when the list is not pinned to the latest transcript entry.

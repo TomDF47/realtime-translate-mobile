@@ -4,19 +4,41 @@ import 'package:flutter/services.dart';
 
 import '../diagnostics/privacy_safe_diagnostics.dart';
 
+enum AndroidAudioSource { voiceRecognition, room }
+
+extension AndroidAudioSourceMethodValue on AndroidAudioSource {
+  String get methodValue {
+    return switch (this) {
+      AndroidAudioSource.voiceRecognition => 'voiceRecognition',
+      AndroidAudioSource.room => 'room',
+    };
+  }
+}
+
 class MicrophoneCaptureConfig {
   const MicrophoneCaptureConfig({
     required this.sampleRateHz,
     this.channelCount = 1,
     this.chunkDuration = const Duration(milliseconds: 200),
+    this.androidAudioSource = AndroidAudioSource.voiceRecognition,
+    this.androidInputEffectsEnabled = true,
   });
 
   const MicrophoneCaptureConfig.openAiRealtime({int sampleRateHz = 24000})
     : this(sampleRateHz: sampleRateHz);
 
+  const MicrophoneCaptureConfig.roomTranscription({int sampleRateHz = 24000})
+    : this(
+        sampleRateHz: sampleRateHz,
+        androidAudioSource: AndroidAudioSource.room,
+        androidInputEffectsEnabled: false,
+      );
+
   final int sampleRateHz;
   final int channelCount;
   final Duration chunkDuration;
+  final AndroidAudioSource androidAudioSource;
+  final bool androidInputEffectsEnabled;
 
   int get bytesPerSample => 2;
 
@@ -33,6 +55,8 @@ class MicrophoneCaptureConfig {
       'sampleRateHz': sampleRateHz,
       'channelCount': channelCount,
       'chunkDurationMs': chunkDuration.inMilliseconds,
+      'androidAudioSource': androidAudioSource.methodValue,
+      'androidInputEffectsEnabled': androidInputEffectsEnabled,
     };
   }
 }
