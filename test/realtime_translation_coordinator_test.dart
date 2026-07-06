@@ -3663,6 +3663,65 @@ void main() {
     expect(harness.controller.state.phase, LiveSessionPhase.listening);
   });
 
+  test('transient inactive keeps capture and realtime resources open', () async {
+    final harness = await _Harness.create(
+      permissionStatus: MicrophonePermissionStatus.granted,
+    );
+
+    await harness.coordinator.start(config: config);
+    // Android reports system overlays (runtime permission dialog, volume HUD,
+    // incoming-call banner) as `inactive` while the app stays visible.
+    harness.coordinator.handleAppLifecycleState(AppLifecycleState.inactive);
+    await _drainAsync();
+
+    expect(harness.controller.state.phase, LiveSessionPhase.listening);
+    expect(harness.controller.state.isMicrophoneCaptureOpen, isTrue);
+    expect(harness.captureGateway.isCapturing, isTrue);
+    expect(harness.playbackGateway.isOpen, isTrue);
+    expect(harness.realtimeGateway.session.closeImmediatelyCount, 0);
+
+    harness.coordinator.handleAppLifecycleState(AppLifecycleState.resumed);
+    await _drainAsync();
+
+    // No teardown happened, so no reconnect is needed either.
+    expect(harness.realtimeGateway.connectCount, 1);
+    expect(harness.captureGateway.startCount, 1);
+    expect(harness.controller.state.phase, LiveSessionPhase.listening);
+    expect(harness.captureGateway.isCapturing, isTrue);
+  });
+
+  test(
+    'inactive during the first permission dialog does not cancel startup',
+    () async {
+      final harness = await _Harness.create(
+        permissionStatus: MicrophonePermissionStatus.granted,
+      );
+      harness.permissionGateway.holdNextRequest();
+
+      final startFuture = harness.coordinator.start(config: config);
+      await _drainAsync();
+      expect(
+        harness.controller.state.phase,
+        LiveSessionPhase.requestingMicrophonePermission,
+      );
+
+      // The Android runtime permission dialog surfaces as `inactive` without
+      // backgrounding the app, while start() is still awaiting the request.
+      harness.coordinator.handleAppLifecycleState(AppLifecycleState.inactive);
+      harness.permissionGateway.releaseHeldRequest();
+      // Dismissing the dialog returns the app to `resumed`.
+      harness.coordinator.handleAppLifecycleState(AppLifecycleState.resumed);
+
+      final result = await startFuture;
+
+      expect(result, LiveRealtimeStartResult.started);
+      expect(harness.controller.state.phase, LiveSessionPhase.listening);
+      expect(harness.captureGateway.isCapturing, isTrue);
+      expect(harness.playbackGateway.isOpen, isTrue);
+      expect(harness.realtimeGateway.connectCount, 1);
+    },
+  );
+
   group('LiveRealtimeTranscriptCommitter language resolution', () {
     Future<LiveRealtimeTranscriptCommitter> committerFor(
       LocalMeetingRepository repository, {
@@ -4271,6 +4330,21 @@ class _FakePermissionGateway implements MicrophonePermissionGateway {
 
   final MicrophonePermissionStatus status;
   int requestCount = 0;
+  Completer<void>? _heldRequest;
+
+  /// Makes the next [request] wait until [releaseHeldRequest] runs, modeling
+  /// the OS runtime permission dialog staying open.
+  void holdNextRequest() {
+    _heldRequest = Completer<void>();
+  }
+
+  void releaseHeldRequest() {
+    final held = _heldRequest;
+    _heldRequest = null;
+    if (held != null && !held.isCompleted) {
+      held.complete();
+    }
+  }
 
   @override
   Future<MicrophonePermissionStatus> checkStatus() async => status;
@@ -4281,6 +4355,10 @@ class _FakePermissionGateway implements MicrophonePermissionGateway {
   @override
   Future<MicrophonePermissionStatus> request() async {
     requestCount += 1;
+    final held = _heldRequest;
+    if (held != null) {
+      await held.future;
+    }
     return status;
   }
 }

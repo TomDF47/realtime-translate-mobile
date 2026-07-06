@@ -411,6 +411,13 @@ class LiveRealtimeTranslationCoordinator {
     sessionController.handleAppLifecycleState(lifecycleState);
     switch (lifecycleState) {
       case AppLifecycleState.inactive:
+        // Android reports the runtime microphone permission dialog (and other
+        // transient system overlays) as `inactive` without backgrounding the
+        // app. Bumping `_startGeneration` here cancelled the in-flight
+        // `start()` that was awaiting that very permission dialog, so
+        // `inactive` must not tear down live startup or capture. The
+        // protective teardown still runs for `hidden`/`paused`/`detached`.
+        break;
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:

@@ -398,6 +398,12 @@ class LiveSessionController extends ChangeNotifier {
   void handleAppLifecycleState(AppLifecycleState lifecycleState) {
     switch (lifecycleState) {
       case AppLifecycleState.inactive:
+        // On Android, `inactive` fires for transient foreground interruptions
+        // (runtime permission dialog, volume HUD, incoming-call banner) while
+        // the activity is still visible. Treating it as a pause tore down the
+        // first permission/start flow, so only `hidden`/`paused` trigger the
+        // protective teardown below.
+        break;
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
         if (_state.phase.isActive) {

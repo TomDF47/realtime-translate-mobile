@@ -2,6 +2,27 @@
 
 Use this file for durable product and architecture decisions that future agents should preserve. The canonical build spec remains [docs/live-translate-build-spec.md](live-translate-build-spec.md).
 
+## 2026-07-06 - Transient `inactive` Lifecycle State Must Not Tear Down Live Startup Or Capture
+
+Status: Accepted
+
+Context:
+
+- On Android, `AppLifecycleState.inactive` fires for transient foreground interruptions while the activity is still visible: the runtime microphone permission dialog, volume HUD, incoming-call banner, and similar system overlays.
+- Both `LiveSessionController.handleAppLifecycleState` and `LiveRealtimeTranslationCoordinator.handleAppLifecycleState` treated `inactive` identically to `hidden`/`paused`: the controller forced `listeningPaused`, and the coordinator bumped `_startGeneration` and closed realtime resources.
+- The coordinator's `start()` awaits the microphone permission request. Because the OS permission dialog itself surfaces as `inactive`, the first-run start flow could cancel itself: the generation bump made `start()` return `failed` after the user granted permission.
+
+Decision:
+
+- `inactive` is now a no-op in both lifecycle handlers. The protective teardown (pause phase, close capture/realtime/playback, cancel pending reconnects) still runs for `hidden`, `paused`, and `detached`. `resumed` recovery behavior is unchanged.
+- Android's lifecycle ordering guarantees a true backgrounding still passes through `hidden`/`paused` after `inactive`, so no teardown coverage is lost; only the transient-overlay case stops interrupting live sessions.
+
+Implications:
+
+- The first permission/start flow can complete while the permission dialog is up, and transient overlays (volume, notifications shade peek, call banner) no longer kill an active listening session.
+- Unit tests cover: `inactive` keeps an active session listening, `inactive` during a pending permission request does not disturb startup, `inactive` during the coordinator's first permission dialog still results in `started`, and `hidden` still pauses like `paused`.
+- Physical-device validation of the first-run permission flow still needs Tom's Samsung retest.
+
 ## 2026-06-07 - Active Live Path Uses Transcription Batches Plus Per-Row Playback
 
 Status: Accepted as code direction (local Windows checkout still relies on CI/Fedora for Flutter analyzer, tests, APK build, and installed-device proof)

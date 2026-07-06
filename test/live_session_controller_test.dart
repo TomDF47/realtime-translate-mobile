@@ -98,6 +98,81 @@ void main() {
     expect(controller.state.isPlaybackQueueOpen, isFalse);
   });
 
+  test('hidden lifecycle pauses listening resources', () async {
+    final controller = LiveSessionController(
+      permissionGateway: _FixedPermissionGateway(
+        MicrophonePermissionStatus.granted,
+      ),
+    );
+
+    await controller.startMeeting();
+    controller.markRealtimeStarted();
+    controller.handleAppLifecycleState(AppLifecycleState.hidden);
+
+    expect(controller.state.phase, LiveSessionPhase.listeningPaused);
+    expect(controller.state.isMicrophoneCaptureOpen, isFalse);
+    expect(controller.state.isRealtimeSessionOpen, isFalse);
+    expect(controller.state.isPlaybackQueueOpen, isFalse);
+  });
+
+  test(
+    'transient inactive lifecycle keeps the listening session running',
+    () async {
+      final controller = LiveSessionController(
+        permissionGateway: _FixedPermissionGateway(
+          MicrophonePermissionStatus.granted,
+        ),
+      );
+
+      await controller.startMeeting();
+      controller.markRealtimeStarted();
+      // Android reports system overlays (runtime permission dialog, volume
+      // HUD, incoming-call banner) as `inactive` while the app stays visible.
+      controller.handleAppLifecycleState(AppLifecycleState.inactive);
+
+      expect(controller.state.phase, LiveSessionPhase.listening);
+      expect(controller.state.isMicrophoneCaptureOpen, isTrue);
+      expect(controller.state.isRealtimeSessionOpen, isTrue);
+      expect(controller.state.isPlaybackQueueOpen, isTrue);
+
+      // Returning to `resumed` after a transient overlay must not be
+      // misclassified as a lifecycle interruption needing a reconnect.
+      controller.handleAppLifecycleState(AppLifecycleState.resumed);
+
+      expect(controller.state.phase, LiveSessionPhase.listening);
+      expect(controller.state.isMicrophoneCaptureOpen, isTrue);
+      expect(controller.state.isRealtimeSessionOpen, isTrue);
+    },
+  );
+
+  test(
+    'inactive during pending permission request does not disturb startup',
+    () async {
+      final gateway = _DeferredPermissionGateway();
+      final controller = LiveSessionController(permissionGateway: gateway);
+
+      final start = controller.startMeeting();
+      expect(
+        controller.state.phase,
+        LiveSessionPhase.requestingMicrophonePermission,
+      );
+
+      // The Android runtime permission dialog surfaces as `inactive`.
+      controller.handleAppLifecycleState(AppLifecycleState.inactive);
+      expect(
+        controller.state.phase,
+        LiveSessionPhase.requestingMicrophonePermission,
+      );
+
+      gateway.complete(MicrophonePermissionStatus.granted);
+      await start;
+
+      expect(controller.state.phase, LiveSessionPhase.connecting);
+      expect(controller.state.isMicrophoneCaptureOpen, isFalse);
+      expect(controller.state.isRealtimeSessionOpen, isFalse);
+    },
+  );
+
   test(
     'manual listening pause keeps transcript state and warm realtime',
     () async {
