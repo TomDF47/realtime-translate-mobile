@@ -47,9 +47,10 @@ Optional live OpenAI smoke, only when a credential is supplied through the proce
 ```bash
 export PATH=/home/tom/.local/share/flutter/bin:$PATH
 OPENAI_API_KEY="<redacted local value>" dart run scripts/live_openai_smoke.dart --all
+OPENAI_API_KEY="<redacted local value>" dart run scripts/live_openai_smoke.dart --realtime-transcription
 ```
 
-`--all` includes direct Responses checks, no-microphone realtime session creation for the retained legacy realtime profiles, synthetic PCM16 append checks for those legacy profiles, a local generated-Spanish-speech smoke for the dedicated translation profile when `espeak-ng` is installed, and a controlled generated-speech reconnect smoke for the dedicated translation profile. These smokes do not yet prove the active transcription-first app path, Android physical microphone capture, installed-app transcript persistence, app-coordinator de-duplication, credential-expiry recovery, or audible Android speaker output. Real microphone translation smoke still requires a reliable emulator/device microphone source; if a credential is inserted into app storage for that smoke, clear app data afterward.
+`--all` includes direct Responses checks, an active `gpt-realtime-whisper` transcription smoke with generated PCM16 speech and manual commit, no-microphone realtime session creation for the retained legacy realtime profiles, synthetic PCM16 append checks for those legacy profiles, a local generated-Spanish-speech smoke for the dedicated translation profile when `espeak-ng` is installed, and a controlled generated-speech reconnect smoke for the dedicated translation profile. These smokes do not yet prove Android physical microphone capture, installed-app transcript persistence, app-coordinator de-duplication, credential-expiry recovery, or audible Android speaker output. Real microphone translation smoke still requires a reliable emulator/device microphone source; if a credential is inserted into app storage for that smoke, clear app data afterward.
 
 Installed APK emulator E2E, only when `/home/tom/.openclaw/secrets/realtime-translate-openai-api-key` is readable and app data can be cleared afterward:
 

@@ -6,6 +6,7 @@ import 'openai_realtime_translation.dart';
 enum OpenAiRealtimeFailureKind {
   credentialExpired,
   credentialRejected,
+  configurationRejected,
   unsupportedLanguage,
   retryableNetwork,
   transientOpenAiError,
@@ -129,6 +130,28 @@ class OpenAiRealtimeFailure {
     }
 
     if (_containsAny(code, const [
+      'invalid_request',
+      'invalid_event',
+      'invalid_session',
+      'invalid_value',
+      'invalid_type',
+      'missing_required',
+      'missing_parameter',
+      'unknown_parameter',
+      'unknown_field',
+      'unsupported_model',
+      'unsupported_session',
+      'unsupported_format',
+      'bad_request',
+      '400',
+    ])) {
+      return OpenAiRealtimeFailure(
+        kind: OpenAiRealtimeFailureKind.configurationRejected,
+        diagnosticCode: code,
+      );
+    }
+
+    if (_containsAny(code, const [
       'unsupported_language',
       'unsupported_output_language',
       'unsupported_audio_language',
@@ -238,6 +261,8 @@ class OpenAiRealtimeReconnectDecision {
         _ => 'Network connection appears offline. Live translation is paused.',
       },
       OpenAiRealtimeRecoveryAction.fatalError => switch (failure.kind) {
+        OpenAiRealtimeFailureKind.configurationRejected =>
+          'OpenAI rejected the realtime session setup. Install the latest debug build or share the sanitized diagnostics.',
         OpenAiRealtimeFailureKind.rateLimited =>
           'OpenAI rate limits persisted after retries. Restart when quota is available.',
         OpenAiRealtimeFailureKind.transientOpenAiError =>

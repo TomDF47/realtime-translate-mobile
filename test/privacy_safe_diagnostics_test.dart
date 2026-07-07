@@ -87,6 +87,38 @@ void main() {
     }
   });
 
+  test('realtime startup diagnostics keep config shape but omit payloads', () {
+    final sink = MemoryPrivacySafeDiagnosticsSink();
+    final diagnostics = PrivacySafeDiagnostics(sink: sink);
+
+    diagnostics.info(
+      'openai.realtime_transcription_connect_started',
+      fields: {
+        'operation': 'realtimeTranscription.connect',
+        'endpoint': 'api.openai.com',
+        'model': 'gpt-realtime-whisper',
+        'sessionType': 'transcription',
+        'inputAudioRate': 24000,
+        'languageHintConfigured': false,
+        'transcriptionDelay': 'default',
+        'eventType': 'socket.closed',
+        'requestBody': {'audio': 'base64 payload'},
+        'responseBody': '{"error":"secret"}',
+      },
+    );
+
+    final record = sink.records.single;
+    expect(record.fields['sessionType'], 'transcription');
+    expect(record.fields['inputAudioRate'], '24000');
+    expect(record.fields['languageHintConfigured'], 'false');
+    expect(record.fields['transcriptionDelay'], 'default');
+    expect(record.fields['eventType'], 'socket.closed');
+    expect(record.fields['requestBody'], PrivacySafeDiagnostics.redacted);
+    expect(record.fields['responseBody'], PrivacySafeDiagnostics.redacted);
+    expect(_serialize(record), isNot(contains('base64 payload')));
+    expect(_serialize(record), isNot(contains('secret')));
+  });
+
   test('live session diagnostics record state only', () async {
     final sink = MemoryPrivacySafeDiagnosticsSink();
     final controller = LiveSessionController(

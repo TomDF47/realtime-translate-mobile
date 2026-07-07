@@ -27,7 +27,9 @@ void main() {
     expect(serialized, contains('"rate":24000'));
     expect(
       serialized,
-      contains('"model":"${OpenAiConfiguration.translationTranscriptionModel}"'),
+      contains(
+        '"model":"${OpenAiConfiguration.translationTranscriptionModel}"',
+      ),
     );
     expect(serialized, contains('"language":"en"'));
     expect(serialized, contains('"turn_detection":null'));
@@ -79,5 +81,25 @@ void main() {
     expect(error.code, 'authentication_error');
     expect(error.eventId, 'event-1');
     expect(error.param, 'session');
+  });
+
+  test('parses item-level transcription failure as realtime error', () {
+    final event = OpenAiRealtimeTranscriptionEventParser.parse({
+      'type': 'conversation.item.input_audio_transcription.failed',
+      'item_id': 'item_123',
+      'error': {
+        'type': 'invalid_request_error',
+        'code': 'invalid_value',
+        'event_id': 'event-2',
+        'param': 'audio.input.transcription',
+      },
+    });
+
+    expect(event, isA<OpenAiRealtimeTranscriptionError>());
+    final error = event! as OpenAiRealtimeTranscriptionError;
+    expect(error.type, 'conversation.item.input_audio_transcription.failed');
+    expect(error.code, 'invalid_value');
+    expect(error.eventId, 'event-2');
+    expect(error.param, 'audio.input.transcription');
   });
 }

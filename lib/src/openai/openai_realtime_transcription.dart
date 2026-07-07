@@ -44,8 +44,14 @@ class OpenAiRealtimeTranscriptionConfig {
   Uri webSocketUri({Uri? baseUri}) {
     final base =
         baseUri ?? Uri.parse(OpenAiConfiguration.realtimeWebSocketBaseUrl);
-    final path = _joinPath(base.path, OpenAiConfiguration.realtimeWebSocketPath);
-    return base.replace(path: path, queryParameters: {'model': transcriptionModel});
+    final path = _joinPath(
+      base.path,
+      OpenAiConfiguration.realtimeWebSocketPath,
+    );
+    return base.replace(
+      path: path,
+      queryParameters: {'model': transcriptionModel},
+    );
   }
 
   Map<String, Object?> initialSessionUpdate() {
@@ -117,6 +123,17 @@ class OpenAiRealtimeTranscriptionGateway implements AudioTranscriptionGateway {
         'operation': 'realtimeTranscription.connect',
         'endpoint': uri.host,
         'model': config.transcriptionModel,
+        'sessionType': 'transcription',
+        'inputAudioRate': config.inputAudioRate,
+        'languageHintConfigured':
+            config.languageHint == null || config.languageHint!.trim().isEmpty
+            ? false
+            : true,
+        'transcriptionDelay':
+            config.transcriptionDelay == null ||
+                config.transcriptionDelay!.trim().isEmpty
+            ? 'default'
+            : config.transcriptionDelay,
       },
     );
 
@@ -142,6 +159,7 @@ class OpenAiRealtimeTranscriptionGateway implements AudioTranscriptionGateway {
         'operation': 'realtimeTranscription.connect',
         'endpoint': uri.host,
         'model': config.transcriptionModel,
+        'sessionType': 'transcription',
         'result': 'success',
       },
     );
@@ -278,6 +296,39 @@ class OpenAiRealtimeTranscriptionSession implements AudioTranscriptionSession {
           param: null,
         ),
       );
+      diagnostics.warning(
+        'openai.realtime_transcription_socket_closed',
+        fields: {
+          'operation': 'realtimeTranscription.receive',
+          'model': config.transcriptionModel,
+          'eventType': 'socket.closed',
+          'errorCode': closeReason,
+          'result': 'closed',
+        },
+      );
+    } else {
+      final closeCode = _socket.closeCode;
+      if (closeCode != null) {
+        final diagnosticCode = 'socket.close_$closeCode';
+        _emitEvent(
+          OpenAiRealtimeTranscriptionError(
+            type: 'socket.closed',
+            code: diagnosticCode,
+            eventId: null,
+            param: null,
+          ),
+        );
+        diagnostics.warning(
+          'openai.realtime_transcription_socket_closed',
+          fields: {
+            'operation': 'realtimeTranscription.receive',
+            'model': config.transcriptionModel,
+            'eventType': 'socket.closed',
+            'errorCode': diagnosticCode,
+            'result': 'closed',
+          },
+        );
+      }
     }
 
     _emitEvent(
@@ -390,7 +441,9 @@ class OpenAiRealtimeTranscriptionStartupException implements Exception {
   factory OpenAiRealtimeTranscriptionStartupException.fromError(
     OpenAiRealtimeTranscriptionError error,
   ) {
-    return OpenAiRealtimeTranscriptionStartupException(error.code ?? error.type);
+    return OpenAiRealtimeTranscriptionStartupException(
+      error.code ?? error.type,
+    );
   }
 
   final String code;
@@ -437,7 +490,8 @@ abstract final class OpenAiRealtimeTranscriptionEventParser {
       return OpenAiRealtimeTranscriptionSessionClosed(type: type);
     }
 
-    if (type == 'error') {
+    if (type == 'error' ||
+        type == 'conversation.item.input_audio_transcription.failed') {
       final error = event['error'];
       final code = error is Map<String, dynamic>
           ? error['code'] ?? error['type']

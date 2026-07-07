@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:realtime_translate_mobile/src/openai/openai_configuration.dart';
+import 'package:realtime_translate_mobile/src/openai/openai_realtime_transcription.dart';
 import 'package:realtime_translate_mobile/src/openai/openai_realtime_translation.dart';
 
 const _credentialEnvName = 'OPENAI_API_KEY';
@@ -98,6 +99,15 @@ Future<void> main(List<String> args) async {
           targetLanguageCode: 'es',
           profile: OpenAiRealtimeTranslationProfile.primaryRealtime2,
         ),
+      ),
+    );
+  }
+  if (selection.realtimeTranscription) {
+    await record(
+      await _runRealtimeTranscriptionSmoke(
+        credential: credential,
+        name: 'realtime-transcription',
+        config: const OpenAiRealtimeTranscriptionConfig(inputAudioRate: 24000),
       ),
     );
   }
@@ -413,6 +423,92 @@ Future<_SmokeResult> _runRealtimePrimarySyntheticAudioSmoke({
   }
 }
 
+Future<_SmokeResult> _runRealtimeTranscriptionSmoke({
+  required String credential,
+  required String name,
+  required OpenAiRealtimeTranscriptionConfig config,
+}) async {
+  final speech = await _generateSpeechPcm16(
+    OpenAiRealtimeTranslationConfig(
+      targetLanguageCode: 'en',
+      inputAudioRate: config.inputAudioRate,
+    ),
+  );
+  if (speech.failureNote != null) {
+    return _SmokeResult.failed(name, speech.failureNote!);
+  }
+
+  AudioTranscriptionSession? session;
+  try {
+    session = await OpenAiRealtimeTranscriptionGateway().connect(
+      config: config,
+      credential: credential,
+    );
+    final evidenceFuture = _waitForTranscriptionEvidence(
+      session.events,
+      const Duration(seconds: 18),
+    );
+    await _appendGeneratedSpeechToTranscription(
+      session: session,
+      config: config,
+      speech: speech.pcm16!,
+    );
+    final evidence = await evidenceFuture;
+
+    if (evidence.error != null) {
+      final error = evidence.error!;
+      return _SmokeResult.failed(
+        name,
+        'websocket transcriptionError code=${_safeRealtimeCode(error.code)} '
+        'param=${_safeParam(error.param)} model=${config.transcriptionModel} '
+        'sessionType=transcription',
+      );
+    }
+    if (!evidence.hasTranscript) {
+      return _SmokeResult.failed(
+        name,
+        'websocket transcriptionMissingEvidence '
+        'committedEvents=${evidence.committedEvents} '
+        'transcriptEvents=${evidence.transcriptEvents} '
+        'model=${config.transcriptionModel} sessionType=transcription',
+      );
+    }
+
+    return _SmokeResult.passed(
+      name,
+      'websocket committedEvents=${evidence.committedEvents} '
+      'transcriptEvents=${evidence.transcriptEvents} '
+      'model=${config.transcriptionModel} sessionType=transcription',
+    );
+  } on OpenAiRealtimeTranscriptionStartupException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket startupRejected code=${_safeRealtimeCode(error.code)} '
+      'model=${config.transcriptionModel} sessionType=transcription',
+    );
+  } on WebSocketException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket handshakeFailed status=${error.httpStatusCode ?? 'unknown'} '
+      'model=${config.transcriptionModel} sessionType=transcription',
+    );
+  } on TimeoutException {
+    return _SmokeResult.failed(
+      name,
+      'websocket timeout model=${config.transcriptionModel} '
+      'sessionType=transcription',
+    );
+  } on SocketException catch (error) {
+    return _SmokeResult.failed(
+      name,
+      'websocket socketError=${error.osError?.errorCode ?? 'unknown'} '
+      'model=${config.transcriptionModel} sessionType=transcription',
+    );
+  } finally {
+    await session?.closeImmediately();
+  }
+}
+
 Future<_SmokeResult> _runRealtimeGeneratedSpeechSmoke({
   required String credential,
   required String name,
@@ -704,6 +800,23 @@ Future<void> _appendGeneratedSpeech({
   session.appendPcm16Audio(_silencePcm16(config.inputAudioRate, 500));
 }
 
+Future<void> _appendGeneratedSpeechToTranscription({
+  required AudioTranscriptionSession session,
+  required OpenAiRealtimeTranscriptionConfig config,
+  required List<int> speech,
+}) async {
+  for (final chunk in _pcm16Chunks(
+    speech,
+    sampleRate: config.inputAudioRate,
+    chunkDuration: const Duration(milliseconds: 200),
+  )) {
+    session.appendPcm16Audio(chunk);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  }
+  session.appendPcm16Audio(_silencePcm16(config.inputAudioRate, 500));
+  session.commitInputAudioBuffer();
+}
+
 List<int> _syntheticTonePcm16(OpenAiRealtimeTranslationConfig config) {
   const chunkDuration = Duration(milliseconds: 200);
   const frequencyHz = 440;
@@ -872,6 +985,61 @@ Future<_GeneratedSpeechEvidence> _waitForGeneratedSpeechEvidence(
   });
 }
 
+Future<_TranscriptionEvidence> _waitForTranscriptionEvidence(
+  Stream<OpenAiRealtimeTranscriptionEvent> events,
+  Duration timeout,
+) async {
+  final completer = Completer<_TranscriptionEvidence>();
+  late final StreamSubscription<OpenAiRealtimeTranscriptionEvent> subscription;
+  Timer? timer;
+  var committedEvents = 0;
+  var transcriptEvents = 0;
+
+  void complete({OpenAiRealtimeTranscriptionError? error}) {
+    if (completer.isCompleted) {
+      return;
+    }
+    completer.complete(
+      _TranscriptionEvidence(
+        committedEvents: committedEvents,
+        transcriptEvents: transcriptEvents,
+        error: error,
+      ),
+    );
+  }
+
+  subscription = events.listen((event) {
+    switch (event) {
+      case OpenAiRealtimeTranscriptionError():
+        complete(error: event);
+      case OpenAiRealtimeTranscriptionBufferCommitted():
+        committedEvents += 1;
+      case OpenAiRealtimeTranscriptionDelta():
+        transcriptEvents += 1;
+      case OpenAiRealtimeTranscriptionCompleted():
+        transcriptEvents += 1;
+        complete();
+      case OpenAiRealtimeTranscriptionSessionClosed():
+        complete(
+          error: const OpenAiRealtimeTranscriptionError(
+            type: 'socket.closed',
+            code: 'socket.closed',
+            eventId: null,
+            param: null,
+          ),
+        );
+      default:
+        break;
+    }
+  });
+  timer = Timer(timeout, complete);
+
+  return completer.future.whenComplete(() async {
+    timer?.cancel();
+    await subscription.cancel();
+  });
+}
+
 _ResponsesSmokeRequest _summarySmokeRequest() {
   return _ResponsesSmokeRequest(
     name: 'summary-export',
@@ -1019,12 +1187,20 @@ String? _safeErrorCode(String responseBody) {
 }
 
 String _safeRealtimeErrorParam(OpenAiRealtimeError error) {
-  final param = error.param;
-  if (param == null || !RegExp(r'^[a-zA-Z0-9_.\[\]-]+$').hasMatch(param)) {
+  final param = _safeParam(error.param);
+  if (param.isEmpty) {
     return '';
   }
 
   return 'param=$param ';
+}
+
+String _safeParam(String? param) {
+  if (param == null || !RegExp(r'^[a-zA-Z0-9_.\[\]-]+$').hasMatch(param)) {
+    return '';
+  }
+
+  return param;
 }
 
 /// Realtime error/close codes can originate from OpenAI error payloads or
@@ -1071,6 +1247,9 @@ void _printUsage() {
     ' Append 200 ms non-speech synthetic PCM16 tone to gpt-realtime-2.',
   );
   print(
+    '  --realtime-transcription      Stream local generated speech through the active transcription session.',
+  );
+  print(
     '  --realtime-generated-speech'
     ' Stream local generated Spanish speech to the translation profile.',
   );
@@ -1089,6 +1268,7 @@ class _SmokeSelection {
     required this.realtimeTranslationFallback,
     required this.realtimeSyntheticAudio,
     required this.realtimePrimarySyntheticAudio,
+    required this.realtimeTranscription,
     required this.realtimeGeneratedSpeech,
     required this.realtimeGeneratedSpeechReconnect,
   });
@@ -1100,6 +1280,7 @@ class _SmokeSelection {
   final bool realtimeTranslationFallback;
   final bool realtimeSyntheticAudio;
   final bool realtimePrimarySyntheticAudio;
+  final bool realtimeTranscription;
   final bool realtimeGeneratedSpeech;
   final bool realtimeGeneratedSpeechReconnect;
 
@@ -1113,6 +1294,7 @@ class _SmokeSelection {
         realtimeTranslationFallback: true,
         realtimeSyntheticAudio: true,
         realtimePrimarySyntheticAudio: true,
+        realtimeTranscription: true,
         realtimeGeneratedSpeech: true,
         realtimeGeneratedSpeechReconnect: true,
       );
@@ -1131,6 +1313,7 @@ class _SmokeSelection {
       '--realtime-translation',
       '--realtime-synthetic-audio',
       '--realtime-primary-synthetic-audio',
+      '--realtime-transcription',
       '--realtime-generated-speech',
       '--realtime-generated-speech-reconnect',
     };
@@ -1151,6 +1334,7 @@ class _SmokeSelection {
       realtimePrimarySyntheticAudio: args.contains(
         '--realtime-primary-synthetic-audio',
       ),
+      realtimeTranscription: args.contains('--realtime-transcription'),
       realtimeGeneratedSpeech: args.contains('--realtime-generated-speech'),
       realtimeGeneratedSpeechReconnect: args.contains(
         '--realtime-generated-speech-reconnect',
@@ -1203,6 +1387,20 @@ class _GeneratedSpeechEvidence {
   /// original source never did" condition that must fail the smoke check.
   bool get translationArrivedWithoutSource =>
       (hasOutputTranscript || hasTranslatedAudio) && !hasSourceTranscript;
+}
+
+class _TranscriptionEvidence {
+  const _TranscriptionEvidence({
+    required this.committedEvents,
+    required this.transcriptEvents,
+    required this.error,
+  });
+
+  final int committedEvents;
+  final int transcriptEvents;
+  final OpenAiRealtimeTranscriptionError? error;
+
+  bool get hasTranscript => transcriptEvents > 0;
 }
 
 class _Pcm16Wav {

@@ -43,6 +43,7 @@ class PrivacySafeDiagnostics {
     'errorCode',
     'exportType',
     'fallbackModel',
+    'eventType',
     // Presence-only realtime transcript signal counters. These never carry
     // transcript/translation content; they only expose whether the dedicated
     // translation wire actually delivered source (original) vs output
@@ -53,6 +54,8 @@ class PrivacySafeDiagnostics {
     'isMicrophoneCaptureOpen',
     'isPlaybackQueueOpen',
     'isRealtimeSessionOpen',
+    'inputAudioRate',
+    'languageHintConfigured',
     'model',
     'nextPhase',
     'operation',
@@ -72,6 +75,8 @@ class PrivacySafeDiagnostics {
     'storageArea',
     'summaryModel',
     'targetLanguage',
+    'transcriptionDelay',
+    'sessionType',
   };
 
   static const _forbiddenKeyFragments = {

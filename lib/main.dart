@@ -373,8 +373,9 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
       const OpenAiCredentialStatus.missing();
   String? _activeMeetingId;
   String? _debugRealtimeProofStatus;
-  TranslationLanguage _selectedSourceLanguage =
-      LanguageSupport.languageByCode('it');
+  TranslationLanguage _selectedSourceLanguage = LanguageSupport.languageByCode(
+    'it',
+  );
   TranslationLanguage _selectedTargetLanguage = LanguageSupport.languageByCode(
     'en',
   );
@@ -1233,7 +1234,8 @@ class _LiveTranslateHomeState extends State<LiveTranslateHome>
     try {
       final language = LanguageSupport.languageByCode(code);
       if (language.code != LanguageSupport.autoDetectSource.code &&
-          (language.supportsRealtimeTarget || language.supportsDirectFallback)) {
+          (language.supportsRealtimeTarget ||
+              language.supportsDirectFallback)) {
         return language;
       }
     } on ArgumentError {
@@ -2724,6 +2726,9 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
             : state.realtimeFailureKind ==
                   OpenAiRealtimeFailureKind.transientOpenAiError
             ? 'OpenAI temporarily unavailable'
+            : state.realtimeFailureKind ==
+                  OpenAiRealtimeFailureKind.configurationRejected
+            ? 'Realtime setup rejected'
             : 'Live translation stopped',
       _ => 'Live translation needs attention',
     };
@@ -2744,6 +2749,9 @@ class _RealtimeRecoveryBanner extends StatelessWidget {
             : state.realtimeFailureKind ==
                   OpenAiRealtimeFailureKind.transientOpenAiError
             ? 'OpenAI realtime remained unavailable after retries. Restart when ready.'
+            : state.realtimeFailureKind ==
+                  OpenAiRealtimeFailureKind.configurationRejected
+            ? 'OpenAI rejected the realtime session setup. Install the latest debug build or share the sanitized diagnostics.'
             : 'OpenAI realtime session stopped. Restart the meeting when ready.',
       _ => 'Live translation needs attention.',
     };

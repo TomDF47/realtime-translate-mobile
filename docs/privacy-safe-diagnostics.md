@@ -20,7 +20,9 @@ Allowed fields are low-sensitivity state and configuration labels:
 - bounded retry/backoff numbers
 - credential status as `missing` or `configured`
 - endpoint path/model intent labels
+- realtime event type and session type labels
 - export type
+- input audio sample rate and language-hint/delay configuration flags
 - local operation/result labels
 - permission name/status
 - previous and next live-session phase
@@ -50,6 +52,7 @@ Current tests in `test/privacy_safe_diagnostics_test.dart` prove:
 - email addresses, prompts, transcript text, translated text, request bodies, and recipient fields do not appear in serialized diagnostic records
 - live-session diagnostics record state transitions only, not user-facing notices or payloads
 - realtime recovery diagnostics record sanitized error code, retry attempt, and backoff milliseconds only
+- realtime startup diagnostics preserve content-free config shape fields while request/response bodies remain redacted
 - OpenAI credential diagnostics never include credential values or API-key field names
 
 Run:

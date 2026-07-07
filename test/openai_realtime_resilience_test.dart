@@ -26,6 +26,10 @@ void main() {
       OpenAiRealtimeFailureKind.transientOpenAiError,
     );
     expect(
+      OpenAiRealtimeFailure.classifyCode('invalid_request_error').kind,
+      OpenAiRealtimeFailureKind.configurationRejected,
+    );
+    expect(
       OpenAiRealtimeFailure.sessionClosed().kind,
       OpenAiRealtimeFailureKind.retryableNetwork,
     );
@@ -109,6 +113,24 @@ void main() {
       OpenAiRealtimeFailureKind.credentialRejected,
     );
     expect(projectAccessFailure.diagnosticCode, 'permission_denied');
+  });
+
+  test('realtime configuration rejection has actionable fatal notice', () {
+    const policy = OpenAiRealtimeReconnectPolicy();
+    final decision = policy.plan(
+      failure: OpenAiRealtimeFailure.classifyCode('invalid_request_error'),
+      retryAttempt: 1,
+    );
+
+    expect(decision.action, OpenAiRealtimeRecoveryAction.fatalError);
+    expect(
+      decision.failure.kind,
+      OpenAiRealtimeFailureKind.configurationRejected,
+    );
+    expect(
+      decision.userFacingNotice,
+      'OpenAI rejected the realtime session setup. Install the latest debug build or share the sanitized diagnostics.',
+    );
   });
 
   test('plans bounded exponential backoff with deterministic jitter', () {
